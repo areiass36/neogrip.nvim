@@ -107,8 +107,8 @@ function M.build(connection)
 			options.SSL = "true"
 		end
 		local path = connection.database or ""
-		if path ~= "" and connection.default_schema then
-			path = path .. "/" .. connection.default_schema
+		if path ~= "" and connection.schema then
+			path = path .. "/" .. connection.schema
 		end
 		-- An empty catalog segment is rejected by the driver, so with no
 		-- catalog the path is left off entirely. A query then names the catalog
