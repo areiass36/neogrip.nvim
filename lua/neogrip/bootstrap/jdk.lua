@@ -61,7 +61,12 @@ local function find_executable(name)
 				("%s/Contents/Home/bin/%s%s"):format(root, name, platform.exe_suffix),
 			}
 			for _, path in ipairs(candidates) do
-				if vim.fn.executable(path) == 1 then
+				-- Presence, not executability: on Windows vim.fn.executable()
+				-- can report 0 for a freshly extracted .exe while antivirus or
+				-- the indexer still holds it, which made a good JDK look
+				-- missing the instant the archive finished. The file being
+				-- there is the real question; a true failure surfaces at spawn.
+				if vim.uv.fs_stat(path) then
 					return path
 				end
 			end
