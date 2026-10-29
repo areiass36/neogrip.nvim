@@ -9,6 +9,9 @@ support.describe("connections: schema v2")
 
 local root = vim.fn.tempname()
 vim.fn.mkdir(root .. "/.nvim", "p")
+-- macOS tempdirs live behind a /var -> /private/var symlink; getcwd() resolves
+-- it and tempname() does not, so the comparison has to start from the real path.
+root = vim.uv.fs_realpath(root) or root
 local original_cwd = vim.fn.getcwd()
 vim.cmd("cd " .. vim.fn.fnameescape(root))
 

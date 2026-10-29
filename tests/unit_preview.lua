@@ -237,7 +237,11 @@ preview.render("tables", context, { value = "users" }, bufnr, function(drawn)
 	redrawn = drawn
 end)
 check("a table is drawn from what the snapshot already holds", redrawn ~= nil, true)
-check("and highlighted as the SQL it is", vim.treesitter.highlighter.active[bufnr] ~= nil, true)
+if pcall(vim.treesitter.language.add, "sql") then
+	check("and highlighted as the SQL it is", vim.treesitter.highlighter.active[bufnr] ~= nil, true)
+else
+	support.note("sql treesitter parser not installed; the highlight check is skipped")
+end
 
 asked = { ready = 0, columns = 0, details = 0 }
 local back = nil

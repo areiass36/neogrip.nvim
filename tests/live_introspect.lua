@@ -63,11 +63,11 @@ local ENGINES = {
 	},
 }
 
-local java = require("tools.jdk").java()
+local java = require("neogrip.bootstrap.jdk").java()
 
 for _, engine in ipairs(ENGINES) do
 	support.describe("live/introspect: " .. engine.driver)
-	local jar = require("tools.jdbc").jar(engine.driver)
+	local jar = require("neogrip.bootstrap.jdbc").jar(engine.driver)
 	if not java or not jar then
 		note("skipped: no JDK or no driver yet (both download on first use)")
 	else
