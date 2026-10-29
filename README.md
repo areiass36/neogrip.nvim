@@ -13,7 +13,8 @@ Windows and Linux, with no Java to install.
 
 A Lua plugin in the editor talks JSON-RPC over stdio to a small Java sidecar, which speaks JDBC to the
 databases. The plugin downloads its own pinned, checksum-verified JDK and driver jars on first use and
-compiles the sidecar from the sources in this repository — nothing to install, nothing on your PATH.
+compiles the sidecar from the sources in this repository — nothing to install, nothing on your PATH. The
+sidecar is a standalone program any JSON-RPC client can talk to; see [java/README.md](java/README.md).
 
 Engines: PostgreSQL, MySQL/MariaDB, SQL Server, Azure SQL, Trino, MongoDB, SQLite and DuckDB — DuckDB
 doubling as the engine that lets you re-query any result (or any CSV) with SQL: `:NGripResults` turns the
