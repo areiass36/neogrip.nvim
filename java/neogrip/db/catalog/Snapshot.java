@@ -131,15 +131,6 @@ public final class Snapshot {
      * without touching the server again.
      */
     public Types.Rows<Types.TableWithColumns> snapshot(String catalog, String schema) throws SQLException {
-        if (MongoFields.isMongo(connection)) {
-            // Collections have no columns to sweep; their fields come from
-            // sampling, one collection at a time, on the columns path.
-            List<Types.TableWithColumns> list = new ArrayList<>();
-            for (String name : MongoFields.collectionNames(connection)) {
-                list.add(new Types.TableWithColumns(name, "collection", null, List.of()));
-            }
-            return new Types.Rows<>(list);
-        }
         SchemaBody body = new SchemaBody(schema, schema);
         sweepSchema(body, connection.getMetaData(), catalog, LIMIT, COLUMN_LIMIT);
 

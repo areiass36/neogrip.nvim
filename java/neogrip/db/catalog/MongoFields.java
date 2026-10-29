@@ -74,31 +74,6 @@ public final class MongoFields {
         return new Types.Rows<>(list);
     }
 
-    /**
-     * Collection names through the wrapper's script dialect rather than its
-     * getTables: the metadata route sorts sampled collections with a comparator
-     * TimSort rejects deterministically for some data, while the statement the
-     * doctor already relies on answers plainly. The wrapper may hand the names
-     * back as rows or as one array value; both shapes are read.
-     */
-    static List<String> collectionNames(Connection connection) throws SQLException {
-        List<String> names = new ArrayList<>();
-        try (java.sql.Statement statement = connection.createStatement();
-                ResultSet rows = statement.executeQuery("db.getCollectionNames()")) {
-            while (rows.next()) {
-                Object value = rows.getObject(1);
-                if (value instanceof List<?> list) {
-                    for (Object element : list) {
-                        names.add(String.valueOf(element));
-                    }
-                } else if (value != null) {
-                    names.add(String.valueOf(value));
-                }
-            }
-        }
-        return names;
-    }
-
     static String bsonType(Object value) {
         if (value == null) return "null";
         if (value instanceof java.util.Map) return "object";
