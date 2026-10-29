@@ -176,3 +176,23 @@ end
 check("the … that says the value goes on is dimmed", #ellipsis_marks, 1)
 check("and only the … is", narrow_lines[3]:sub(ellipsis_marks[1][2] + 1, ellipsis_marks[1][3]), "…")
 vim.api.nvim_buf_delete(narrow_buf, { force = true })
+
+support.describe("grid: the optional row-number gutter")
+
+local grid = require("neogrip.grid")
+-- A fabricated state: three data rows under the two header lines.
+local rownum_buf = vim.api.nvim_create_buf(false, true)
+require("neogrip.grid").buf = rownum_buf
+-- Reach into show() by faking a minimal result so states[buf] exists.
+grid.show({
+	columns = { "a" },
+	rows = { { 1 }, { 2 }, { 3 } },
+	connection = { name = "x", driver = "duckdb" },
+}, { focus = false })
+local gb = grid.current_buf()
+check("header line has no number", grid.row_number_for(gb, 1), "")
+check("rule line has no number", grid.row_number_for(gb, 2), "")
+check("first data row is 1", grid.row_number_for(gb, 3), "1 ")
+check("third data row is 3", grid.row_number_for(gb, 5), "3 ")
+check("past the data is blank", grid.row_number_for(gb, 6), "")
+grid.close(gb)

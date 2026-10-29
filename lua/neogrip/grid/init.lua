@@ -269,6 +269,9 @@ function M.show(result, context)
 		vim.wo[winid].number = false
 		vim.wo[winid].relativenumber = false
 		vim.wo[winid].cursorline = false
+		if require("neogrip.config").get().row_numbers then
+			vim.wo[winid].statuscolumn = "%!v:lua.require'neogrip.grid'.row_label()"
+		end
 		vim.api.nvim_set_current_win(origin)
 	end
 
@@ -373,6 +376,31 @@ function M.show_document(bufnr)
 		title_pos = "center",
 		style = "minimal",
 	})
+end
+
+--- The ordinal shown in the left gutter for a given buffer line, pure so the
+--- test can check it without a window: the first two lines are the header and
+--- the rule, the data rows are 1..N below them, and the trailing blank and
+--- footer get nothing.
+--- @return string right-aligned ordinal, or "" for a non-data line
+function M.row_number_for(bufnr, lnum)
+	local state = states[bufnr]
+	if not state then
+		return ""
+	end
+	local row = lnum - 2
+	if row < 1 or row > #state.rows then
+		return ""
+	end
+	local width = #tostring(#state.rows)
+	return ("%" .. width .. "d "):format(row)
+end
+
+--- The 'statuscolumn' entry point: reads the line and window being drawn.
+function M.row_label()
+	local winid = vim.g.statusline_winid
+	local bufnr = winid and winid > 0 and vim.api.nvim_win_get_buf(winid) or vim.api.nvim_get_current_buf()
+	return M.row_number_for(bufnr, vim.v.lnum)
 end
 
 M.display = value_module.display

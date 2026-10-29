@@ -17,6 +17,10 @@ M.defaults = {
 	-- Rows scanned when measuring column widths.
 	width_sample = 1000,
 	null_text = "NULL",
+	-- Number the data rows in a left gutter, 1..N down the page. Off by
+	-- default; it is drawn through 'statuscolumn', so it never becomes a real
+	-- column and yanking or following a key is unaffected.
+	row_numbers = false,
 	-- Tint every other row of the result, in whatever colour the colourscheme
 	-- uses for the cursor line. It is what keeps the eye on one row across a
 	-- wide table; off, the grid is drawn on the plain background.
