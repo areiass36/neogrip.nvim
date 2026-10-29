@@ -96,7 +96,13 @@ jobs:
           NVIM_DB_TEST_PW: "p@ss:w/rd#1"
           NVIM_DB_TEST_MSSQL_PW: "Str0ng:P/ss#1"
         run: |
-          nvim --headless -u tests/minimal.lua -l tests/run.lua | tee live.log
-          # Skips must not silently become total: this job exists to reach
-          # real servers, so proof of reaching PostgreSQL is asserted.
+          # nvim's own exit code is unreliable here: in headless -l mode it
+          # reports non-zero when a live suite leaves container-engine child
+          # processes open at exit (the Mongo wrapper's JVM lingers past
+          # SIGTERM), even with every check green. So the gate is the suite's
+          # own reported result, not the process code.
+          nvim --headless -u tests/minimal.lua -l tests/run.lua | tee live.log || true
+          # The suite ran to its summary with zero failures...
+          grep -qE "[0-9]+ checks, 0 failures" live.log
+          # ...and actually reached the servers, so skips did not go total.
           grep -q "server: PostgreSQL" live.log
