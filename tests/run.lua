@@ -12,12 +12,15 @@ local UNIT = {
 	"unit_errors",
 	"unit_connections",
 	"unit_grid",
+	"unit_scratch",
 }
 
 local LIVE = {
 	"live_protocol",
 	"live_jdbc",
 	"live_flow",
+	"live_requery",
+	"live_safety",
 }
 
 local unit_only = false
