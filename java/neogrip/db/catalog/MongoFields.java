@@ -74,6 +74,30 @@ public final class MongoFields {
         return new Types.Rows<>(list);
     }
 
+    /**
+     * Collection names through the wrapper's own script, because its JDBC
+     * getTables is unreliable here: it trips TimSort's contract check, and
+     * past that throws NumberFormatException parsing a null. db.getCollectionNames()
+     * is the statement the doctor already leans on, and it answers plainly.
+     */
+    static List<String> collectionNames(Connection connection) throws SQLException {
+        List<String> names = new ArrayList<>();
+        try (java.sql.Statement statement = connection.createStatement();
+                ResultSet rows = statement.executeQuery("db.getCollectionNames()")) {
+            while (rows.next()) {
+                Object value = rows.getObject(1);
+                if (value instanceof List<?> list) {
+                    for (Object element : list) {
+                        names.add(String.valueOf(element));
+                    }
+                } else if (value != null) {
+                    names.add(String.valueOf(value));
+                }
+            }
+        }
+        return names;
+    }
+
     static String bsonType(Object value) {
         if (value == null) return "null";
         if (value instanceof java.util.Map) return "object";

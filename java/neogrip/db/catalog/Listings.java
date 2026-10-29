@@ -49,6 +49,16 @@ public final class Listings {
 
     public Types.Rows<Types.TableRow> tables(String catalog, String schema, String pattern)
             throws SQLException {
+        if (MongoFields.isMongo(connection)) {
+            List<Types.TableRow> collections = new ArrayList<>();
+            String needle = pattern == null ? "" : pattern.toLowerCase(java.util.Locale.ROOT);
+            for (String name : MongoFields.collectionNames(connection)) {
+                if (needle.isEmpty() || name.toLowerCase(java.util.Locale.ROOT).contains(needle)) {
+                    collections.add(new Types.TableRow(name, "collection", null, null));
+                }
+            }
+            return new Types.Rows<>(collections);
+        }
         DatabaseMetaData meta = connection.getMetaData();
         String namePattern = pattern == null || pattern.isEmpty() ? "%" : "%" + pattern + "%";
 
