@@ -100,7 +100,9 @@ project default, the last one used. `:NGripWhich` explains the answer.
 ==============================================================================
 5. COMMANDS                                     *neogrip-commands*
 
-:NGripRun [sql]        Run a statement, or the one under the cursor.
+:NGripRun [sql]        Run a statement, or the one under the cursor. A
+                       visual selection runs every statement in it, in
+                       sequence; the grid shows the last.
 :NGripCancel           Cancel the running query - a real server-side cancel.
 :NGripValidate         Check the statement on the server; nothing executes.
 :NGripUse {id}         Use a connection in this buffer.
@@ -174,6 +176,7 @@ lives, `lua/neogrip/config.lua`): >lua
       timeout_ms = 30000,            -- server-side statement timeout (0 = none)
       max_column_width = 60,         -- grid truncation; yanks are whole
       null_text = "NULL",
+      row_numbers = false,           -- number the rows down the page (gutter)
       stripe_rows = true,
       result_retention_days = 2,     -- orphaned result files
       schema_ttl_seconds = 3600,     -- per-question catalog cache
