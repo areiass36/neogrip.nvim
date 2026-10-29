@@ -3,6 +3,7 @@ package neogrip;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
+import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -17,10 +18,18 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import neogrip.db.types.Types.Column;
+import neogrip.db.types.Types.ExportResult;
+import neogrip.db.types.Types.QueryPage;
+import neogrip.db.types.Types.TxState;
+import neogrip.db.types.Types.UpdateResult;
+import neogrip.rpc.JsonCodec;
+import neogrip.rpc.JsonStream;
 
-/** Running statements, and turning their results into one line of JSON. */
+/** Running statements, and turning their results into the wire's records. */
 public final class Queries {
     private final Connection connection;
     private final AtomicReference<Statement> running;
@@ -70,11 +79,8 @@ public final class Queries {
      * passed through as text (ADR-0013): passing them through desynchronises
      * the driver's view of the transaction state. Only the plain spellings are
      * intercepted - BEGIN TRY, savepoints and anything else pass untouched.
-     *
-     * @return true when the statement was a transaction command and the
-     *         response has been written.
      */
-    public boolean transaction(StringBuilder out, Object id, String sql) throws SQLException {
+    public Optional<TxState> transaction(String sql) throws SQLException {
         String text = stripLeadingComments(sql).stripTrailing();
         if (text.endsWith(";")) {
             text = text.substring(0, text.length() - 1).stripTrailing();
@@ -96,12 +102,9 @@ public final class Queries {
             connection.setAutoCommit(true);
             open = false;
         } else {
-            return false;
+            return Optional.empty();
         }
-        Rpc.beginResult(out, id);
-        out.append("{\"transaction\":").append(open).append('}');
-        out.append('}');
-        return true;
+        return Optional.of(new TxState(open));
     }
 
     private static String stripLeadingComments(String sql) {
@@ -141,9 +144,9 @@ public final class Queries {
      * @param limit rows to return, 0 for everything. One extra is fetched to
      *              learn whether another page exists, which is cheaper than a
      *              second count(*) query.
+     * @return a QueryPage, or an UpdateResult for a statement with no rows.
      */
-    public void query(StringBuilder out, Object id, String sql, int limit, int offset, int timeoutSeconds)
-            throws SQLException {
+    public Object query(String sql, int limit, int offset, int timeoutSeconds) throws SQLException {
         refuseWrites(sql);
         long start = System.currentTimeMillis();
         try (Statement statement =
@@ -162,24 +165,17 @@ public final class Queries {
 
             boolean hasResult = statement.execute(sql);
             if (!hasResult) {
-                int updated = statement.getUpdateCount();
-                Rpc.beginResult(out, id);
-                out.append("{\"updateCount\":").append(updated);
-                out.append(",\"elapsedMs\":").append(System.currentTimeMillis() - start).append('}');
-                out.append('}');
-                return;
+                return new UpdateResult(statement.getUpdateCount(), System.currentTimeMillis() - start);
             }
-
             try (ResultSet rows = statement.getResultSet()) {
-                writeResultSet(out, id, rows, limit, offset, start);
+                return page(rows, limit, offset, start);
             }
         } finally {
             running.set(null);
         }
     }
 
-    private void writeResultSet(StringBuilder out, Object id, ResultSet rows, int limit, int offset, long start)
-            throws SQLException {
+    private static QueryPage page(ResultSet rows, int limit, int offset, long start) throws SQLException {
         ResultSetMetaData meta = rows.getMetaData();
         int columnCount = meta.getColumnCount();
 
@@ -234,35 +230,20 @@ public final class Queries {
             documents.pad(collected, names.size());
         }
 
-        Rpc.beginResult(out, id);
-        out.append("{\"columns\":[");
+        // Built after the rows: a document result's names keep growing while
+        // the rows are read, so only now is the column list complete.
+        List<Column> columns = new ArrayList<>(names.size());
         for (int i = 0; i < names.size(); i++) {
-            if (i > 0) out.append(',');
-            out.append("{\"name\":");
-            Json.writeString(out, names.get(i));
-            out.append(",\"type\":");
-            Json.writeString(out, types.get(i));
-            if (i < tables.size() && tables.get(i) != null) {
-                out.append(",\"table\":");
-                Json.writeString(out, tables.get(i));
-            }
-            if (i < schemas.size() && schemas.get(i) != null) {
-                out.append(",\"schema\":");
-                Json.writeString(out, schemas.get(i));
-            }
-            out.append('}');
+            columns.add(new Column(
+                    names.get(i),
+                    types.get(i),
+                    i < tables.size() ? tables.get(i) : null,
+                    i < schemas.size() ? schemas.get(i) : null));
         }
-        out.append("],\"rows\":[");
-        for (int r = 0; r < collected.size(); r++) {
-            if (r > 0) out.append(',');
-            Json.writeValue(out, collected.get(r));
-        }
-        out.append("],\"hasMore\":").append(hasMore);
-        out.append(",\"elapsedMs\":").append(System.currentTimeMillis() - start).append('}');
-        out.append('}');
+        return new QueryPage(columns, collected, hasMore, System.currentTimeMillis() - start);
     }
 
-    public void exec(StringBuilder out, Object id, String sql, int timeoutSeconds) throws SQLException {
+    public UpdateResult exec(String sql, int timeoutSeconds) throws SQLException {
         refuseWrites(sql);
         long start = System.currentTimeMillis();
         try (Statement statement = connection.createStatement()) {
@@ -272,10 +253,7 @@ public final class Queries {
             }
             boolean hasResult = statement.execute(sql);
             int updated = hasResult ? -1 : statement.getUpdateCount();
-            Rpc.beginResult(out, id);
-            out.append("{\"updateCount\":").append(updated);
-            out.append(",\"elapsedMs\":").append(System.currentTimeMillis() - start).append('}');
-            out.append('}');
+            return new UpdateResult(updated, System.currentTimeMillis() - start);
         } finally {
             running.set(null);
         }
@@ -290,7 +268,7 @@ public final class Queries {
      * rolled-back transaction, no triggers, none of the games the command line
      * clients needed.
      */
-    public void validate(StringBuilder out, Object id, String sql) throws SQLException {
+    public void validate(String sql) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             running.set(statement);
             // Asking for the shape of the result forces the describe on the
@@ -304,7 +282,6 @@ public final class Queries {
                     throw e;
                 }
             }
-            Rpc.writeResult(out, id, null);
         } finally {
             running.set(null);
         }
@@ -338,7 +315,7 @@ public final class Queries {
      * asked for still has to come back.
      *
      * @return null for a value that is absent, empty or unreadable, so the
-     *         caller leaves the field out instead of writing an empty name.
+     *         record leaves the field out instead of carrying an empty name.
      */
     private static String optional(SqlText source) {
         try {
@@ -367,8 +344,8 @@ public final class Queries {
      * never leaves a half file where the editor reads a finished one
      * (ADR-0010).
      */
-    public void export(StringBuilder out, Object id, String sql, String path, String format,
-            String nullMarker, int timeoutSeconds) throws SQLException, IOException {
+    public ExportResult export(String sql, String path, String format, String nullMarker, int timeoutSeconds)
+            throws SQLException, IOException {
         refuseWrites(sql);
         long start = System.currentTimeMillis();
         long written = 0;
@@ -398,11 +375,7 @@ public final class Queries {
         } catch (IOException notAtomic) {
             Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING);
         }
-        Rpc.beginResult(out, id);
-        out.append("{\"rows\":").append(written).append(",\"path\":");
-        Json.writeString(out, path);
-        out.append(",\"elapsedMs\":").append(System.currentTimeMillis() - start).append('}');
-        out.append('}');
+        return new ExportResult(written, path, System.currentTimeMillis() - start);
     }
 
     private static long exportCsv(ResultSet rows, Writer file, String nullMarker)
@@ -427,7 +400,10 @@ public final class Queries {
         return written;
     }
 
-    /** One JSON array of objects, keyed by column label, streamed row by row. */
+    /**
+     * One JSON array of objects, keyed by column label, streamed row by row
+     * through the same structured writer the in-band results use.
+     */
     private static long exportJson(ResultSet rows, Writer file) throws SQLException, IOException {
         ResultSetMetaData meta = rows.getMetaData();
         int columnCount = meta.getColumnCount();
@@ -436,23 +412,23 @@ public final class Queries {
             names[i - 1] = meta.getColumnLabel(i);
         }
         long written = 0;
-        file.write("[\n");
-        StringBuilder line = new StringBuilder();
-        while (rows.next()) {
-            line.setLength(0);
-            if (written > 0) line.append(",\n");
-            line.append('{');
-            for (int i = 1; i <= columnCount; i++) {
-                if (i > 1) line.append(',');
-                Json.writeString(line, names[i - 1]);
-                line.append(':');
-                Json.writeValue(line, Values.read(rows, meta, i));
+        JsonStream out = new JsonStream(file);
+        try {
+            out.beginArray();
+            while (rows.next()) {
+                out.beginObject();
+                for (int i = 1; i <= columnCount; i++) {
+                    out.name(names[i - 1]);
+                    JsonCodec.write(out, Values.read(rows, meta, i));
+                }
+                out.endObject();
+                written++;
             }
-            line.append('}');
-            file.write(line.toString());
-            written++;
+            out.endArray();
+        } catch (UncheckedIOException e) {
+            throw e.getCause();
         }
-        file.write("\n]\n");
+        file.write('\n');
         return written;
     }
 }

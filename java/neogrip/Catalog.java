@@ -32,6 +32,11 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import neogrip.db.types.Types;
+import neogrip.rpc.JsonCodec;
+import neogrip.rpc.JsonStream;
+import neogrip.rpc.RpcException;
+import neogrip.rpc.Wire;
 
 /**
  * The catalog, through DatabaseMetaData.
@@ -88,7 +93,7 @@ public final class Catalog {
         return value == null || value.isEmpty() ? null : value;
     }
 
-    public void catalogs(StringBuilder out, Object id) throws SQLException {
+    public Types.Rows<Types.Named> catalogs() throws SQLException {
         DatabaseMetaData meta = connection.getMetaData();
         List<String> names = new ArrayList<>();
         try (ResultSet rows = meta.getCatalogs()) {
@@ -104,11 +109,19 @@ public final class Catalog {
                 names.add(current);
             }
         }
-        writeNames(out, id, names);
+        return named(names);
     }
 
-    public void schemas(StringBuilder out, Object id, String catalog) throws SQLException {
-        writeNames(out, id, schemaNames(connection.getMetaData(), catalog, LIMIT));
+    public Types.Rows<Types.Named> schemas(String catalog) throws SQLException {
+        return named(schemaNames(connection.getMetaData(), catalog, LIMIT));
+    }
+
+    private static Types.Rows<Types.Named> named(List<String> names) {
+        List<Types.Named> rows = new ArrayList<>(names.size());
+        for (String name : names) {
+            rows.add(new Types.Named(String.valueOf(name)));
+        }
+        return new Types.Rows<>(rows);
     }
 
     /**
@@ -139,40 +152,31 @@ public final class Catalog {
         return new ArrayList<>(names);
     }
 
-    public void tables(StringBuilder out, Object id, String catalog, String schema, String pattern) throws SQLException {
+    public Types.Rows<Types.TableRow> tables(String catalog, String schema, String pattern)
+            throws SQLException {
         DatabaseMetaData meta = connection.getMetaData();
         String namePattern = pattern == null || pattern.isEmpty() ? "%" : "%" + pattern + "%";
 
-        Rpc.beginResult(out, id);
-        out.append("{\"rows\":[");
-        int count = 0;
+        List<Types.TableRow> list = new ArrayList<>();
         // Asking for a list of types does not work across drivers: DuckDB
         // answers with "BASE TABLE", others with "TABLE", and a type the driver
         // does not recognise silently returns nothing. So everything is
         // requested and the system objects are dropped here.
         try (ResultSet rows =
                 meta.getTables(orNull(catalog), orNull(literal(meta, schema)), namePattern, null)) {
-            while (rows.next() && count < LIMIT) {
+            while (rows.next() && list.size() < LIMIT) {
                 String tableType = rows.getString("TABLE_TYPE");
                 if (isSystem(tableType)) {
                     continue;
                 }
-                if (count > 0) out.append(',');
-                out.append("{\"name\":");
-                Json.writeString(out, String.valueOf(rows.getString("TABLE_NAME")));
-                out.append(",\"kind\":");
-                Json.writeString(out, kind(rows.getString("TABLE_TYPE")));
-                String tableSchema = rows.getString("TABLE_SCHEM");
-                if (tableSchema != null) {
-                    out.append(",\"schema\":");
-                    Json.writeString(out, tableSchema);
-                }
-                writeRemarks(out, rows);
-                out.append('}');
-                count++;
+                list.add(new Types.TableRow(
+                        String.valueOf(rows.getString("TABLE_NAME")),
+                        kind(tableType),
+                        rows.getString("TABLE_SCHEM"),
+                        remarksOf(rows)));
             }
         }
-        out.append("]}}");
+        return new Types.Rows<>(list);
     }
 
     private static boolean isMongo(Connection connection) {
@@ -192,7 +196,7 @@ public final class Catalog {
      * reported once per type, which is the honest answer and the thing worth
      * knowing before writing a query against it.
      */
-    private void sampleFields(StringBuilder out, Object id, String collection) throws SQLException {
+    private Types.Rows<Types.MongoField> sampleFields(String collection) throws SQLException {
         java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
         java.util.LinkedHashMap<String, Integer> counts = new java.util.LinkedHashMap<>();
 
@@ -220,22 +224,17 @@ public final class Catalog {
             }
         }
 
-        Rpc.beginResult(out, id);
-        out.append("{\"rows\":[");
-        int written = 0;
+        List<Types.MongoField> list = new ArrayList<>(fields.size());
         for (java.util.Map.Entry<String, String> field : fields.entrySet()) {
             String name = field.getKey().substring(0, field.getKey().indexOf('\u0000'));
-            if (written > 0) out.append(',');
-            out.append("{\"name\":");
-            Json.writeString(out, name);
-            out.append(",\"type\":");
-            Json.writeString(out, field.getValue());
-            out.append(",\"nullable\":true,\"is_pk\":").append(name.equals("_id"));
-            out.append(",\"count\":").append(counts.getOrDefault(field.getKey(), 0));
-            out.append('}');
-            written++;
+            list.add(new Types.MongoField(
+                    name,
+                    field.getValue(),
+                    true,
+                    name.equals("_id"),
+                    counts.getOrDefault(field.getKey(), 0)));
         }
-        out.append("]}}");
+        return new Types.Rows<>(list);
     }
 
     private static String bsonType(Object value) {
@@ -265,68 +264,52 @@ public final class Catalog {
         };
     }
 
-    public void columns(StringBuilder out, Object id, String catalog, String schema, String table) throws SQLException {
+    public Types.Rows<?> columns(String catalog, String schema, String table) throws SQLException {
         if (isMongo(connection)) {
             // The JDBC driver's getColumns needs the Atlas SQL schema, which a
             // plain mongod does not have; it throws rather than returning
             // nothing. Sampling documents is what a collection can answer.
-            sampleFields(out, id, table);
-            return;
+            return sampleFields(table);
         }
 
         DatabaseMetaData meta = connection.getMetaData();
 
         PrimaryKey primaryKey = primaryKeyOf(meta, catalog, schema, table);
 
-        Rpc.beginResult(out, id);
-        out.append("{\"rows\":[");
+        List<Types.ColumnRow> list = new ArrayList<>();
         try (ResultSet rows =
                 meta.getColumns(orNull(catalog), orNull(literal(meta, schema)), literal(meta, table), "%")) {
-            int count = 0;
             while (rows.next()) {
                 if (!isRowFor(rows, "TABLE_NAME", table) || !isRowFor(rows, "TABLE_SCHEM", schema)) {
                     continue;
                 }
-                if (count > 0) out.append(',');
-                writeColumn(out, rows, primaryKey.columns);
-                count++;
+                list.add(columnRow(rows, primaryKey.columns));
             }
         }
-        out.append("]}}");
+        return new Types.Rows<>(list);
     }
 
     /** One column of a getColumns row. Shared by columns, snapshot and details. */
-    private static void writeColumn(StringBuilder out, ResultSet rows, Set<String> primaryKeys) throws SQLException {
+    private static Types.ColumnRow columnRow(ResultSet rows, Set<String> primaryKeys) throws SQLException {
         String name = rows.getString("COLUMN_NAME");
-        out.append("{\"name\":");
-        Json.writeString(out, String.valueOf(name));
-        out.append(",\"type\":");
-        Json.writeString(out, describeType(rows));
-        // Not every driver fills in every optional column of the metadata
-        // result; a missing one is not a reason to fail.
-        out.append(",\"nullable\":").append(optionalInt(rows, "NULLABLE", DatabaseMetaData.columnNullable)
-                != DatabaseMetaData.columnNoNulls);
-        out.append(",\"is_pk\":").append(primaryKeys.contains(name));
-        String defaultValue = optionalString(rows, "COLUMN_DEF");
-        if (defaultValue != null) {
-            out.append(",\"default_expr\":");
-            Json.writeString(out, defaultValue);
-        }
-        writeRemarks(out, rows);
-        // The two flags are written only when they are set, because they are
+        // The two flags ride as Boolean and only when set, because they are
         // what the renderer appends a clause for: a false one would have it
-        // asking about every ordinary column.
-        if (isYes(optionalString(rows, "IS_AUTOINCREMENT"))) {
-            out.append(",\"auto_increment\":true");
-        }
-        if (isYes(optionalString(rows, "IS_GENERATEDCOLUMN"))) {
-            out.append(",\"generated\":true");
-        }
-        // The driver returns the columns in this order already, but a reader
-        // that merged two answers - the sweep's and a later per-table pass -
-        // has no other way back to the order the table declares.
-        out.append(",\"position\":").append(optionalInt(rows, "ORDINAL_POSITION", 0));
-        out.append('}');
+        // asking about every ordinary column. Not every driver fills in every
+        // optional column of the metadata result; a missing one is not a
+        // reason to fail. The position survives because a reader that merged
+        // two answers - the sweep's and a later per-table pass - has no other
+        // way back to the order the table declares.
+        return new Types.ColumnRow(
+                String.valueOf(name),
+                describeType(rows),
+                optionalInt(rows, "NULLABLE", DatabaseMetaData.columnNullable)
+                        != DatabaseMetaData.columnNoNulls,
+                primaryKeys.contains(name),
+                optionalString(rows, "COLUMN_DEF"),
+                remarksOf(rows),
+                isYes(optionalString(rows, "IS_AUTOINCREMENT")) ? Boolean.TRUE : null,
+                isYes(optionalString(rows, "IS_GENERATEDCOLUMN")) ? Boolean.TRUE : null,
+                optionalInt(rows, "ORDINAL_POSITION", 0));
     }
 
     /**
@@ -336,12 +319,8 @@ public final class Catalog {
      * out rather than write an empty string: a renderer then has one thing to
      * test instead of two.
      */
-    private static void writeRemarks(StringBuilder out, ResultSet rows) {
-        String remarks = orNull(optionalString(rows, "REMARKS"));
-        if (remarks != null) {
-            out.append(",\"remarks\":");
-            Json.writeString(out, remarks);
-        }
+    private static String remarksOf(ResultSet rows) {
+        return orNull(optionalString(rows, "REMARKS"));
     }
 
     /**
@@ -355,20 +334,20 @@ public final class Catalog {
      * The name is compared rather than trusted: getTables takes a pattern, so
      * a table called foo_bar would also be answered for by fooXbar.
      */
-    private static void writeTableRemarks(
-            StringBuilder out, DatabaseMetaData meta, String catalog, String schema, String table) {
+    private static String tableRemarks(
+            DatabaseMetaData meta, String catalog, String schema, String table) {
         try (ResultSet rows =
                 meta.getTables(orNull(catalog), orNull(literal(meta, schema)), literal(meta, table), null)) {
             while (rows.next()) {
                 if (table.equals(rows.getString("TABLE_NAME"))) {
-                    writeRemarks(out, rows);
-                    return;
+                    return remarksOf(rows);
                 }
             }
         } catch (SQLException ignored) {
             // A driver that will not describe the table has still described
             // its columns, which is the part this answer is for.
         }
+        return null;
     }
 
     /**
@@ -542,14 +521,6 @@ public final class Catalog {
         return new PrimaryKey(inOrder(columns), name);
     }
 
-    /** The constraint's name, where there is one to write. */
-    private static void writePrimaryKeyName(StringBuilder out, PrimaryKey key) {
-        if (key.name != null) {
-            out.append(",\"primary_key_name\":");
-            Json.writeString(out, key.name);
-        }
-    }
-
     /** A schema small enough that asking table by table for its keys is cheap. */
     private static final int KEY_FALLBACK_TABLES = 50;
 
@@ -606,8 +577,8 @@ public final class Catalog {
         final java.util.LinkedHashMap<String, String> kinds = new java.util.LinkedHashMap<>();
         /** A table's comment, for the tables that have one. */
         final java.util.LinkedHashMap<String, String> remarks = new java.util.LinkedHashMap<>();
-        final java.util.LinkedHashMap<String, StringBuilder> columns = new java.util.LinkedHashMap<>();
-        final java.util.Map<String, TableDetails> details = new ConcurrentHashMap<>();
+        final java.util.LinkedHashMap<String, List<Types.ColumnRow>> columns = new java.util.LinkedHashMap<>();
+        final java.util.Map<String, DetailParts> details = new ConcurrentHashMap<>();
         java.util.Map<String, PrimaryKey> keys = new java.util.LinkedHashMap<>();
         int columnCount;
 
@@ -617,15 +588,15 @@ public final class Catalog {
         }
     }
 
-    /** What a table's index and key pass found, rendered and waiting for the file. */
-    private static final class TableDetails {
-        final StringBuilder indexes = new StringBuilder();
-        final StringBuilder foreignKeys = new StringBuilder();
-        final StringBuilder referencedBy = new StringBuilder();
+    /** What a table's index and key pass found, waiting for the file. */
+    private static final class DetailParts {
+        List<Types.IndexInfo> indexes = List.of();
+        List<Types.KeyInfo> foreignKeys = List.of();
+        List<Types.KeyInfo> referencedBy = List.of();
         /** The primary key this pass asked for itself, which the sweep can miss. */
         PrimaryKey primaryKey = PrimaryKey.NONE;
-        /** The columns again, when the sweep's is_pk flags were rendered from a key it missed. */
-        StringBuilder columns;
+        /** The columns again, when the sweep's is_pk flags were built from a key it missed. */
+        List<Types.ColumnRow> columns;
     }
 
     /**
@@ -639,33 +610,20 @@ public final class Catalog {
      * for the entire schema and the rest of the walk is served from the cache
      * without touching the server again.
      */
-    public void snapshot(StringBuilder out, Object id, String catalog, String schema) throws SQLException {
+    public Types.Rows<Types.TableWithColumns> snapshot(String catalog, String schema) throws SQLException {
         SchemaBody body = new SchemaBody(schema, schema);
         sweepSchema(body, connection.getMetaData(), catalog, LIMIT, COLUMN_LIMIT);
 
-        Rpc.beginResult(out, id);
-        out.append("{\"rows\":[");
-        int count = 0;
+        List<Types.TableWithColumns> list = new ArrayList<>(body.kinds.size());
         for (java.util.Map.Entry<String, String> table : body.kinds.entrySet()) {
-            if (count > 0) out.append(',');
-            out.append("{\"name\":");
-            Json.writeString(out, table.getKey());
-            out.append(",\"kind\":");
-            Json.writeString(out, table.getValue());
-            String remarks = body.remarks.get(table.getKey());
-            if (remarks != null) {
-                out.append(",\"remarks\":");
-                Json.writeString(out, remarks);
-            }
-            out.append(",\"columns\":[");
-            StringBuilder columns = body.columns.get(table.getKey());
-            if (columns != null) {
-                out.append(columns);
-            }
-            out.append("]}");
-            count++;
+            List<Types.ColumnRow> columns = body.columns.get(table.getKey());
+            list.add(new Types.TableWithColumns(
+                    table.getKey(),
+                    table.getValue(),
+                    body.remarks.get(table.getKey()),
+                    columns == null ? List.of() : columns));
         }
-        out.append("]}}");
+        return new Types.Rows<>(list);
     }
 
     /**
@@ -721,11 +679,9 @@ public final class Catalog {
                 if (!body.kinds.containsKey(table)) {
                     continue;
                 }
-                StringBuilder column = body.columns.computeIfAbsent(table, name -> new StringBuilder());
-                if (column.length() > 0) {
-                    column.append(',');
-                }
-                writeColumn(column, rows, keys.getOrDefault(table, PrimaryKey.NONE).columns);
+                body.columns
+                        .computeIfAbsent(table, name -> new ArrayList<>())
+                        .add(columnRow(rows, keys.getOrDefault(table, PrimaryKey.NONE).columns));
                 written++;
             }
         }
@@ -740,49 +696,34 @@ public final class Catalog {
      * Five metadata calls, and unlike the snapshot they are per table - which
      * is affordable because this only runs for a table someone opened.
      */
-    public void details(StringBuilder out, Object id, String catalog, String schema, String table) throws SQLException {
+    public Object details(String catalog, String schema, String table) throws SQLException {
         if (isMongo(connection)) {
             // A collection has no indexes or keys to speak of through JDBC.
-            sampleFields(out, id, table);
-            return;
+            return sampleFields(table);
         }
 
         DatabaseMetaData meta = connection.getMetaData();
         PrimaryKey primaryKey = primaryKeyOf(meta, catalog, schema, table);
 
-        Rpc.beginResult(out, id);
-        out.append("{\"rows\":[");
+        List<Types.ColumnRow> columns = new ArrayList<>();
         try (ResultSet rows =
                 meta.getColumns(orNull(catalog), orNull(literal(meta, schema)), literal(meta, table), "%")) {
-            int count = 0;
             while (rows.next()) {
                 if (!isRowFor(rows, "TABLE_NAME", table) || !isRowFor(rows, "TABLE_SCHEM", schema)) {
                     continue;
                 }
-                if (count > 0) out.append(',');
-                writeColumn(out, rows, primaryKey.columns);
-                count++;
+                columns.add(columnRow(rows, primaryKey.columns));
             }
         }
-        out.append(']');
 
-        out.append(",\"primary_key\":[");
-        writeStrings(out, new ArrayList<>(primaryKey.columns));
-        out.append(']');
-        writePrimaryKeyName(out, primaryKey);
-        writeTableRemarks(out, meta, catalog, schema, table);
-
-        out.append(",\"indexes\":[");
-        writeIndexes(out, meta, catalog, schema, table);
-        out.append(']');
-
-        out.append(",\"foreign_keys\":[");
-        writeKeys(out, meta, catalog, schema, table, true);
-        out.append(']');
-
-        out.append(",\"referenced_by\":[");
-        writeKeys(out, meta, catalog, schema, table, false);
-        out.append("]}}");
+        return new Types.TableDetails(
+                columns,
+                new ArrayList<>(primaryKey.columns),
+                primaryKey.name,
+                tableRemarks(meta, catalog, schema, table),
+                indexInfos(meta, catalog, schema, table),
+                keyInfos(meta, catalog, schema, table, true),
+                keyInfos(meta, catalog, schema, table, false));
     }
 
     /**
@@ -804,9 +745,9 @@ public final class Catalog {
      * @param swept the key the schema sweep found, which stands when the
      *              per-table call finds nothing of its own.
      */
-    private static TableDetails collectDetails(
+    private static DetailParts collectDetails(
             DatabaseMetaData meta, String catalog, String schema, String table, PrimaryKey swept) {
-        TableDetails details = new TableDetails();
+        DetailParts details = new DetailParts();
         PrimaryKey primaryKey = primaryKeyOf(meta, catalog, schema, table);
         if (primaryKey.isEmpty()) {
             // A table with no key, or a driver that would not say: either way
@@ -819,14 +760,14 @@ public final class Catalog {
             // column is in the key, so a key the sweep found in another order
             // is not a reason to ask the server for the columns again.
             if (!primaryKey.columns.equals(swept.columns)) {
-                // The columns were rendered with their is_pk flags taken from
-                // the key the sweep found, so they have to be rendered again.
-                details.columns = renderColumns(meta, catalog, schema, table, primaryKey.columns);
+                // The columns were built with their is_pk flags taken from
+                // the key the sweep found, so they have to be built again.
+                details.columns = columnsOf(meta, catalog, schema, table, primaryKey.columns);
             }
         }
-        writeIndexes(details.indexes, meta, catalog, schema, table);
-        writeKeys(details.foreignKeys, meta, catalog, schema, table, true);
-        writeKeys(details.referencedBy, meta, catalog, schema, table, false);
+        details.indexes = indexInfos(meta, catalog, schema, table);
+        details.foreignKeys = keyInfos(meta, catalog, schema, table, true);
+        details.referencedBy = keyInfos(meta, catalog, schema, table, false);
         return details;
     }
 
@@ -838,19 +779,16 @@ public final class Catalog {
      *         sweep's columns in place: is_pk flags that are missing a key beat
      *         a table with no columns at all.
      */
-    private static StringBuilder renderColumns(
+    private static List<Types.ColumnRow> columnsOf(
             DatabaseMetaData meta, String catalog, String schema, String table, Set<String> primaryKeys) {
-        StringBuilder columns = new StringBuilder();
+        List<Types.ColumnRow> columns = new ArrayList<>();
         try (ResultSet rows =
                 meta.getColumns(orNull(catalog), orNull(literal(meta, schema)), literal(meta, table), "%")) {
             while (rows.next()) {
                 if (!isRowFor(rows, "TABLE_NAME", table) || !isRowFor(rows, "TABLE_SCHEM", schema)) {
                     continue;
                 }
-                if (columns.length() > 0) {
-                    columns.append(',');
-                }
-                writeColumn(columns, rows, primaryKeys);
+                columns.add(columnRow(rows, primaryKeys));
             }
         } catch (SQLException refused) {
             return null;
@@ -858,8 +796,8 @@ public final class Catalog {
         return columns;
     }
 
-    private static void writeIndexes(
-            StringBuilder out, DatabaseMetaData meta, String catalog, String schema, String table) {
+    private static List<Types.IndexInfo> indexInfos(
+            DatabaseMetaData meta, String catalog, String schema, String table) {
         java.util.LinkedHashMap<String, List<IndexColumn>> indexes = new java.util.LinkedHashMap<>();
         java.util.Map<String, Boolean> unique = new java.util.LinkedHashMap<>();
         java.util.Map<String, String> kinds = new java.util.LinkedHashMap<>();
@@ -899,37 +837,28 @@ public final class Catalog {
         } catch (SQLException ignored) {
             // Trino and the other query engines have no indexes to report.
         }
-        int count = 0;
+        List<Types.IndexInfo> list = new ArrayList<>(indexes.size());
         for (java.util.Map.Entry<String, List<IndexColumn>> index : indexes.entrySet()) {
-            if (count > 0) out.append(',');
             List<IndexColumn> columns = index.getValue();
             columns.sort(Comparator.comparingInt(IndexColumn::position));
-            out.append("{\"name\":");
-            Json.writeString(out, index.getKey());
-            out.append(",\"unique\":").append(unique.getOrDefault(index.getKey(), false));
-            out.append(",\"columns\":[");
-            for (int i = 0; i < columns.size(); i++) {
-                if (i > 0) out.append(',');
-                Json.writeString(out, String.valueOf(columns.get(i).name()));
-            }
-            // Written as a parallel array rather than per column, because the
+            List<String> names = new ArrayList<>(columns.size());
+            // Kept as a parallel array rather than per column, because the
             // columns are what a reader that does not care about ordering
             // already reads: a second array it can ignore beats a shape change.
-            out.append("],\"order\":[");
-            for (int i = 0; i < columns.size(); i++) {
-                if (i > 0) out.append(',');
-                Json.writeString(out, columns.get(i).direction());
+            List<String> order = new ArrayList<>(columns.size());
+            for (IndexColumn column : columns) {
+                names.add(String.valueOf(column.name()));
+                order.add(column.direction());
             }
-            out.append("],\"kind\":");
-            Json.writeString(out, kinds.getOrDefault(index.getKey(), "other"));
-            String filter = filters.get(index.getKey());
-            if (filter != null) {
-                out.append(",\"filter\":");
-                Json.writeString(out, filter);
-            }
-            out.append('}');
-            count++;
+            list.add(new Types.IndexInfo(
+                    index.getKey(),
+                    unique.getOrDefault(index.getKey(), false),
+                    names,
+                    order,
+                    kinds.getOrDefault(index.getKey(), "other"),
+                    filters.get(index.getKey())));
         }
+        return list;
     }
 
     /**
@@ -964,13 +893,8 @@ public final class Catalog {
      * table swaps with the direction: imported keys have it as the FK side,
      * exported keys as the PK side.
      */
-    private static void writeKeys(
-            StringBuilder out,
-            DatabaseMetaData meta,
-            String catalog,
-            String schema,
-            String table,
-            boolean imported) {
+    private static List<Types.KeyInfo> keyInfos(
+            DatabaseMetaData meta, String catalog, String schema, String table, boolean imported) {
         // Both ends of a column are kept as one pair, not as two lists.
         // Built separately they were ordered separately - by whatever order the
         // driver returned the rows in, independently for each side - and a
@@ -1008,44 +932,27 @@ public final class Catalog {
             // No referential metadata on this engine.
         }
 
-        int count = 0;
+        List<Types.KeyInfo> list = new ArrayList<>(pairs.size());
         for (java.util.Map.Entry<String, List<KeyPair>> key : pairs.entrySet()) {
-            if (count > 0) out.append(',');
             List<KeyPair> columns = key.getValue();
             columns.sort(Comparator.comparingInt(KeyPair::position));
             String[] other = target.getOrDefault(key.getKey(), new String[] {null, null});
-            out.append("{\"name\":");
-            Json.writeString(out, key.getKey());
-            if (other[0] != null) {
-                out.append(",\"schema\":");
-                Json.writeString(out, other[0]);
+            List<String> here = new ArrayList<>(columns.size());
+            List<String> there = new ArrayList<>(columns.size());
+            for (KeyPair pair : columns) {
+                here.add(String.valueOf(pair.here()));
+                there.add(String.valueOf(pair.there()));
             }
-            out.append(",\"table\":");
-            Json.writeString(out, String.valueOf(other[1]));
-            out.append(",\"columns\":[");
-            for (int i = 0; i < columns.size(); i++) {
-                if (i > 0) out.append(',');
-                Json.writeString(out, String.valueOf(columns.get(i).here()));
-            }
-            out.append("],\"ref_columns\":[");
-            for (int i = 0; i < columns.size(); i++) {
-                if (i > 0) out.append(',');
-                Json.writeString(out, String.valueOf(columns.get(i).there()));
-            }
-            out.append(']');
-            String deleteRule = onDelete.get(key.getKey());
-            if (deleteRule != null) {
-                out.append(",\"on_delete\":");
-                Json.writeString(out, deleteRule);
-            }
-            String updateRule = onUpdate.get(key.getKey());
-            if (updateRule != null) {
-                out.append(",\"on_update\":");
-                Json.writeString(out, updateRule);
-            }
-            out.append('}');
-            count++;
+            list.add(new Types.KeyInfo(
+                    key.getKey(),
+                    other[0],
+                    String.valueOf(other[1]),
+                    here,
+                    there,
+                    onDelete.get(key.getKey()),
+                    onUpdate.get(key.getKey())));
         }
+        return list;
     }
 
     /**
@@ -1080,21 +987,14 @@ public final class Catalog {
         };
     }
 
-    private static void writeStrings(StringBuilder out, List<String> values) {
-        for (int i = 0; i < values.size(); i++) {
-            if (i > 0) out.append(',');
-            Json.writeString(out, String.valueOf(values.get(i)));
-        }
-    }
-
     /**
      * There is no portable "show me the DDL": JDBC does not have one. What it
      * does have is every piece one is written from, which is what details
      * answers with - the rendering happens in Lua, where the dialect's quoting
      * rules already live.
      */
-    public void ddl(StringBuilder out, Object id, String catalog, String schema, String table) throws SQLException {
-        details(out, id, catalog, schema, table);
+    public Object ddl(String catalog, String schema, String table) throws SQLException {
+        return details(catalog, schema, table);
     }
 
     /**
@@ -1135,7 +1035,7 @@ public final class Catalog {
      * failing here would only take away the better answer when it was
      * available and leave nothing in its place.
      */
-    public void nativeDdl(StringBuilder out, Object id, String catalog, String schema, String table) {
+    public Types.Ddl nativeDdl(String catalog, String schema, String table) {
         String ddl = null;
         try {
             ddl = nativeDdlText(catalog, schema, table);
@@ -1146,14 +1046,7 @@ public final class Catalog {
             // drivers wrap a protocol-level refusal in one.
             ddl = null;
         }
-        Rpc.beginResult(out, id);
-        out.append("{\"ddl\":");
-        if (ddl == null) {
-            out.append("null");
-        } else {
-            Json.writeString(out, ddl);
-        }
-        out.append("}}");
+        return new Types.Ddl(ddl);
     }
 
     private String nativeDdlText(String catalog, String schema, String table) throws SQLException {
@@ -1384,18 +1277,6 @@ public final class Catalog {
         return ddl.length() == 0 ? null : ddl.toString();
     }
 
-    private static void writeNames(StringBuilder out, Object id, List<String> names) {
-        Rpc.beginResult(out, id);
-        out.append("{\"rows\":[");
-        for (int i = 0; i < names.size(); i++) {
-            if (i > 0) out.append(',');
-            out.append("{\"name\":");
-            Json.writeString(out, String.valueOf(names.get(i)));
-            out.append('}');
-        }
-        out.append("]}}");
-    }
-
     /**
      * The whole catalog, written to a file instead of answered through the
      * protocol.
@@ -1409,14 +1290,8 @@ public final class Catalog {
      * catalog runs to hundreds of megabytes of JSON, and a line that long is
      * not a protocol message.
      */
-    public void introspect(
-            StringBuilder out,
-            Object id,
-            String catalog,
-            String outFile,
-            int parallelism,
-            long deadlineMs,
-            boolean wantDetails)
+    public Types.IntrospectSummary introspect(
+            String catalog, String outFile, int parallelism, long deadlineMs, boolean wantDetails)
             throws SQLException, IOException {
         long start = System.currentTimeMillis();
         // No budget at all rather than one that has already run out: a caller
@@ -1427,20 +1302,15 @@ public final class Catalog {
         cancelled.set(false);
 
         if (outFile == null || outFile.isEmpty()) {
-            Rpc.writeError(out, id, Rpc.INVALID_REQUEST, "introspect needs a file to write the catalog to", null);
-            return;
+            throw new RpcException(Wire.INVALID_REQUEST, "introspect needs a file to write the catalog to");
         }
         if (isMongo(connection)) {
             // getColumns wants the Atlas SQL schema a plain mongod does not
             // have, and a snapshot of collections without fields would answer
             // "no fields" where the explorer has to sample documents instead.
-            Rpc.writeError(
-                    out,
-                    id,
-                    Rpc.INVALID_REQUEST,
-                    "a collection catalog cannot be swept; the explorer samples documents instead",
-                    null);
-            return;
+            throw new RpcException(
+                    Wire.INVALID_REQUEST,
+                    "a collection catalog cannot be swept; the explorer samples documents instead");
         }
 
         DatabaseMetaData meta = connection.getMetaData();
@@ -1532,8 +1402,7 @@ public final class Catalog {
         // A snapshot that reached its place is an answer even if a cancel
         // arrived a moment later; nothing else can get this far unwritten.
         if (!written) {
-            Rpc.writeError(out, id, Rpc.CANCELLED, "the catalog sweep was cancelled", null);
-            return;
+            throw new RpcException(Wire.CANCELLED, "the catalog sweep was cancelled");
         }
 
         int tables = 0;
@@ -1542,17 +1411,15 @@ public final class Catalog {
             tables += schema.kinds.size();
             columns += schema.columnCount;
         }
-        Rpc.beginResult(out, id);
-        out.append("{\"path\":");
-        Json.writeString(out, outFile);
-        out.append(",\"schemas\":").append(schemas.size());
-        out.append(",\"tables\":").append(tables);
-        out.append(",\"columns\":").append(columns);
-        out.append(",\"details\":").append(detailed);
-        out.append(",\"partial\":").append(partial);
-        out.append(",\"parallel\":").append(parallel);
-        out.append(",\"elapsedMs\":").append(System.currentTimeMillis() - start);
-        out.append("}}");
+        return new Types.IntrospectSummary(
+                outFile,
+                schemas.size(),
+                tables,
+                columns,
+                detailed,
+                partial,
+                parallel,
+                System.currentTimeMillis() - start);
     }
 
     /**
@@ -1870,41 +1737,30 @@ public final class Catalog {
             List<SchemaBody> schemas,
             AtomicBoolean cancelled)
             throws IOException {
-        StringBuilder head = new StringBuilder();
-        head.append("{\"at\":").append(System.currentTimeMillis() / 1000).append(",\"product\":");
-        Json.writeString(head, product);
-        head.append(",\"catalog\":");
-        Json.writeString(head, catalog);
-        head.append(",\"parallel\":").append(parallel);
-        head.append(",\"partial\":").append(partial);
-        head.append(",\"schemas\":[");
-        file.append(head);
-
-        int schemaCount = 0;
-        for (SchemaBody schema : schemas) {
-            if (cancelled.get()) {
-                return false;
-            }
-            if (schemaCount > 0) {
-                file.append(',');
-            }
-            StringBuilder open = new StringBuilder("{\"name\":");
-            Json.writeString(open, schema.name);
-            open.append(",\"tables\":[");
-            file.append(open);
-            int tableCount = 0;
-            for (java.util.Map.Entry<String, String> table : schema.kinds.entrySet()) {
-                if (tableCount > 0) {
-                    file.append(',');
+        try {
+            JsonStream out = new JsonStream(file);
+            out.beginObject();
+            out.name("at").value(System.currentTimeMillis() / 1000);
+            out.name("product").value(product);
+            out.name("catalog").value(catalog);
+            out.name("parallel").value(parallel);
+            out.name("partial").value(partial);
+            out.name("schemas").beginArray();
+            for (SchemaBody schema : schemas) {
+                if (cancelled.get()) {
+                    return false;
                 }
-                writeTable(file, schema, table.getKey(), table.getValue());
-                tableCount++;
+                out.beginObject().name("name").value(schema.name).name("tables").beginArray();
+                for (java.util.Map.Entry<String, String> table : schema.kinds.entrySet()) {
+                    writeTable(out, schema, table.getKey(), table.getValue());
+                }
+                out.endArray().endObject();
             }
-            file.append("]}");
-            schemaCount++;
+            out.endArray().endObject();
+            return true;
+        } catch (java.io.UncheckedIOException wrapped) {
+            throw wrapped.getCause();
         }
-        file.append("]}");
-        return true;
     }
 
     /**
@@ -1920,48 +1776,37 @@ public final class Catalog {
      * of them is the one that can come back empty on an engine that does not
      * support it.
      */
-    private static void writeTable(Writer file, SchemaBody schema, String table, String kind) throws IOException {
-        TableDetails details = schema.details.get(table);
-        StringBuilder head = new StringBuilder("{\"name\":");
-        Json.writeString(head, table);
-        head.append(",\"kind\":");
-        Json.writeString(head, kind);
+    private static void writeTable(JsonStream out, SchemaBody schema, String table, String kind) {
+        DetailParts details = schema.details.get(table);
+        out.beginObject();
+        out.name("name").value(table);
+        out.name("kind").value(kind);
         String remarks = schema.remarks.get(table);
         if (remarks != null) {
-            head.append(",\"remarks\":");
-            Json.writeString(head, remarks);
+            out.name("remarks").value(remarks);
         }
-        head.append(",\"columns\":[");
-        file.append(head);
 
-        StringBuilder columns = details != null && details.columns != null
-                ? details.columns
-                : schema.columns.get(table);
-        if (columns != null) {
-            file.append(columns);
-        }
+        List<Types.ColumnRow> columns =
+                details != null && details.columns != null ? details.columns : schema.columns.get(table);
+        out.name("columns");
+        JsonCodec.write(out, columns == null ? List.of() : columns);
 
         PrimaryKey primaryKey =
                 details != null ? details.primaryKey : schema.keys.getOrDefault(table, PrimaryKey.NONE);
-        StringBuilder keys = new StringBuilder("],\"primary_key\":[");
-        writeStrings(keys, new ArrayList<>(primaryKey.columns));
-        keys.append(']');
-        writePrimaryKeyName(keys, primaryKey);
-        file.append(keys);
+        out.name("primary_key");
+        JsonCodec.write(out, new ArrayList<>(primaryKey.columns));
+        if (primaryKey.name != null) {
+            out.name("primary_key_name").value(primaryKey.name);
+        }
 
-        file.append(",\"indexes\":[");
-        if (details != null) {
-            file.append(details.indexes);
-        }
-        file.append("],\"foreign_keys\":[");
-        if (details != null) {
-            file.append(details.foreignKeys);
-        }
-        file.append("],\"referenced_by\":[");
-        if (details != null) {
-            file.append(details.referencedBy);
-        }
-        file.append("],\"details\":").append(Boolean.toString(details != null)).append('}');
+        out.name("indexes");
+        JsonCodec.write(out, details != null ? details.indexes : List.of());
+        out.name("foreign_keys");
+        JsonCodec.write(out, details != null ? details.foreignKeys : List.of());
+        out.name("referenced_by");
+        JsonCodec.write(out, details != null ? details.referencedBy : List.of());
+        out.name("details").value(details != null);
+        out.endObject();
     }
 
     /**

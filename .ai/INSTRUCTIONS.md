@@ -37,13 +37,14 @@ secret hygiene and portability rules are strict.
 - Lua is formatted with StyLua and linted with luacheck. Their config files are versioned in the
   repository root.
 - Java has no build system by design (see ADR-0004). The quality bar is `javac -Xlint:all -Werror`
-  compiling clean.
+  compiling clean, always with `-parameters`: the RPC library binds request parameters by name
+  (ADR-0027).
 
 ```bash
 stylua .
 stylua --check .
 luacheck lua tests
-javac -Xlint:all -Werror -d build/classes java/neogrip/*.java
+javac -parameters -Xlint:all -Werror -d build/classes $(find java -name '*.java')
 ```
 
 ## Comments

@@ -56,7 +56,7 @@ else
 	)
 	check("nor the user name", command_line:find("testuser", 1, true), nil)
 	check("nor the jdbc url", command_line:find("jdbc:", 1, true), nil)
-	check("and it really is the sidecar", command_line:find("neogrip.Main", 1, true) ~= nil, true)
+	check("and it really is the sidecar", command_line:find("neogrip.app.App", 1, true) ~= nil, true)
 
 	support.wait(function()
 		return finished

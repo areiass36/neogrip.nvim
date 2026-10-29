@@ -3,20 +3,23 @@ package neogrip;
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import neogrip.rpc.RpcException;
+import neogrip.rpc.Wire;
 
 /**
  * An error the editor can point at.
  *
  * JDBC gives more than a command line client does: a SQLState, the vendor's
  * own code, and - for PostgreSQL - the character position of the problem.
- * Those ride in the JSON-RPC error's data object (doc/protocol.md). The
- * position is read reflectively because reading it properly would mean
- * compiling against every driver.
+ * Those ride in the JSON-RPC error's data object (doc/protocol.md); this is
+ * the exception mapper the server is configured with. The position is read
+ * reflectively because reading it properly would mean compiling against every
+ * driver.
  */
 public final class Errors {
     private Errors() {}
 
-    public static void write(StringBuilder out, Object id, SQLException e) {
+    public static RpcException toRpcException(SQLException e) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("state", String.valueOf(e.getSQLState()));
         data.put("vendorCode", (long) e.getErrorCode());
@@ -30,7 +33,7 @@ public final class Errors {
             data.put("line", (long) line);
         }
         String message = e.getMessage() == null ? e.toString() : e.getMessage();
-        Rpc.writeError(out, id, Rpc.SQL_ERROR, message.trim(), data);
+        return new RpcException(Wire.SQL_ERROR, message.trim(), data);
     }
 
     /** PostgreSQL reports the offending character; nothing else does. */

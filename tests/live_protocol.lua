@@ -67,7 +67,7 @@ local raw = client.start({
 	jdk.java(),
 	"-cp",
 	sidecar.classes_dir,
-	"neogrip.Main",
+	"neogrip.app.App",
 })
 local _, early = support.sync(function(done)
 	raw:request("ping", {}, done)

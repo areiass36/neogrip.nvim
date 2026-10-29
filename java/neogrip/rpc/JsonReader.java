@@ -1,4 +1,4 @@
-package neogrip;
+package neogrip.rpc;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

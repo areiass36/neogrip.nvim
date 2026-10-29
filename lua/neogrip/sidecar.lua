@@ -23,7 +23,7 @@ M.classes_dir = neogrip.data_dir .. "/classes"
 local stamp_file = M.classes_dir .. "/.protocol-version"
 
 local function sources()
-	return vim.fn.glob(M.sources_dir .. "/*.java", false, true)
+	return vim.fn.glob(M.sources_dir .. "/**/*.java", false, true)
 end
 
 function M.compiled()
@@ -31,7 +31,7 @@ function M.compiled()
 	if stamp ~= tostring(protocol.VERSION) then
 		return false
 	end
-	local main_class = vim.uv.fs_stat(M.classes_dir .. "/neogrip/Main.class")
+	local main_class = vim.uv.fs_stat(M.classes_dir .. "/neogrip/app/App.class")
 	if not main_class then
 		return false
 	end
@@ -56,7 +56,8 @@ function M.build(on_done)
 	end
 
 	vim.fn.mkdir(M.classes_dir, "p")
-	local command = { javac, "-encoding", "UTF-8", "-d", M.classes_dir }
+	-- -parameters keeps parameter names for the sidecar's named binding.
+	local command = { javac, "-encoding", "UTF-8", "-parameters", "-d", M.classes_dir }
 	vim.list_extend(command, files)
 	vim.system(
 		command,
@@ -109,7 +110,7 @@ function M.launch(opts, on_ready)
 		"-Dfile.encoding=UTF-8",
 		"-cp",
 		classpath,
-		"neogrip.Main",
+		"neogrip.app.App",
 	}
 
 	local sidecar = client.start(command, opts.handlers)
