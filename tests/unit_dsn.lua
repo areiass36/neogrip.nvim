@@ -29,14 +29,14 @@ check(
 		host = "trino.example.com",
 		port = 443,
 		database = "deltalaketrusted",
-		default_schema = "receita_federal",
+		schema = "receita_federal",
 	}),
 	"jdbc:trino://trino.example.com:443/deltalaketrusted/receita_federal?SSL=true"
 )
 
 check(
 	"a schema without a catalog has nowhere to go, and is left out",
-	url({ driver = "trino", host = "trino.example.com", port = 443, default_schema = "receita_federal" }),
+	url({ driver = "trino", host = "trino.example.com", port = 443, schema = "receita_federal" }),
 	"jdbc:trino://trino.example.com:443?SSL=true"
 )
 

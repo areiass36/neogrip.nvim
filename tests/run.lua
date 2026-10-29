@@ -13,6 +13,14 @@ local UNIT = {
 	"unit_connections",
 	"unit_grid",
 	"unit_scratch",
+	"unit_identifier",
+	"unit_dialect",
+	"unit_store",
+	"unit_detail",
+	"unit_preview",
+	"unit_explorer",
+	"unit_completion",
+	"unit_lsp",
 }
 
 local LIVE = {
@@ -21,6 +29,10 @@ local LIVE = {
 	"live_flow",
 	"live_requery",
 	"live_safety",
+	"live_schema",
+	"live_introspect",
+	"live_explorer",
+	"live_diagnostics",
 }
 
 local unit_only = false
