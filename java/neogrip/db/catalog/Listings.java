@@ -39,6 +39,17 @@ public final class Listings {
         return named(Metadata.schemaNames(connection.getMetaData(), catalog, Snapshot.LIMIT));
     }
 
+    private Types.Rows<Types.TableRow> mongoTables(String pattern) throws SQLException {
+        List<Types.TableRow> list = new ArrayList<>();
+        String needle = pattern == null ? "" : pattern.toLowerCase(java.util.Locale.ROOT);
+        for (String name : MongoFields.collectionNames(connection)) {
+            if (needle.isEmpty() || name.toLowerCase(java.util.Locale.ROOT).contains(needle)) {
+                list.add(new Types.TableRow(name, "collection", null, null));
+            }
+        }
+        return new Types.Rows<>(list);
+    }
+
     private static Types.Rows<Types.Named> named(List<String> names) {
         List<Types.Named> rows = new ArrayList<>(names.size());
         for (String name : names) {
@@ -49,6 +60,9 @@ public final class Listings {
 
     public Types.Rows<Types.TableRow> tables(String catalog, String schema, String pattern)
             throws SQLException {
+        if (MongoFields.isMongo(connection)) {
+            return mongoTables(pattern);
+        }
         DatabaseMetaData meta = connection.getMetaData();
         String namePattern = pattern == null || pattern.isEmpty() ? "%" : "%" + pattern + "%";
 
