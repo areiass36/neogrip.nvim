@@ -3,7 +3,9 @@
 -- Invoke as: nvim --headless -u tests/minimal.lua -l tests/run.lua [unit]
 local support = require("tests.support")
 
-local UNIT = {}
+local UNIT = {
+	"unit_rpc",
+}
 
 local LIVE = {}
 
