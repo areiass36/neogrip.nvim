@@ -123,7 +123,7 @@ function M.build(connection)
 	end
 
 	if driver == "mongodb" then
-		if connection.user and options.authSource == nil then
+		if connection.auth and connection.auth.user and options.authSource == nil then
 			options.authSource = "admin"
 		end
 		local scheme = options.srv == "true" and "mongodb+srv" or "mongodb"

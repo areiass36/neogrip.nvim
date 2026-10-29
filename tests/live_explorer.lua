@@ -282,20 +282,17 @@ note("preview tail: " .. tostring(table_lines[#table_lines]))
 
 -- Still available for whoever wants to pay for it.
 local config = require("neogrip.config")
-vim.g.db_config = vim.tbl_extend("force", vim.g.db_config or {}, { preview_sample = true })
-config.reload()
+config.setup({ preview_sample = true })
 local sampled = support.sync(function(done)
 	preview.render("tables", table_context, table_entry, preview_buf, done)
 end, 30000)
 local sampled_text = table.concat(sampled, "\n")
 check("turned on, the sample comes back", sampled_text:find("-- Sample", 1, true) ~= nil, true)
-check(
-	"below the definition",
-	sampled_text:find("CREATE TABLE") < sampled_text:find("-- Sample", 1, true),
-	true
-)
+local create_at = sampled_text:find("CREATE TABLE")
+local sample_at = sampled_text:find("-- Sample", 1, true)
+check("below the definition", create_at ~= nil and sample_at ~= nil and create_at < sample_at, true)
 check("with real values in it", sampled_text:find("a,b", 1, true) ~= nil, true)
-vim.g.db_config.preview_sample = nil
+config.setup({})
 config.reload()
 
 local column_lines = support.sync(function(done)

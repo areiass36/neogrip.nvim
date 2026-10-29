@@ -33,7 +33,7 @@ local DETAILS = {
 
 -- Short enough that the suite does not sit waiting for a debounce, long enough
 -- that a second render still lands inside it.
-vim.g.db_config = vim.tbl_extend("force", vim.g.db_config or {}, { schema_warm_debounce_ms = 20 })
+require("neogrip.config").setup({ schema_warm_debounce_ms = 20 })
 config.reload()
 
 local saved = {
@@ -264,6 +264,6 @@ check("the fixture snapshot is deleted again", vim.fn.filereadable(snapshot_path
 
 schema.details_ready, schema.columns = saved.details_ready, saved.columns
 schema.details, schema.sample = saved.details, saved.sample
-vim.g.db_config.schema_warm_debounce_ms = nil
+require("neogrip.config").setup({})
 config.reload()
 pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
