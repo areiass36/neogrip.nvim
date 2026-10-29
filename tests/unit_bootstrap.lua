@@ -50,11 +50,22 @@ vim.fn.mkdir(fake_jdk .. "/bin", "p")
 for _, name in ipairs({ "java", "javac" }) do
 	vim.fn.writefile({ "not a real binary" }, ("%s/bin/%s%s"):format(fake_jdk, name, platform.exe_suffix))
 end
-local saved = vim.env.NEOGRIP_TEST_JDK
-vim.env.NEOGRIP_TEST_JDK = fake_jdk
-support.check("a non-executable java file is still found", jdk.java() ~= nil, true)
+
+-- The downloaded JDK lives at jdk.dir, with no NEOGRIP_TEST_JDK override - the
+-- normal case. This is the regression that shipped: find_executable built
+-- { nil, M.dir } and ipairs never reached M.dir, so a good JDK read as missing.
+local saved_env = vim.env.NEOGRIP_TEST_JDK
+local saved_dir = jdk.dir
+vim.env.NEOGRIP_TEST_JDK = nil
+jdk.dir = fake_jdk
+support.check("a non-executable java file is found at jdk.dir with no env override", jdk.java() ~= nil, true)
 support.check("and javac likewise", jdk.javac() ~= nil, true)
 support.check("so the JDK reads as installed", jdk.installed(), true)
-vim.env.NEOGRIP_TEST_JDK = saved
+jdk.dir = saved_dir
+
+-- And the env override still takes precedence when it is set (the CI path).
+vim.env.NEOGRIP_TEST_JDK = fake_jdk
+support.check("NEOGRIP_TEST_JDK is honoured when present", jdk.java() ~= nil, true)
+vim.env.NEOGRIP_TEST_JDK = saved_env
 
 vim.fn.delete(temp_root, "rf")

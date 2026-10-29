@@ -53,7 +53,15 @@ M.dir = neogrip.data_dir .. "/jdk"
 --- tests can point NEOGRIP_TEST_JDK at an existing JDK to skip the download.
 --- @return string|nil
 local function find_executable(name)
-	local roots = { vim.env.NEOGRIP_TEST_JDK, M.dir }
+	-- Built without a nil hole on purpose: `{ vim.env.NEOGRIP_TEST_JDK, M.dir }`
+	-- becomes `{ nil, M.dir }` when the test override is unset - every real
+	-- user - and ipairs stops at that first nil, so M.dir was never checked
+	-- and a perfectly good JDK read as missing.
+	local roots = {}
+	if vim.env.NEOGRIP_TEST_JDK and vim.env.NEOGRIP_TEST_JDK ~= "" then
+		roots[#roots + 1] = vim.env.NEOGRIP_TEST_JDK
+	end
+	roots[#roots + 1] = M.dir
 	for _, root in ipairs(roots) do
 		if root and root ~= "" then
 			local candidates = {
