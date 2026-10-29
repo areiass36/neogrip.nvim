@@ -126,14 +126,19 @@ local function dispatch(handle)
 	end)
 
 	-- The server-side timeout is the real one; this only catches a process
-	-- that stopped answering.
-	handle.timer = vim.defer_fn(function()
-		if not handle.done then
-			neogrip.notify("the sidecar stopped answering; restarting it", vim.log.levels.WARN)
-			sidecar.disconnect(connection.id)
-			finish(handle, nil, { message = "timed out waiting for the sidecar" })
-		end
-	end, (request.timeout_ms or config.get().timeout_ms) + 10000)
+	-- that stopped answering. A timeout of 0 means "run as long as it takes"
+	-- (cancel by hand with :NGripCancel), so the watchdog does not arm either -
+	-- otherwise 0 would disable the server timeout but still kill at 10s.
+	local timeout_ms = request.timeout_ms or config.get().timeout_ms
+	if timeout_ms > 0 then
+		handle.timer = vim.defer_fn(function()
+			if not handle.done then
+				neogrip.notify("the sidecar stopped answering; restarting it", vim.log.levels.WARN)
+				sidecar.disconnect(connection.id)
+				finish(handle, nil, { message = "timed out waiting for the sidecar" })
+			end
+		end, timeout_ms + 10000)
+	end
 end
 
 function M._pump(connection_id)

@@ -41,3 +41,44 @@ check(
 	run_buffer({ "-- trailing", "  " }),
 	"[neogrip] no statement under the cursor"
 )
+
+support.describe("execute: timeout_ms = 0 runs without arming the watchdog")
+
+-- With a zero timeout the runner must not schedule the stopped-process
+-- watchdog; otherwise 0 would still kill the query at ~10s. A mock sidecar
+-- that never answers lets us prove nothing fires.
+local runner = require("neogrip.runner")
+local config = require("neogrip.config")
+local sidecar = require("neogrip.sidecar")
+
+config.setup({ timeout_ms = 0 })
+local saved_connected_to = sidecar.is_connected_to
+local saved_is_connected = sidecar.is_connected
+local saved_request = sidecar.request
+sidecar.is_connected_to = function()
+	return true
+end
+sidecar.is_connected = function()
+	return true
+end
+sidecar.request = function() end -- never calls back: the query "hangs"
+
+local fired = nil
+runner.run({
+	connection = { id = "__timeout_probe__", driver = "duckdb" },
+	sql = "select 1",
+	mode = "query",
+	limit = 1,
+}, function(_, err)
+	fired = err or {}
+end)
+-- The old watchdog would fire at ~10s (0 + 10000). Wait past that.
+vim.wait(11000, function()
+	return fired ~= nil
+end, 100)
+support.check("a zero timeout never trips the watchdog", fired, nil)
+
+sidecar.is_connected_to = saved_connected_to
+sidecar.is_connected = saved_is_connected
+sidecar.request = saved_request
+config.setup({})

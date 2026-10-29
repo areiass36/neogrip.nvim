@@ -7,6 +7,8 @@ M.defaults = {
 	-- Rows fetched per page. One extra row is always requested to learn whether
 	-- another page exists without paying for a count(*) (ADR-0014).
 	limit = 200,
+	-- Statement timeout, enforced on the server. Zero means no timeout: the
+	-- query runs as long as it takes and :NGripCancel stops it by hand.
 	timeout_ms = 30000,
 	-- Columns wider than this are truncated with an ellipsis in the grid; the
 	-- yanked and exported value is always the untruncated one.

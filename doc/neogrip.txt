@@ -171,7 +171,7 @@ Defaults, overridable through `setup(opts)` (each is documented where it
 lives, `lua/neogrip/config.lua`): >lua
     require("neogrip").setup({
       limit = 200,                   -- rows per result page
-      timeout_ms = 30000,            -- server-side statement timeout
+      timeout_ms = 30000,            -- server-side statement timeout (0 = none)
       max_column_width = 60,         -- grid truncation; yanks are whole
       null_text = "NULL",
       stripe_rows = true,
