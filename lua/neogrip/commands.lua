@@ -123,6 +123,50 @@ function M.setup()
 		end
 	end, { desc = "Open a query buffer against this buffer's connection" })
 
+	command("NGripResults", function()
+		local grid = require("neogrip.grid")
+		local bufnr = grid.current_buf()
+		if not bufnr then
+			return neogrip.notify("no result yet")
+		end
+		require("neogrip.grid.requery").materialise(bufnr)
+	end, { desc = "Query the current result with SQL (DuckDB)" })
+
+	command("NGripCsv", function(args)
+		local path = vim.fn.expand(args.args)
+		if vim.fn.filereadable(path) == 0 then
+			return neogrip.notify(("no such file: %s"):format(path), vim.log.levels.ERROR)
+		end
+		require("neogrip.grid.requery").query_csv(vim.fs.normalize(vim.fn.fnamemodify(path, ":p")))
+	end, { nargs = 1, complete = "file", desc = "Query a CSV file with SQL (DuckDB)" })
+
+	command("NGripExport", function()
+		local grid = require("neogrip.grid")
+		local bufnr = grid.current_buf()
+		if not bufnr then
+			return neogrip.notify("no result to export", vim.log.levels.WARN)
+		end
+		require("neogrip.grid.export").pick(bufnr)
+	end, { desc = "Export the current result as CSV or JSON" })
+
+	command(
+		"NGripKeep",
+		function(args)
+			local grid = require("neogrip.grid")
+			local bufnr = grid.current_buf()
+			local state = bufnr and grid.state(bufnr)
+			if not state then
+				return neogrip.notify("no result to keep", vim.log.levels.WARN)
+			end
+			local export = require("neogrip.grid.export")
+			local path = args.args ~= "" and vim.fn.expand(args.args)
+				or (vim.fn.getcwd() .. "/result-" .. os.date("%Y%m%d-%H%M%S") .. ".csv")
+			export.page_to_csv(state, path)
+			neogrip.notify(("kept as %s"):format(path))
+		end,
+		{ nargs = "?", complete = "file", desc = "Write the current result where it will not be cleaned up" }
+	)
+
 	command("NGripInit", function()
 		M.init_project()
 	end, { desc = "Create .nvim/database.json for this project" })

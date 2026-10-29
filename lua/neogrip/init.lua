@@ -56,6 +56,7 @@ function M.setup(opts)
 	require("neogrip.diagnostics").setup()
 	require("neogrip.buffer").setup()
 	require("neogrip.grid.highlight").setup()
+	require("neogrip.grid.requery").setup()
 	require("neogrip.commands").setup()
 end
 
