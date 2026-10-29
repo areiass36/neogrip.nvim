@@ -6,8 +6,13 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -45,7 +50,13 @@ public final class Main {
     private final AtomicReference<java.sql.Statement> running = new AtomicReference<>();
     /** A catalog sweep has no statement to cancel, so a cancel reaches it as a flag. */
     private final AtomicBoolean cancelled = new AtomicBoolean();
+    /** The worker methods that exist; catalog ones join with the schema phase. */
+    private static final java.util.Set<String> STATEMENT_METHODS =
+            java.util.Set.of("query", "exec", "validate", "export");
     private boolean initialized = false;
+    /** Set by connect, on the worker; read only on the worker after that. */
+    private Connection connection;
+    private Queries queries;
 
     public static void main(String[] args) throws Exception {
         BufferedReader input =
@@ -142,6 +153,22 @@ public final class Main {
         // query is in flight should still return that query's answer.
         cancelled.set(true);
         drain(worker);
+        if (connection != null) {
+            try {
+                // Never commit on the way out (ADR-0013); rollback is a no-op
+                // under autocommit and the right answer under a transaction.
+                if (!connection.getAutoCommit()) {
+                    connection.rollback();
+                }
+            } catch (SQLException ignored) {
+                // Shutting down anyway.
+            }
+            try {
+                connection.close();
+            } catch (SQLException ignored) {
+                // Shutting down anyway.
+            }
+        }
     }
 
     private boolean initialize(Object id, Map<?, ?> params) {
@@ -185,15 +212,46 @@ public final class Main {
     private void handle(Object id, String method, Map<?, ?> params) {
         StringBuilder response = new StringBuilder();
         try {
-            switch (method) {
-                // connect, statements and catalog methods land in later
-                // phases; the dispatch and threading shape is already final.
-                default -> Rpc.writeError(
-                        response, id, Rpc.METHOD_NOT_FOUND, "method not found: " + method, null);
+            if (method.equals("connect")) {
+                connect(response, id, params);
+            } else if (!STATEMENT_METHODS.contains(method)) {
+                // Unknown beats unconnected: the method will not exist later
+                // either, and the client should learn that first.
+                Rpc.writeError(response, id, Rpc.METHOD_NOT_FOUND, "method not found: " + method, null);
+            } else if (queries == null) {
+                Rpc.writeError(response, id, Rpc.INVALID_REQUEST, "not connected", null);
+            } else {
+                switch (method) {
+                    case "query" -> queries.query(
+                            response,
+                            id,
+                            string(params, "sql"),
+                            integer(params, "limit", 0),
+                            integer(params, "offset", 0),
+                            integer(params, "timeoutSeconds", 0));
+                    case "exec" -> queries.exec(
+                            response, id, string(params, "sql"), integer(params, "timeoutSeconds", 0));
+                    case "validate" -> queries.validate(response, id, string(params, "sql"));
+                    case "export" -> queries.export(
+                            response,
+                            id,
+                            string(params, "sql"),
+                            string(params, "path"),
+                            string(params, "format"),
+                            string(params, "nullMarker"),
+                            integer(params, "timeoutSeconds", 0));
+                    default -> throw new IllegalStateException("unreachable: " + method);
+                }
             }
-        } catch (Exception e) {
+        } catch (Queries.Refused e) {
+            response.setLength(0);
+            Rpc.writeError(response, id, Rpc.READONLY_REFUSED, e.getMessage(), null);
+        } catch (SQLException e) {
             // Whatever was written before the failure is half an object; the
             // error has to replace it, not follow it, or the line is not JSON.
+            response.setLength(0);
+            Errors.write(response, id, e);
+        } catch (Exception e) {
             response.setLength(0);
             Rpc.writeError(
                     response,
@@ -203,5 +261,101 @@ public final class Main {
                     null);
         }
         send(response.toString());
+    }
+
+    /**
+     * The one frame that carries secrets (ADR-0009): nothing in it is logged,
+     * echoed into a response, or written to stderr.
+     */
+    private void connect(StringBuilder response, Object id, Map<?, ?> params) throws SQLException {
+        if (connection != null) {
+            Rpc.writeError(response, id, Rpc.INVALID_REQUEST, "already connected", null);
+            return;
+        }
+        String url = string(params, "url");
+        Properties properties = new Properties();
+        if (params.get("properties") instanceof Map<?, ?> extra) {
+            for (Map.Entry<?, ?> entry : extra.entrySet()) {
+                properties.setProperty(String.valueOf(entry.getKey()), String.valueOf(entry.getValue()));
+            }
+        }
+        Map<?, ?> auth = params.get("auth") instanceof Map<?, ?> map ? map : Map.of();
+        String type = auth.get("type") instanceof String value ? value : "none";
+        switch (type) {
+            case "none" -> {
+                // Nothing to add: a file database, or a server that trusts us.
+            }
+            case "password" -> {
+                if (auth.get("user") instanceof String user) {
+                    properties.setProperty("user", user);
+                }
+                if (auth.get("password") instanceof String password) {
+                    properties.setProperty("password", password);
+                }
+            }
+            default -> {
+                Rpc.writeError(
+                        response, id, Rpc.AUTH_ERROR, "auth type not implemented yet: " + type, null);
+                return;
+            }
+        }
+
+        boolean readonly = Boolean.TRUE.equals(auth.get("readonly"))
+                || Boolean.TRUE.equals(params.get("readonly"));
+        connection = DriverManager.getConnection(url, properties);
+        if (readonly) {
+            try {
+                connection.setReadOnly(true);
+            } catch (SQLException ignored) {
+                // Only a hint in some drivers; the keyword check still refuses.
+            }
+        }
+        queries = new Queries(connection, running, readonly);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Object> capabilities = new LinkedHashMap<>();
+        try {
+            DatabaseMetaData meta = connection.getMetaData();
+            result.put("product", meta.getDatabaseProductName() + " " + meta.getDatabaseProductVersion());
+            result.put("driver", meta.getDriverName() + " " + meta.getDriverVersion());
+            capabilities.put("schemas", supports(meta::supportsSchemasInDataManipulation));
+            capabilities.put("catalogs", supports(meta::supportsCatalogsInDataManipulation));
+            capabilities.put("transactions", supports(meta::supportsTransactions));
+        } catch (SQLException ignored) {
+            // A driver that cannot describe itself is still usable.
+        }
+        capabilities.put("sql", true);
+        capabilities.put("cancellation", true);
+        result.put("capabilities", capabilities);
+        Rpc.writeResult(response, id, result);
+    }
+
+    @FunctionalInterface
+    private interface SqlFlag {
+        boolean get() throws SQLException;
+    }
+
+    private static boolean supports(SqlFlag flag) {
+        try {
+            return flag.get();
+        } catch (SQLException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static String string(Map<?, ?> params, String key) {
+        Object value = params.get(key);
+        return value instanceof String text ? text : "";
+    }
+
+    private static int integer(Map<?, ?> params, String key, int fallback) {
+        Object value = params.get(key);
+        if (value instanceof Long number) {
+            return (int) (long) number;
+        }
+        if (value instanceof Double number) {
+            return (int) (double) number;
+        }
+        return fallback;
     }
 }

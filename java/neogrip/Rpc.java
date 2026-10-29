@@ -30,6 +30,16 @@ public final class Rpc {
         }
     }
 
+    /**
+     * Open a result envelope so a large result can be streamed into it; the
+     * caller writes the result object and appends the closing brace.
+     */
+    public static void beginResult(StringBuilder out, Object id) {
+        out.append("{\"jsonrpc\":\"2.0\",\"id\":");
+        writeId(out, id);
+        out.append(",\"result\":");
+    }
+
     /** result is written through Json.writeValue: a Map, a List, a RawJson... */
     public static void writeResult(StringBuilder out, Object id, Object result) {
         out.append("{\"jsonrpc\":\"2.0\",\"id\":");
