@@ -28,6 +28,7 @@ local LIVE = {
 	"live_jdbc",
 	"live_flow",
 	"live_requery",
+	"live_tx",
 	"live_safety",
 	"live_schema",
 	"live_introspect",
