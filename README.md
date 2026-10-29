@@ -36,11 +36,68 @@ With lazy.nvim:
 
 `require("neogrip").setup(opts)` is the single entry point; the plugin does nothing before it is called.
 
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `:NGripRun [sql]` | Run a statement, or the one under the cursor |
+| `:NGripCancel` | Cancel the running query — a real server-side cancel |
+| `:NGripValidate` | Check the statement on the server without running it |
+| `:NGripUse <id>` / `:NGripWhich` | Pick the buffer's connection / explain which one applies |
+| `:NGripConnections` / `:NGripReload` | List / re-read the connection files |
+| `:NGripResults` | Query the current result with SQL (DuckDB views `r1`, `r2`, …, alias `last`) |
+| `:NGripCsv <file>` | Query any CSV file with SQL |
+| `:NGripExport` / `:NGripKeep [file]` | Export the result (CSV/JSON, page or everything) / keep the page as CSV |
+| `:NGripNewQuery` / `:NGripDisconnect[!]` | Open a query buffer / stop the sidecar(s) |
+| `:NGripInit` / `:NGripDoctor` | Write a starter project file / check the whole path |
+
 ## Keymaps
 
 The plugin defines **no keymaps** — not even behind an option. Every action is a `:NGrip*` command or a
-documented Lua function, and this section will carry a complete copy-paste recipe reproducing a sensible
-layout once the grid API lands.
+documented Lua function. A complete starting layout, to paste into your config and reshape:
+
+```lua
+-- Global, for SQL buffers.
+vim.keymap.set("n", "<leader>qq", "<cmd>NGripRun<cr>", { desc = "Run the statement under the cursor" })
+vim.keymap.set("n", "<leader>qx", "<cmd>NGripCancel<cr>", { desc = "Cancel the running query" })
+vim.keymap.set("n", "<leader>qc", "<cmd>NGripUse<cr>", { desc = "Pick a connection" })
+vim.keymap.set("n", "<leader>qr", "<cmd>NGripResults<cr>", { desc = "Query the result with SQL" })
+
+-- Buffer-local, inside the result grid.
+vim.api.nvim_create_autocmd("FileType", {
+	pattern = "neogrip-grid",
+	callback = function(event)
+		local actions = require("neogrip.grid.actions")
+		local function map(lhs, rhs, desc)
+			vim.keymap.set("n", lhs, rhs, { buffer = event.buf, nowait = true, desc = desc })
+		end
+		map("<Tab>", actions.next_column, "Next column")
+		map("<S-Tab>", actions.prev_column, "Previous column")
+		map("h", actions.prev_column, "Previous column")
+		map("l", actions.next_column, "Next column")
+		map("j", actions.down, "Next row")
+		map("k", actions.up, "Previous row")
+		map("0", actions.first_column, "First column")
+		map("$", actions.last_column, "Last column")
+		map("gg", actions.first_row, "First row")
+		map("G", actions.last_row, "Last row")
+		map("y", actions.yank_cell, "Yank cell")
+		map("Y", actions.yank_row, "Yank row as CSV")
+		map("s", actions.sort_asc, "Sort by this column")
+		map("S", actions.sort_desc, "Sort descending")
+		map("]p", actions.page_next, "Next page")
+		map("[p", actions.page_prev, "Previous page")
+		map("gf", actions.follow_fk, "Follow this foreign key")
+		map("<CR>", actions.show_document, "Show the whole document (Mongo)")
+		map("e", actions.export, "Export")
+		map("d", actions.materialise, "Query this result with SQL")
+		map("q", actions.close, "Close the grid")
+	end,
+})
+```
+
+A statusline component is available too: `require("neogrip.statusline").component()` renders
+`replica [RO][PROD]` for the current buffer — `[PROD]` being the one effect `production: true` has.
 
 ## What this is not
 
