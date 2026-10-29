@@ -10,9 +10,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import neogrip.Catalog;
-import neogrip.Queries;
 import neogrip.app.Session;
+import neogrip.db.catalog.Details;
+import neogrip.db.catalog.Introspect;
+import neogrip.db.catalog.Listings;
+import neogrip.db.catalog.NativeDdl;
+import neogrip.db.catalog.Snapshot;
 import neogrip.db.types.Types;
 import neogrip.rpc.Notifier;
 import neogrip.rpc.RpcLifecycle;
@@ -38,8 +41,14 @@ public final class Database implements RpcLifecycle {
     private final AtomicBoolean cancelled = new AtomicBoolean();
 
     private volatile Connection bound;
-    private volatile Queries queries;
-    private volatile Catalog catalog;
+    private volatile Statements statements;
+    private volatile Exports exports;
+    private volatile Transactions transactions;
+    private volatile Listings listings;
+    private volatile Snapshot snapshots;
+    private volatile Details tableDetails;
+    private volatile NativeDdl nativeDdl;
+    private volatile Introspect introspect;
 
     public Database(Session session, Notifier notifier, Worker worker) {
         this.session = session;
@@ -48,49 +57,47 @@ public final class Database implements RpcLifecycle {
         startTransactionWatchdog();
     }
 
-    /** The executors, bound to the live connection the first time it is used. */
-    private synchronized Queries queries() {
-        bind();
-        return queries;
-    }
-
-    private synchronized Catalog catalog() {
-        bind();
-        return catalog;
-    }
-
-    private void bind() {
+    /** The units, bound to the live connection the first time it is used. */
+    private synchronized Database bind() {
         Connection connection = session.connection();
         if (connection != bound) {
-            queries = new Queries(connection, running, session.readonly());
+            ReadonlyGuard guard = new ReadonlyGuard(session.readonly());
+            statements = new Statements(connection, running, guard);
+            exports = new Exports(connection, running, guard);
+            transactions = new Transactions(connection);
+            listings = new Listings(connection);
+            snapshots = new Snapshot(connection);
+            tableDetails = new Details(connection);
+            nativeDdl = new NativeDdl(connection, running, session.url());
             // The url and the properties go with it so a catalog sweep can
             // open connections of its own rather than take this one.
-            catalog = new Catalog(connection, cancelled, running, session.url(), session.properties());
+            introspect = new Introspect(connection, cancelled, session.url(), session.properties());
             bound = connection;
         }
+        return this;
     }
 
     // --- statements -------------------------------------------------------
 
     public Optional<Types.TxState> intercept(String sql) throws SQLException {
-        return queries().transaction(sql);
+        return bind().transactions.intercept(sql);
     }
 
     public Object query(String sql, int limit, int offset, int timeoutSeconds) throws SQLException {
-        return queries().query(sql, limit, offset, timeoutSeconds);
+        return bind().statements.query(sql, limit, offset, timeoutSeconds);
     }
 
     public Types.UpdateResult exec(String sql, int timeoutSeconds) throws SQLException {
-        return queries().exec(sql, timeoutSeconds);
+        return bind().statements.exec(sql, timeoutSeconds);
     }
 
     public void validate(String sql) throws SQLException {
-        queries().validate(sql);
+        bind().statements.validate(sql);
     }
 
     public Types.ExportResult export(String sql, String path, String format, String nullMarker, int timeoutSeconds)
             throws SQLException, IOException {
-        return queries().export(sql, path, format, nullMarker, timeoutSeconds);
+        return bind().exports.export(sql, path, format, nullMarker, timeoutSeconds);
     }
 
     /**
@@ -116,36 +123,36 @@ public final class Database implements RpcLifecycle {
     // --- catalog ----------------------------------------------------------
 
     public Types.Rows<Types.Named> catalogs() throws SQLException {
-        return catalog().catalogs();
+        return bind().listings.catalogs();
     }
 
     public Types.Rows<Types.Named> schemas(String catalogName) throws SQLException {
-        return catalog().schemas(catalogName);
+        return bind().listings.schemas(catalogName);
     }
 
     public Types.Rows<Types.TableRow> tables(String catalogName, String schema, String pattern)
             throws SQLException {
-        return catalog().tables(catalogName, schema, pattern);
+        return bind().listings.tables(catalogName, schema, pattern);
     }
 
     public Types.Rows<?> columns(String catalogName, String schema, String table) throws SQLException {
-        return catalog().columns(catalogName, schema, table);
+        return bind().listings.columns(catalogName, schema, table);
     }
 
     public Types.Rows<Types.TableWithColumns> snapshot(String catalogName, String schema) throws SQLException {
-        return catalog().snapshot(catalogName, schema);
+        return bind().snapshots.snapshot(catalogName, schema);
     }
 
     public Object details(String catalogName, String schema, String table) throws SQLException {
-        return catalog().details(catalogName, schema, table);
+        return bind().tableDetails.details(catalogName, schema, table);
     }
 
     public Object ddl(String catalogName, String schema, String table) throws SQLException {
-        return catalog().ddl(catalogName, schema, table);
+        return bind().tableDetails.ddl(catalogName, schema, table);
     }
 
     public Types.Ddl nativeDdl(String catalogName, String schema, String table) {
-        return catalog().nativeDdl(catalogName, schema, table);
+        return bind().nativeDdl.nativeDdl(catalogName, schema, table);
     }
 
     public Types.IntrospectSummary introspect(
@@ -154,7 +161,7 @@ public final class Database implements RpcLifecycle {
         // The flag is shared with a running statement's cancel, so a cancel
         // sent before this sweep must not end it on sight.
         cancelled.set(false);
-        return catalog().introspect(catalogName, path, parallelism, budgetMs, details);
+        return bind().introspect.introspect(catalogName, path, parallelism, budgetMs, details);
     }
 
     // --- the idle-transaction watchdog (ADR-0013) -------------------------
@@ -176,7 +183,7 @@ public final class Database implements RpcLifecycle {
     }
 
     private void rollbackIfIdle() {
-        Queries open = queries;
+        Transactions open = transactions;
         long idleMs = session.transactionIdleMs();
         if (open == null
                 || idleMs <= 0
@@ -185,7 +192,7 @@ public final class Database implements RpcLifecycle {
             return;
         }
         try {
-            open.rollbackIdle();
+            open.rollback();
         } catch (SQLException ignored) {
             // The connection will report its own state on the next statement.
         }
@@ -196,10 +203,10 @@ public final class Database implements RpcLifecycle {
     public void onShutdown() {
         // Never commit on the way out (ADR-0013); this runs before the Session
         // closes the connection, because shutdown hooks fire in reverse order.
-        Queries open = queries;
+        Transactions open = transactions;
         if (open != null && open.inTransaction()) {
             try {
-                open.rollbackIdle();
+                open.rollback();
             } catch (SQLException ignored) {
                 // Shutting down anyway.
             }

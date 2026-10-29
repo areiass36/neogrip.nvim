@@ -1,4 +1,4 @@
-package neogrip;
+package neogrip.db;
 
 import java.sql.SQLException;
 import java.util.LinkedHashMap;

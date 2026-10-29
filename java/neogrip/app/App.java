@@ -2,9 +2,9 @@ package neogrip.app;
 
 import java.sql.SQLException;
 import java.util.Map;
-import neogrip.Errors;
-import neogrip.Queries;
 import neogrip.db.Database;
+import neogrip.db.Errors;
+import neogrip.db.ReadonlyGuard;
 import neogrip.rpc.RpcException;
 import neogrip.rpc.RpcServer;
 import neogrip.rpc.Wire;
@@ -30,7 +30,7 @@ public final class App {
                         ConnectHandler.class,
                         StatementHandlers.class,
                         CatalogHandlers.class)
-                .mapException(Queries.Refused.class, e -> RpcException.of(Wire.READONLY_REFUSED, e))
+                .mapException(ReadonlyGuard.Refused.class, e -> RpcException.of(Wire.READONLY_REFUSED, e))
                 .mapException(SQLException.class, Errors::toRpcException)
                 .drainSeconds(30)
                 .build()

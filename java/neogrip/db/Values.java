@@ -1,4 +1,4 @@
-package neogrip;
+package neogrip.db;
 
 import java.math.BigDecimal;
 import java.sql.Array;

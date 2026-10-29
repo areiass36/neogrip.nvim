@@ -1,4 +1,4 @@
-package neogrip;
+package neogrip.db;
 
 /** RFC 4180 fields, for the streaming export. */
 public final class Csv {

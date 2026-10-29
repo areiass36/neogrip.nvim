@@ -1,4 +1,4 @@
-package neogrip;
+package neogrip.db;
 
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
