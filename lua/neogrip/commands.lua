@@ -123,6 +123,67 @@ function M.setup()
 		end
 	end, { desc = "Open a query buffer against this buffer's connection" })
 
+	command("NGripExplore", function()
+		require("neogrip.explorer").open({})
+	end, { desc = "Explore the schema" })
+
+	command("NGripSchemaReload", function()
+		-- Only this buffer's connection. Passing nil would clear every
+		-- connection's catalog, which is not what "reload" asks for.
+		local connection = current_connection()
+		if not connection then
+			return
+		end
+		require("neogrip.schema").invalidate(connection)
+		neogrip.notify(("%s: cached catalog cleared"):format(connection.name))
+	end, { desc = "Clear the cached catalog for this buffer's connection" })
+
+	command("NGripIntrospect", function(args)
+		local connection = current_connection()
+		if not connection then
+			return
+		end
+		local schema = require("neogrip.schema")
+		-- The catalog the explorer would open on, so what is swept is what the
+		-- explorer then reads. An argument overrides it.
+		local catalog = require("neogrip.explorer").entry_point(connection).context.catalog
+		if args.args ~= "" then
+			catalog = args.args
+		end
+
+		if args.bang then
+			if not schema.introspecting(connection, catalog) then
+				return neogrip.notify("nothing is being introspected")
+			end
+			-- The same cancel the runner uses: it reaches the sweep's own
+			-- threads as well as a running statement.
+			require("neogrip.sidecar").request(connection, "cancel", {}, function() end)
+			return neogrip.notify("cancelling the introspect")
+		end
+
+		neogrip.notify(("introspecting %s%s..."):format(connection.name, catalog and ("/" .. catalog) or ""))
+		schema.introspect(connection, catalog, {}, function(summary, err)
+			if err then
+				return neogrip.notify(("introspect failed: %s"):format(err), vim.log.levels.ERROR)
+			end
+			neogrip.notify(
+				("%s: %d schemas, %d tables, %d columns in %d ms%s%s"):format(
+					connection.name,
+					summary.schemas,
+					summary.tables,
+					summary.columns,
+					summary.elapsed_ms,
+					summary.parallel and "" or " (one connection)",
+					summary.partial and " -- definitions incomplete, run it again to finish" or ""
+				)
+			)
+		end)
+	end, {
+		nargs = "?",
+		bang = true,
+		desc = "Sweep this buffer's whole database and keep it (! cancels)",
+	})
+
 	command("NGripResults", function()
 		local grid = require("neogrip.grid")
 		local bufnr = grid.current_buf()

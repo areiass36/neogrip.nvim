@@ -54,6 +54,11 @@ function M.setup(opts)
 	require("neogrip.resolve").setup()
 	require("neogrip.runner").setup()
 	require("neogrip.diagnostics").setup()
+	-- document registers the neogrip:// reader and must come before buffer:
+	-- attach() may open a definition the moment a SQL buffer resolves.
+	require("neogrip.document").setup()
+	require("neogrip.dialect").setup()
+	require("neogrip.completion").setup()
 	require("neogrip.buffer").setup()
 	require("neogrip.grid.highlight").setup()
 	require("neogrip.grid.requery").setup()
