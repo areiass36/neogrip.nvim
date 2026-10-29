@@ -5,9 +5,12 @@ local support = require("tests.support")
 
 local UNIT = {
 	"unit_rpc",
+	"unit_bootstrap",
 }
 
-local LIVE = {}
+local LIVE = {
+	"live_protocol",
+}
 
 local unit_only = false
 for _, argument in ipairs(vim.v.argv) do
