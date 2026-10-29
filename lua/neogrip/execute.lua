@@ -62,6 +62,128 @@ local function refused(connection, sql)
 	return false
 end
 
+--- Prepare one statement and run it, showing the grid when `show` is set.
+--- Pulled out of M.run so a multi-statement selection can drive it once per
+--- statement in sequence.
+--- @param p table { bufnr, connection, statement, limit, offset, order_by, descending, focus, show, label, on_done }
+local function execute_statement(p)
+	local bufnr, connection = p.bufnr, p.connection
+	-- No driver wants the terminator, and Trino refuses a statement that
+	-- carries one. A statement from the splitter never has it; one typed at
+	-- :NGripRun can.
+	local sql = vim.trim((p.statement.text:gsub(";%s*$", "")))
+	-- The statement as the user wrote it, kept aside before anything is
+	-- wrapped around it below. `rerun` sends this back through here with the
+	-- sort it is re-applying, so it has to be the unwrapped text: a statement
+	-- that arrived already wrapped would be wrapped again on every page step
+	-- and every change of sort, each layer reusing the same alias.
+	local base_sql = sql
+
+	if p.order_by then
+		-- Sorting is the server's job so it covers every page, not just the
+		-- rows already fetched. Quoting is the schema layer's job once it is
+		-- ported; doubled quotes cover the engines in play until then.
+		local quoted = '"' .. tostring(p.order_by):gsub('"', '""') .. '"'
+		local schema_ok, schema = pcall(require, "neogrip.schema")
+		if schema_ok then
+			quoted = schema.quote(connection.driver, p.order_by)
+		end
+		sql = ("SELECT * FROM (%s) AS _neogrip_s ORDER BY %s %s"):format(
+			sql,
+			quoted,
+			p.descending and "DESC" or "ASC"
+		)
+	end
+
+	-- No LIMIT is spliced into the statement: the driver caps the rows
+	-- (setMaxRows) and the runner skips the offset, which works the same
+	-- whatever the dialect spells it (ADR-0014).
+	local handle
+	handle = runner.run({
+		connection = connection,
+		sql = sql,
+		mode = "query",
+		limit = p.limit,
+		offset = p.offset or 0,
+	}, function(result, err)
+		in_flight[bufnr] = nil
+		if err then
+			if err.cancelled then
+				return neogrip.notify("cancelled")
+			end
+			neogrip.notify((p.label and p.label .. ": " or "") .. err.message, vim.log.levels.ERROR)
+			diagnostics.from_error(bufnr, p.statement, err)
+			return
+		end
+		diagnostics.clear(bufnr)
+		if p.show then
+			result.base_sql = base_sql
+			result.order_by = p.order_by
+			result.descending = p.descending
+			grid.show(result, { origin_buf = bufnr, statement = p.statement, focus = p.focus })
+		end
+		if p.on_done then
+			p.on_done(result)
+		end
+	end)
+	in_flight[bufnr] = handle
+	start_progress(connection, handle)
+end
+
+--- One line describing what a statement did, for the ones in a sequence whose
+--- result does not reach the grid.
+local function summarise(label, result)
+	if result.rows_written then
+		return ("%s: wrote %d rows"):format(label, result.rows_written)
+	end
+	if result.update_count and result.update_count >= 0 then
+		return ("%s: %d rows affected"):format(label, result.update_count)
+	end
+	return ("%s: %d rows%s"):format(label, #(result.rows or {}), result.has_more and "+" or "")
+end
+
+--- Run several statements against one connection one after another. The driver
+--- takes a single statement per call - Trino rejects even two separated by a
+--- ';' with "mismatched input ';'" - so a selection that holds more than one is
+--- a sequence, exactly as a SQL console runs it: each in turn, stopping at the
+--- first error, with only the last one's rows shown in the grid.
+local function run_sequence(bufnr, connection, outer, parts, opts)
+	local total = #parts
+	local function step(index)
+		local part = parts[index]
+		local label = ("statement %d/%d"):format(index, total)
+		if refused(connection, part.text) then
+			return
+		end
+		local last = index == total
+		execute_statement({
+			bufnr = bufnr,
+			connection = connection,
+			statement = {
+				text = part.text,
+				start_line = outer.start_line,
+				end_line = outer.end_line,
+			},
+			limit = opts.limit,
+			offset = 0,
+			focus = last and opts.focus or false,
+			show = last,
+			label = label,
+			on_done = function(result)
+				if last then
+					if opts.on_done then
+						opts.on_done(result)
+					end
+				else
+					neogrip.notify(summarise(label, result))
+					step(index + 1)
+				end
+			end,
+		})
+	end
+	step(1)
+end
+
 --- @param opts table|nil { bufnr, statement, visual, limit, offset, order_by, descending, on_done }
 function M.run(opts)
 	opts = opts or {}
@@ -85,71 +207,40 @@ function M.run(opts)
 
 	flash(bufnr, statement)
 
+	local settings = config.get()
+	local limit = opts.limit or connection.limit or settings.limit
+
+	-- A selection can hold several statements; one from the cursor or from a
+	-- rerun (paging, sorting) is always a single one. Splitting here is cheap
+	-- and leaves the single case untouched, since a lone statement splits into
+	-- one part. More than one is run as a sequence. The guards keep a rerun -
+	-- which carries its own single base_sql plus an offset or a sort - on the
+	-- single path no matter what.
+	local parts = split.statements(statement.text, vim.b[bufnr].neogrip_dialect)
+	if #parts > 1 and not opts.statement and not opts.order_by and (opts.offset or 0) == 0 then
+		return run_sequence(bufnr, connection, statement, parts, {
+			limit = limit,
+			focus = opts.focus,
+			on_done = opts.on_done,
+		})
+	end
+
 	if refused(connection, statement.text) then
 		return
 	end
 
-	local settings = config.get()
-	local limit = opts.limit or connection.limit or settings.limit
-	local offset = opts.offset or 0
-	-- No driver wants the terminator, and Trino refuses a statement that
-	-- carries one. A statement from the splitter never has it; one typed at
-	-- :NGripRun can.
-	local sql = vim.trim((statement.text:gsub(";%s*$", "")))
-	-- The statement as the user wrote it, kept aside before anything is
-	-- wrapped around it below. `rerun` sends this back through here with the
-	-- sort it is re-applying, so it has to be the unwrapped text: a statement
-	-- that arrived already wrapped would be wrapped again on every page step
-	-- and every change of sort, each layer reusing the same alias.
-	local base_sql = sql
-
-	if opts.order_by then
-		-- Sorting is the server's job so it covers every page, not just the
-		-- rows already fetched. Quoting is the schema layer's job once it is
-		-- ported; doubled quotes cover the engines in play until then.
-		local quoted = '"' .. tostring(opts.order_by):gsub('"', '""') .. '"'
-		local schema_ok, schema = pcall(require, "neogrip.schema")
-		if schema_ok then
-			quoted = schema.quote(connection.driver, opts.order_by)
-		end
-		sql = ("SELECT * FROM (%s) AS _neogrip_s ORDER BY %s %s"):format(
-			sql,
-			quoted,
-			opts.descending and "DESC" or "ASC"
-		)
-	end
-
-	-- No LIMIT is spliced into the statement: the driver caps the rows
-	-- (setMaxRows) and the runner skips the offset, which works the same
-	-- whatever the dialect spells it (ADR-0014).
-	local handle
-	handle = runner.run({
+	execute_statement({
+		bufnr = bufnr,
 		connection = connection,
-		sql = sql,
-		mode = "query",
+		statement = statement,
 		limit = limit,
-		offset = offset,
-	}, function(result, err)
-		in_flight[bufnr] = nil
-		if err then
-			if err.cancelled then
-				return neogrip.notify("cancelled")
-			end
-			neogrip.notify(err.message, vim.log.levels.ERROR)
-			diagnostics.from_error(bufnr, statement, err)
-			return
-		end
-		diagnostics.clear(bufnr)
-		result.base_sql = base_sql
-		result.order_by = opts.order_by
-		result.descending = opts.descending
-		grid.show(result, { origin_buf = bufnr, statement = statement, focus = opts.focus })
-		if opts.on_done then
-			opts.on_done(result)
-		end
-	end)
-	in_flight[bufnr] = handle
-	start_progress(connection, handle)
+		offset = opts.offset or 0,
+		order_by = opts.order_by,
+		descending = opts.descending,
+		focus = opts.focus,
+		show = true,
+		on_done = opts.on_done,
+	})
 end
 
 function M.cancel(bufnr)

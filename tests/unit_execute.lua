@@ -82,3 +82,50 @@ sidecar.is_connected_to = saved_connected_to
 sidecar.is_connected = saved_is_connected
 sidecar.request = saved_request
 config.setup({})
+
+support.describe("execute: a visual selection of several statements runs them in sequence")
+
+-- A selection can hold more than one statement; the driver takes one per call
+-- (Trino rejects even two separated by ';'). The selection must therefore be
+-- split and run in order, each statement carrying no terminator.
+local resolve = require("neogrip.resolve")
+local grid = require("neogrip.grid")
+
+local saved_for_buf = resolve.for_buf
+local saved_runner_run = runner.run
+local saved_grid_show = grid.show
+
+resolve.for_buf = function()
+	return { id = "__seq_probe__", name = "probe", driver = "postgres", readonly = false }, nil
+end
+
+local sent = {}
+runner.run = function(request, callback)
+	sent[#sent + 1] = request.sql
+	callback({ columns = {}, rows = {}, has_more = false }, nil)
+	return { done = true }
+end
+grid.show = function() end
+
+local seqbuf = vim.api.nvim_create_buf(false, true)
+vim.bo[seqbuf].filetype = "sql"
+vim.api.nvim_buf_set_lines(seqbuf, 0, -1, false, { "select 1;", "select 2;" })
+vim.api.nvim_set_current_buf(seqbuf)
+vim.api.nvim_buf_set_mark(seqbuf, "<", 1, 0, {})
+vim.api.nvim_buf_set_mark(seqbuf, ">", 2, 8, {})
+
+local prev_notify = vim.notify
+vim.notify = function() end
+execute.run({ bufnr = seqbuf, visual = true })
+vim.wait(500, function()
+	return #sent >= 2
+end, 10)
+vim.notify = prev_notify
+
+support.check("both statements were sent", #sent, 2)
+support.check("the first carried no terminator", sent[1], "select 1")
+support.check("the second carried no terminator", sent[2], "select 2")
+
+resolve.for_buf = saved_for_buf
+runner.run = saved_runner_run
+grid.show = saved_grid_show
