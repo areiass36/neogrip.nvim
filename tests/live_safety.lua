@@ -118,6 +118,33 @@ else
 	)
 end
 
+support.describe("live/safety: cancellation reaches the server")
+if not support.reachable(pg) then
+	note("skipped")
+else
+	local runner = require("neogrip.runner")
+	local outcome = nil
+	local handle = runner.run(
+		{ connection = pg, sql = "select pg_sleep(30)", mode = "query", limit = 1 },
+		function(_, err)
+			outcome = err or {}
+		end
+	)
+	-- Give the statement time to actually reach the server before cancelling.
+	vim.wait(1000, function()
+		return false
+	end, 100)
+	local started = vim.uv.now()
+	runner.cancel(handle)
+	support.wait(function()
+		return outcome ~= nil
+	end, 10000)
+	check("the cancel comes back as cancelled", outcome and outcome.cancelled, true)
+	check("and does not wait out the statement", (vim.uv.now() - started) < 10000, true)
+	-- The connection survives a cancel: the next query answers.
+	check("the connection is still usable", support.scalar(pg, "select 41 + 1"), 42)
+end
+
 support.describe("live/safety: a read-only connection refuses a write, with no prompt")
 if not support.reachable(pg) then
 	note("skipped")

@@ -33,3 +33,4 @@ in the author's Neovim configuration; where the two disagreed, the record states
 | 0022 | [Language services are an in-process Lua LSP fed by the swept catalog](0022-in-process-lua-lsp.md) | Proposed |
 | 0023 | [Tests are flat headless scripts in unit and live lists; live tests skip when unreachable](0023-test-strategy.md) | Accepted |
 | 0024 | [User commands are prefixed NGrip](0024-ngrip-prefix.md) | Accepted |
+| 0025 | [The MongoDB wrapper is DataGrip's mongo-jdbc-driver 1.21](0025-mongodb-wrapper-chosen.md) | Accepted |
