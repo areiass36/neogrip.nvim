@@ -13,6 +13,7 @@ local UNIT = {
 	"unit_connections",
 	"unit_grid",
 	"unit_scratch",
+	"unit_execute",
 	"unit_identifier",
 	"unit_dialect",
 	"unit_store",

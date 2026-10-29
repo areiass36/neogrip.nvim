@@ -68,7 +68,10 @@ function M.run(opts)
 	local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
 	local statement = opts.statement or (opts.visual and split.selection(bufnr)) or split.at_cursor(bufnr)
 
-	if not statement or vim.trim(statement.text) == "" then
+	-- A buffer that is only comments has no statement to run; sending it would
+	-- make the server answer with its own "no statements" error, which reads
+	-- as a failure rather than as "there was nothing here".
+	if not statement or classify.strip_leading_comments(statement.text) == "" then
 		neogrip.notify("no statement under the cursor", vim.log.levels.WARN)
 		return
 	end
