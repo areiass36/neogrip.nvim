@@ -10,6 +10,10 @@ local M = {}
 
 M.state_dir = vim.fn.stdpath("state") .. "/neogrip"
 
+-- Downloaded artifacts (JDK, driver jars) and compiled sidecar classes live
+-- here, apart from state, so wiping one never costs the other.
+M.data_dir = vim.fn.stdpath("data") .. "/neogrip"
+
 -- SQL NULL. A unique table rather than nil (which would leave a hole in a row
 -- array) and rather than "" (which is a different value, and saying otherwise
 -- turns a correct "where x is null" into a wrong one).
