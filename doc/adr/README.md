@@ -38,3 +38,4 @@ in the author's Neovim configuration; where the two disagreed, the record states
 | 0027 | [Sidecar methods are annotated functions returning typed records](0027-annotated-rpc-methods.md) | Accepted |
 | 0028 | [Every request runs on its own thread; the session is a lock](0028-virtual-threads-session-lock.md) | Accepted |
 | 0029 | [MongoDB metadata through the wrapper is best-effort](0029-mongodb-metadata-is-best-effort.md) | Accepted |
+| 0030 | [A selection of several statements runs them in sequence](0030-selection-runs-statements-in-sequence.md) | Accepted |
