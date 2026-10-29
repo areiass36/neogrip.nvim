@@ -99,9 +99,10 @@ jobs:
           # nvim's own exit code is unreliable here: in headless -l mode it
           # reports non-zero when a live suite leaves container-engine child
           # processes open at exit (the Mongo wrapper's JVM lingers past
-          # SIGTERM), even with every check green. So the gate is the suite's
-          # own reported result, not the process code.
-          nvim --headless -u tests/minimal.lua -l tests/run.lua | tee live.log || true
+          # SIGTERM), even with every check green. Redirect to a file and
+          # ignore that code; the gate is the suite's own reported result.
+          nvim --headless -u tests/minimal.lua -l tests/run.lua > live.log 2>&1 || true
+          cat live.log
           # The suite ran to its summary with zero failures...
           grep -qE "[0-9]+ checks, 0 failures" live.log
           # ...and actually reached the servers, so skips did not go total.
