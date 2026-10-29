@@ -57,8 +57,8 @@ public final class Listings {
         // answers with "BASE TABLE", others with "TABLE", and a type the driver
         // does not recognise silently returns nothing. So everything is
         // requested and the system objects are dropped here.
-        try (ResultSet rows = Metadata.listTables(
-                meta, Metadata.orNull(catalog), Metadata.orNull(Metadata.literal(meta, schema)), namePattern)) {
+        try (ResultSet rows =
+                meta.getTables(Metadata.orNull(catalog), Metadata.orNull(Metadata.literal(meta, schema)), namePattern, null)) {
             while (rows.next() && list.size() < Snapshot.LIMIT) {
                 String tableType = rows.getString("TABLE_TYPE");
                 if (Metadata.isSystem(tableType)) {

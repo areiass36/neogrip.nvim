@@ -108,6 +108,10 @@ function M.launch(opts, on_ready)
 		"-XX:+UseSerialGC",
 		"-Xss4m",
 		"-Dfile.encoding=UTF-8",
+		-- The MongoDB wrapper sorts sampled collections with a comparator that
+		-- violates its contract, which TimSort rejects outright; the legacy
+		-- merge sort does not enforce the contract, so metadata listing works.
+		"-Djava.util.Arrays.useLegacyMergeSort=true",
 		"-cp",
 		classpath,
 		"neogrip.app.App",

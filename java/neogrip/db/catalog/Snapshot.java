@@ -64,8 +64,8 @@ public final class Snapshot {
     static void sweepSchema(
             SchemaBody body, DatabaseMetaData meta, String catalog, int tableLimit, int columnLimit)
             throws SQLException {
-        try (ResultSet rows = Metadata.listTables(
-                meta, Metadata.orNull(catalog), Metadata.orNull(Metadata.literal(meta, body.pattern)), "%")) {
+        try (ResultSet rows =
+                meta.getTables(Metadata.orNull(catalog), Metadata.orNull(Metadata.literal(meta, body.pattern)), "%", null)) {
             while (rows.next() && body.kinds.size() < tableLimit) {
                 if (Metadata.isSystem(rows.getString("TABLE_TYPE")) || !Metadata.isRowFor(rows, "TABLE_SCHEM", body.pattern)) {
                     continue;

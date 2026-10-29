@@ -17,25 +17,6 @@ import neogrip.db.types.Types;
 public final class Metadata {
     private Metadata() {}
 
-    /**
-     * getTables, with one retry: the MongoDB wrapper sorts sampled collections
-     * with a comparator TimSort occasionally rejects ("Comparison method
-     * violates its general contract"), and the second attempt settles it. Any
-     * other runtime failure propagates untouched.
-     */
-    static java.sql.ResultSet listTables(
-            DatabaseMetaData meta, String catalog, String schemaPattern, String namePattern)
-            throws SQLException {
-        try {
-            return meta.getTables(catalog, schemaPattern, namePattern, null);
-        } catch (IllegalArgumentException flaky) {
-            if (flaky.getMessage() == null || !flaky.getMessage().contains("Comparison method")) {
-                throw flaky;
-            }
-            return meta.getTables(catalog, schemaPattern, namePattern, null);
-        }
-    }
-
     static String orNull(String value) {
         return value == null || value.isEmpty() ? null : value;
     }
