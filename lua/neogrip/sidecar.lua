@@ -141,4 +141,150 @@ function M.stop(sidecar)
 	end, 500)
 end
 
+-- One process per configured connection (ADR-0003), keyed by id. Each entry
+-- remembers the url it connected to, because the explorer can re-point a
+-- connection at another database and the process must be replaced, not reused.
+local processes = {}
+
+--- JDK present, sidecar compiled, and this driver's jar installed.
+--- @param on_done fun(jar: string|nil, err: string|nil)
+function M.ensure_driver(driver, on_done)
+	M.ensure(function(ok, err)
+		if not ok then
+			return on_done(nil, err)
+		end
+		require("neogrip.bootstrap.jdbc").ensure(driver, on_done)
+	end)
+end
+
+--- @return boolean connected to this exact connection, url included
+function M.is_connected_to(connection)
+	local entry = processes[connection.id]
+	if not entry or entry.sidecar.exited then
+		return false
+	end
+	local url = require("neogrip.dsn").build(connection)
+	return entry.url == url
+end
+
+--- Connected under this id at all; is_connected_to is the url-aware check and
+--- the one a caller about to send statements must use.
+function M.is_connected(id)
+	local entry = processes[id]
+	return entry ~= nil and not entry.sidecar.exited
+end
+
+--- Open a connection's process and connect it, replacing a process bound to a
+--- different url. The auth table is the resolved one from secrets.resolve and
+--- is never logged (ADR-0009).
+--- @param on_done fun(ok: boolean, err: table|string|nil)
+function M.connect(connection, auth, on_done)
+	local dsn = require("neogrip.dsn")
+	local url, url_err = dsn.build(connection)
+	if not url then
+		return on_done(false, url_err)
+	end
+
+	local existing = processes[connection.id]
+	if existing and not existing.sidecar.exited then
+		if existing.url == url then
+			return on_done(true, nil)
+		end
+		M.disconnect(connection.id)
+	end
+
+	M.ensure_driver(connection.driver, function(jar, err)
+		if not jar then
+			return on_done(false, err)
+		end
+		M.launch({
+			jar = jar,
+			handlers = {
+				on_notification = function(method, params)
+					if method == "status" and params and params.message then
+						neogrip.notify(("%s: %s"):format(connection.name, params.message))
+					end
+				end,
+				on_exit = function()
+					processes[connection.id] = nil
+				end,
+			},
+		}, function(launched, launch_err)
+			if not launched then
+				return on_done(false, launch_err)
+			end
+			launched:request("connect", {
+				url = url,
+				properties = dsn.properties(connection),
+				auth = auth,
+				readonly = connection.readonly or false,
+			}, function(result, connect_err)
+				if connect_err then
+					M.stop(launched)
+					return on_done(false, connect_err)
+				end
+				processes[connection.id] = {
+					sidecar = launched,
+					url = url,
+					product = result.product,
+					driver = result.driver,
+					capabilities = result.capabilities or {},
+				}
+				on_done(true, nil)
+			end)
+		end)
+	end)
+end
+
+--- Send a request on a connection's live process.
+function M.request(connection, method, params, callback)
+	local entry = processes[connection.id]
+	if not entry or entry.sidecar.exited then
+		return callback(nil, { code = protocol.ERRORS.client_closed, message = "not connected" })
+	end
+	return entry.sidecar:request(method, params, callback)
+end
+
+--- What :NGripDoctor shows about a live connection.
+function M.info(id)
+	local entry = processes[id]
+	if not entry then
+		return nil
+	end
+	return {
+		product = entry.product,
+		driver = entry.driver,
+		capabilities = entry.capabilities,
+		stderr = entry.sidecar:stderr(),
+		pid = entry.sidecar.process and entry.sidecar.process.pid,
+	}
+end
+
+--- @return string[] ids of the connections with a live process
+function M.active()
+	local ids = {}
+	for id, entry in pairs(processes) do
+		if not entry.sidecar.exited then
+			ids[#ids + 1] = id
+		end
+	end
+	table.sort(ids)
+	return ids
+end
+
+function M.disconnect(id)
+	local entry = processes[id]
+	processes[id] = nil
+	if entry then
+		M.stop(entry.sidecar)
+	end
+end
+
+function M.disconnect_all()
+	local ids = vim.tbl_keys(processes)
+	for _, id in ipairs(ids) do
+		M.disconnect(id)
+	end
+end
+
 return M
