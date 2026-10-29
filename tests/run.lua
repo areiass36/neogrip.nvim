@@ -6,10 +6,18 @@ local support = require("tests.support")
 local UNIT = {
 	"unit_rpc",
 	"unit_bootstrap",
+	"unit_sql",
+	"unit_codecs",
+	"unit_dsn",
+	"unit_errors",
+	"unit_connections",
+	"unit_grid",
 }
 
 local LIVE = {
 	"live_protocol",
+	"live_jdbc",
+	"live_flow",
 }
 
 local unit_only = false
