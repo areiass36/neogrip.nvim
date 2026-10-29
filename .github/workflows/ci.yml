@@ -58,9 +58,45 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - name: Cache driver jars
+        uses: actions/cache@v4
+        with:
+          path: |
+            .testdata/nvim/neogrip/jdbc
+            .testdata/nvim-data/neogrip/jdbc
+          key: jdbc-${{ hashFiles('lua/neogrip/bootstrap/jdbc.lua') }}
       - name: Run unit and live suites
         # The JDK comes from setup-java so CI never downloads 190 MB; live
-        # suites that need a database server skip on runners without one.
+        # suites that need a database server skip on runners without one, and
+        # the DuckDB-backed ones run everywhere - real sidecar coverage on all
+        # three platforms, including the Windows EOF-termination path.
         env:
           NEOGRIP_TEST_JDK: ${{ env.JAVA_HOME }}
+          XDG_DATA_HOME: ${{ github.workspace }}/.testdata
         run: nvim --headless -u tests/minimal.lua -l tests/run.lua
+
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: v0.12.1
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Start database servers
+        run: tests/containers.sh up
+      - name: Run the full suite against real servers
+        env:
+          NEOGRIP_TEST_JDK: ${{ env.JAVA_HOME }}
+          XDG_DATA_HOME: ${{ github.workspace }}/.testdata
+          NVIM_DB_TEST_PW: "p@ss:w/rd#1"
+          NVIM_DB_TEST_MSSQL_PW: "Str0ng:P/ss#1"
+        run: |
+          nvim --headless -u tests/minimal.lua -l tests/run.lua | tee live.log
+          # Skips must not silently become total: this job exists to reach
+          # real servers, so proof of reaching PostgreSQL is asserted.
+          grep -q "server: PostgreSQL" live.log
