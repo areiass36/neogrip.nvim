@@ -1,0 +1,199 @@
+-- Every :NGrip command in one place (ADR-0024). Commands land here as their
+-- phases do; the explorer, introspection and requery ones follow their
+-- modules.
+local connections = require("neogrip.connections")
+local neogrip = require("neogrip")
+local resolve = require("neogrip.resolve")
+
+local M = {}
+
+local function command(name, fn, opts)
+	vim.api.nvim_create_user_command(name, fn, opts or {})
+end
+
+local function connection_names()
+	return vim.tbl_map(function(connection)
+		return connection.id
+	end, connections.all())
+end
+
+local function current_connection()
+	local connection = resolve.for_buf(0)
+	if not connection then
+		neogrip.notify("no connection for this buffer", vim.log.levels.WARN)
+	end
+	return connection
+end
+
+function M.setup()
+	command("NGripConnections", function()
+		local lines = {}
+		for _, connection in ipairs(connections.all()) do
+			local target = connection.file
+				or ("%s:%s/%s"):format(
+					connection.host or "?",
+					connection.port or "?",
+					connection.database or "-"
+				)
+			lines[#lines + 1] = ("%-18s %-10s %-8s %-40s %s"):format(
+				connection.id,
+				connection.driver,
+				connection.scope,
+				target,
+				(connection.readonly and "read-only " or "") .. (connection.production and "production" or "")
+			)
+		end
+		if #lines == 0 then
+			lines = { "no connections; :NGripInit writes a project file" }
+		end
+		neogrip.notify(table.concat(lines, "\n"))
+	end, { desc = "List the configured database connections" })
+
+	command("NGripWhich", function()
+		local connection, reason = resolve.for_buf(0)
+		if not connection then
+			return neogrip.notify("no connection resolves for this buffer", vim.log.levels.WARN)
+		end
+		neogrip.notify(("%s [%s] — %s"):format(connection.name, connection.driver, reason))
+	end, { desc = "Show which connection this buffer runs against, and why" })
+
+	command("NGripUse", function(args)
+		local connection = connections.get(args.args)
+		if not connection then
+			return neogrip.notify(("no connection %q"):format(args.args), vim.log.levels.ERROR)
+		end
+		resolve.bind(0, connection.id)
+		neogrip.notify(("%s selected for this buffer"):format(connection.name))
+	end, {
+		nargs = 1,
+		complete = connection_names,
+		desc = "Use a connection in this buffer",
+	})
+
+	command("NGripReload", function()
+		connections.reload()
+		neogrip.notify("connections reloaded")
+	end, { desc = "Re-read the connection files" })
+
+	command("NGripRun", function(args)
+		require("neogrip.execute").run({
+			bufnr = 0,
+			statement = args.args ~= "" and { text = args.args } or nil,
+		})
+	end, { nargs = "?", desc = "Run a statement (or the one under the cursor)" })
+
+	command("NGripValidate", function()
+		require("neogrip.diagnostics").validate({ bufnr = 0, notify = true })
+	end, { desc = "Check the statement under the cursor on the server" })
+
+	command("NGripCancel", function()
+		require("neogrip.execute").cancel()
+	end, { desc = "Cancel the running query" })
+
+	command("NGripDisconnect", function(args)
+		local sidecar = require("neogrip.sidecar")
+		if args.bang then
+			sidecar.disconnect_all()
+			return neogrip.notify("disconnected from every database")
+		end
+		local id = args.args
+		if id == "" then
+			local connection = current_connection()
+			if not connection then
+				return
+			end
+			id = connection.id
+		end
+		if not sidecar.is_connected(id) then
+			return neogrip.notify(("%s is not connected"):format(id))
+		end
+		sidecar.disconnect(id)
+		neogrip.notify(("disconnected from %s"):format(id))
+	end, {
+		nargs = "?",
+		bang = true,
+		complete = connection_names,
+		desc = "Stop a connection's sidecar (! stops every one)",
+	})
+
+	command("NGripNewQuery", function()
+		local connection = current_connection()
+		if connection then
+			require("neogrip.buffer").new_query(connection, "")
+		end
+	end, { desc = "Open a query buffer against this buffer's connection" })
+
+	command("NGripInit", function()
+		M.init_project()
+	end, { desc = "Create .nvim/database.json for this project" })
+
+	command("NGripDoctor", function()
+		require("neogrip.doctor").show()
+	end, { desc = "Check the sidecar, drivers and connections" })
+end
+
+--- Write a starter project file, but only once .gitignore covers it: the file
+--- holds hosts, user names and kvstore key names.
+function M.init_project()
+	local root = connections.project_root()
+	local path = connections.project_file()
+	if vim.fn.filereadable(path) == 1 then
+		return neogrip.notify((".nvim/database.json already exists at %s"):format(root))
+	end
+
+	vim.system(
+		{ "git", "check-ignore", "-q", ".nvim/database.json" },
+		{ cwd = root },
+		vim.schedule_wrap(function(result)
+			-- Only when git says "not ignored" (1). Any other code means it
+			-- could not answer, and a folder that is not a repository cannot
+			-- commit the file anywhere.
+			if result.code == 1 then
+				local answer = vim.fn.confirm(
+					".nvim/database.json is not gitignored. Add '.nvim/' to .gitignore?",
+					"&Yes\n&No",
+					1
+				)
+				if answer ~= 1 then
+					return neogrip.notify("not creating the file: it would be committed", vim.log.levels.WARN)
+				end
+				local gitignore = root .. "/.gitignore"
+				local lines = vim.fn.filereadable(gitignore) == 1 and vim.fn.readfile(gitignore) or {}
+				table.insert(lines, ".nvim/")
+				vim.fn.writefile(lines, gitignore)
+			end
+
+			vim.fn.mkdir(root .. "/.nvim", "p")
+			local template = {
+				"{",
+				'  "version": 2,',
+				'  "default": "local",',
+				'  "connections": [',
+				"    {",
+				'      "id": "local",',
+				'      "name": "Local Postgres",',
+				'      "driver": "postgres",',
+				'      "host": "127.0.0.1",',
+				'      "port": 5432,',
+				'      "database": "app_dev",',
+				'      "auth": {',
+				'        "type": "password",',
+				'        "user": "postgres",',
+				'        "password": { "kvstore": "local-postgres" }',
+				"      }",
+				"    }",
+				"  ],",
+				'  "bindings": [',
+				'    { "glob": "db/migrations/**/*.sql", "connection": "local" }',
+				"  ]",
+				"}",
+			}
+			vim.fn.writefile(template, root .. "/" .. ".nvim/database.json")
+			connections.reload()
+			neogrip.notify(("wrote %s — :KVStore local-postgres stores the password"):format(path))
+			vim.cmd(("edit %s"):format(vim.fn.fnameescape(root .. "/.nvim/database.json")))
+		end)
+	)
+end
+
+return M

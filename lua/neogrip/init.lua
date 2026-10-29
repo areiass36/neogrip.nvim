@@ -6,6 +6,13 @@
 --
 --   config       the defaults and the user's setup(opts) table
 --   rpc          the JSON-RPC client the sidecar is spoken through
+--   bootstrap    the pinned JDK and driver downloads
+--   connections  the two config levels (global, project) and resolution
+--   secrets      every secret, from kvstore.nvim at connect time
+--   sidecar      one Java process per connection
+--   runner       statements queued per connection, cancelled on the server
+--   grid         the result buffer; actions are the user's to map
+--   commands     the :NGrip* commands
 local M = {}
 
 M.state_dir = vim.fn.stdpath("state") .. "/neogrip"
@@ -43,6 +50,13 @@ function M.setup(opts)
 
 	require("neogrip.config").setup(opts)
 	vim.fn.mkdir(M.state_dir, "p")
+	require("neogrip.connections").setup()
+	require("neogrip.resolve").setup()
+	require("neogrip.runner").setup()
+	require("neogrip.diagnostics").setup()
+	require("neogrip.buffer").setup()
+	require("neogrip.grid.highlight").setup()
+	require("neogrip.commands").setup()
 end
 
 return M
