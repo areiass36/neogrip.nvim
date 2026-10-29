@@ -20,12 +20,14 @@ function M.status(bufnr)
 	if not connection then
 		return nil
 	end
+	local runner = require("neogrip.runner")
 	return {
 		name = connection.name,
 		driver = connection.driver,
 		readonly = connection.readonly == true,
 		production = connection.production == true,
-		running = #require("neogrip.runner").active() > 0,
+		running = #runner.active() > 0,
+		transaction = runner.in_transaction(connection.id),
 	}
 end
 
@@ -42,7 +44,9 @@ function M.component()
 	if not status then
 		return "neogrip: no connection"
 	end
-	local flags = (status.readonly and "[RO]" or "") .. (status.production and "[PROD]" or "")
+	local flags = (status.readonly and "[RO]" or "")
+		.. (status.production and "[PROD]" or "")
+		.. (status.transaction and "[TX]" or "")
 	return status.name .. (flags ~= "" and " " .. flags or "") .. (status.running and " …" or "")
 end
 

@@ -16,6 +16,9 @@ local M = {}
 local queues = {}
 local running = {}
 local sequence = 0
+-- Whether a connection's session has an explicit transaction open, from the
+-- sidecar's own answer to an intercepted BEGIN/COMMIT/ROLLBACK (ADR-0013).
+local transactions = {}
 
 local function finish(handle, result, err)
 	if handle.done then
@@ -34,6 +37,10 @@ end
 --- Turn the sidecar's answer into what the rest of the plugin expects.
 local function translate(handle, response)
 	local request = handle.request
+
+	if response.transaction ~= nil then
+		transactions[request.connection.id] = response.transaction == true
+	end
 
 	local columns, types, tables, schemas = {}, {}, {}, {}
 	for index, column in ipairs(response.columns or {}) do
@@ -68,6 +75,7 @@ local function translate(handle, response)
 		has_more = response.hasMore == true,
 		elapsed_ms = response.elapsedMs,
 		update_count = response.updateCount,
+		transaction = response.transaction,
 		-- An export answers with how many rows it wrote, under the same name a
 		-- query uses for the rows themselves; the type tells them apart.
 		rows_written = type(response.rows) == "number" and response.rows or nil,
@@ -225,6 +233,13 @@ function M.cancel_all()
 			M.cancel(handle)
 		end
 	end
+end
+
+--- The statusline's [TX] flag: an explicit transaction is open on this
+--- connection's session. Dropped with the process, because the sidecar rolls
+--- back on the way out (ADR-0013).
+function M.in_transaction(connection_id)
+	return transactions[connection_id] == true and sidecar.is_connected(connection_id)
 end
 
 --- @return table[] handles running or queued

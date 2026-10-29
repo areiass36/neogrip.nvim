@@ -52,6 +52,10 @@ M.defaults = {
 	-- Stop a connection's sidecar after this long with nothing to do. Zero
 	-- keeps it alive for the whole session.
 	idle_timeout_seconds = 1800,
+	-- Roll back - never commit - a transaction that has seen no statement for
+	-- this long, because an idle open transaction holds locks (ADR-0013).
+	-- Zero disables the watchdog.
+	transaction_idle_seconds = 600,
 }
 
 local stored = {}

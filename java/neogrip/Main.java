@@ -82,6 +82,9 @@ public final class Main {
     private Connection connection;
     private Queries queries;
     private Catalog catalog;
+    /** When the last request arrived, for the idle-transaction watchdog. */
+    private volatile long lastStatement = System.currentTimeMillis();
+    private volatile long transactionIdleMs = 0;
 
     public static void main(String[] args) throws Exception {
         BufferedReader input =
@@ -129,6 +132,7 @@ public final class Main {
             if (method.equals("shutdown")) {
                 break;
             }
+            lastStatement = System.currentTimeMillis();
 
             if (method.equals("initialize")) {
                 if (!initialize(id, params)) {
@@ -273,15 +277,25 @@ public final class Main {
                 Rpc.writeError(response, id, Rpc.INVALID_REQUEST, "not connected", null);
             } else {
                 switch (method) {
-                    case "query" -> queries.query(
+                    case "query" -> {
+                        if (queries.transaction(response, id, string(params, "sql"))) {
+                            break;
+                        }
+                        queries.query(
                             response,
                             id,
                             string(params, "sql"),
                             integer(params, "limit", 0),
                             integer(params, "offset", 0),
                             integer(params, "timeoutSeconds", 0));
-                    case "exec" -> queries.exec(
-                            response, id, string(params, "sql"), integer(params, "timeoutSeconds", 0));
+                    }
+                    case "exec" -> {
+                        if (queries.transaction(response, id, string(params, "sql"))) {
+                            break;
+                        }
+                        queries.exec(
+                                response, id, string(params, "sql"), integer(params, "timeoutSeconds", 0));
+                    }
                     case "validate" -> queries.validate(response, id, string(params, "sql"));
                     case "export" -> queries.export(
                             response,
@@ -386,6 +400,17 @@ public final class Main {
                     properties.setProperty("password", password);
                 }
             }
+            case "token" -> {
+                // The property both the SQL Server and the Trino drivers read
+                // a bearer token from. The value came out of kvstore on the
+                // Lua side and is never echoed anywhere (ADR-0009).
+                if (auth.get("user") instanceof String user) {
+                    properties.setProperty("user", user);
+                }
+                if (auth.get("token") instanceof String token) {
+                    properties.setProperty("accessToken", token);
+                }
+            }
             default -> {
                 Rpc.writeError(
                         response, id, Rpc.AUTH_ERROR, "auth type not implemented yet: " + type, null);
@@ -407,6 +432,7 @@ public final class Main {
         // The url and the properties go with it so a catalog sweep can open
         // connections of its own rather than take this one.
         catalog = new Catalog(connection, cancelled, running, url, properties);
+        startTransactionWatchdog(integer(params, "transactionIdleSeconds", 0));
 
         Map<String, Object> result = new LinkedHashMap<>();
         Map<String, Object> capabilities = new LinkedHashMap<>();
@@ -424,6 +450,43 @@ public final class Main {
         capabilities.put("cancellation", true);
         result.put("capabilities", capabilities);
         Rpc.writeResult(response, id, result);
+    }
+
+    /**
+     * An idle open transaction holds locks (ADR-0013), so one that has seen no
+     * request for the configured window is rolled back - never committed - and
+     * the editor is told. The check runs on the worker, where it cannot race a
+     * statement for the connection.
+     */
+    private void startTransactionWatchdog(long idleSeconds) {
+        if (idleSeconds <= 0) {
+            return;
+        }
+        transactionIdleMs = idleSeconds * 1000L;
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(task -> {
+                    Thread thread = new Thread(task, "neogrip-tx-watchdog");
+                    thread.setDaemon(true);
+                    return thread;
+                })
+                .scheduleAtFixedRate(
+                        () -> worker.submit(this::rollbackIfIdle), 15, 15, TimeUnit.SECONDS);
+    }
+
+    private void rollbackIfIdle() {
+        if (queries == null
+                || !queries.inTransaction()
+                || System.currentTimeMillis() - lastStatement < transactionIdleMs) {
+            return;
+        }
+        try {
+            queries.rollbackIdle();
+        } catch (SQLException ignored) {
+            // The connection will report its own state on the next statement.
+        }
+        StringBuilder note = new StringBuilder();
+        Rpc.writeNotification(
+                note, "status", Map.of("phase", "transaction", "message", "idle transaction rolled back"));
+        send(note.toString());
     }
 
     @FunctionalInterface

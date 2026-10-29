@@ -218,6 +218,7 @@ function M.connect(connection, auth, on_done)
 				properties = dsn.properties(connection),
 				auth = auth,
 				readonly = connection.readonly or false,
+				transactionIdleSeconds = require("neogrip.config").get().transaction_idle_seconds,
 			}, function(result, connect_err)
 				if connect_err then
 					M.stop(launched)
