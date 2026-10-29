@@ -57,14 +57,16 @@ A major-version mismatch is refused with error `-32002` and the sidecar exits.
 → {"method":"connect","params":{
      "url":"jdbc:postgresql://host:5432/app",
      "properties":{"connectTimeout":"10"},
-     "auth":{"type":"password","user":"fulano","secret":"..."},
+     "auth":{"type":"password","user":"fulano","password":"..."},
      "readonly":true}}
 ← {"result":{"product":"PostgreSQL 16.2","driver":"PostgreSQL JDBC Driver 42.7.3",
      "capabilities":{"sql":true,"schemas":true,"catalogs":false,"cancellation":true,"transactions":true}}}
 ```
 
-The one frame that carries secrets (ADR-0009). Neither side ever logs or echoes its params. Capabilities
-are per connection and the client must consult them instead of assuming SQL semantics (ADR-0020).
+The one frame that carries secrets (ADR-0009): the auth object's secret-bearing fields are `password`,
+`client_secret`, `token` and `passphrase`, resolved from kvstore key names on the Lua side. Neither side
+ever logs or echoes its params. Capabilities are per connection and the client must consult them instead
+of assuming SQL semantics (ADR-0020).
 
 ### Statements
 
