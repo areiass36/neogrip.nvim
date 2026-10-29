@@ -58,4 +58,17 @@ end
 
 print("")
 print(string.format("%d checks, %d failures", support.checks, support.failures))
+
+-- Stop the sidecars before leaving. os.exit() in -l mode does not run
+-- VimLeavePre, so a live suite's child processes would still be open handles
+-- at exit, and nvim then reports a non-zero code even though every check
+-- passed. Draining them first keeps the exit code honest.
+local ok_sidecar, sidecar = pcall(require, "neogrip.sidecar")
+if ok_sidecar then
+	pcall(sidecar.disconnect_all)
+	vim.wait(5000, function()
+		return #sidecar.active() == 0
+	end, 50)
+end
+
 os.exit(support.failures == 0 and 0 or 1)
