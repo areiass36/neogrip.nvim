@@ -68,12 +68,20 @@ The one frame that carries secrets (ADR-0009): the auth object's secret-bearing 
 ever logs or echoes its params. Capabilities are per connection and the client must consult them instead
 of assuming SQL semantics (ADR-0020).
 
+Implemented auth types: `none`, `password`, and `token` (a bearer token handed to the driver's
+`accessToken` property - SQL Server and Trino both read it). `entra_interactive`, `service_principal` and
+`managed_identity` are carried by the schema and refused by the sidecar with `-32011` until their phase
+lands. `transactionIdleSeconds` arms the idle-transaction watchdog (ADR-0013); zero disables it.
+
 ### Statements
 
 - `query {sql, limit, offset, timeoutSeconds}` → `{columns:[{name,type,table,schema}], rows:[[...]],
   hasMore, elapsedMs}` — at most `limit` rows per page (ADR-0014); cell values are strings, numbers,
   booleans or null, rendered per `java/neogrip/Values.java`'s rules.
 - `exec {sql, timeoutSeconds}` → `{updateCount, elapsedMs}`
+- A plain `BEGIN`/`COMMIT`/`ROLLBACK` sent as `query` or `exec` is intercepted and mapped to the JDBC
+  calls (ADR-0013); the result is `{transaction: true|false}` saying whether the session now has one open.
+  Any other spelling passes through untouched.
 - `validate {sql}` → `{}` — a server-side prepare, parses but never executes.
 - `export {sql, path, format, nullMarker, timeoutSeconds}` → `{rows, path}` — streams to `path`,
   format `csv` or `json`.
@@ -104,7 +112,7 @@ of assuming SQL semantics (ADR-0020).
 ## Messages (sidecar → client)
 
 - Notification `status {phase, message}` — connection progress, authentication steps ("browser opened"),
-  token refresh.
+  and the idle-transaction watchdog's rollback notice.
 - Notification `log {level, message}` — sparse; never anything derived from `connect` params.
 - Request `input {prompt, secret}` → `{value}` — reserved for authentication flows that need user input
   (device code). The client answers asynchronously.
