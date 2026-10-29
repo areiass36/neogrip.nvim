@@ -13,9 +13,10 @@ import neogrip.rpc.RpcMethod;
 import neogrip.rpc.RpcNamespace;
 
 /**
- * The catalog, through DatabaseMetaData. introspect runs on its own exclusive
- * lane: a sweep of a warehouse takes minutes, and either it waits behind a
- * query or the next query waits behind it.
+ * The catalog, through DatabaseMetaData. The introspect sweep runs one at a
+ * time and outside the session lock, on sibling connections of its own: a
+ * sweep of a warehouse takes minutes, and either it waits behind a query or
+ * the next query waits behind it.
  */
 @RpcNamespace("catalog")
 final class CatalogHandlers {
@@ -65,7 +66,7 @@ final class CatalogHandlers {
         return db.nativeDdl(catalog, schema, table);
     }
 
-    @RpcMethod(lane = "introspect")
+    @RpcMethod
     IntrospectSummary introspect(String catalog, String path, int parallelism, long budgetMs, boolean details)
             throws SQLException, IOException {
         return db.introspect(catalog, path, parallelism, budgetMs, details);

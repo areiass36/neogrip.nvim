@@ -48,7 +48,7 @@ final class CatalogHandlers {
         return db.tables(catalog, schema, pattern);
     }
 
-    @RpcMethod(lane = "introspect")                       // a named lane is exclusive: one at a time
+    @RpcMethod
     IntrospectSummary introspect(String catalog, String path, int parallelism, long budgetMs,
             boolean details) throws SQLException, IOException {
         return db.introspect(catalog, path, parallelism, budgetMs, details);
@@ -56,19 +56,23 @@ final class CatalogHandlers {
 }
 ```
 
+Handlers declare nothing about threading - there is nothing to declare.
+
 `App.main` is pure configuration: classes go into the builder, which instantiates them, resolving each
-constructor parameter by type from the other components and the library's injectables (`Notifier`,
-`Worker`). Components may implement `RpcLifecycle` for per-request and shutdown hooks; shutdown hooks run
-in reverse registration order. Everything that can be wrong — a duplicate wire name, an unsupported
-signature, a missing dependency, a build without `-parameters` — fails at `build()` with a message naming
-the offender.
+constructor parameter by type from the other components and the library's injectables (`Notifier`).
+Components may implement `RpcLifecycle` for per-request and shutdown hooks; shutdown hooks run in reverse
+registration order. Everything that can be wrong — a duplicate wire name, an unsupported signature, a
+missing dependency, a build without `-parameters` — fails at `build()` with a message naming the
+offender.
 
 Adding a method is: declare a record in `neogrip/db/types/`, write an annotated function, done — the
 dispatch, threading, binding and serialization are the library's.
 
 ## Threading
 
-The read loop answers `lane = "read"` methods itself (ping, cancel — always answerable mid-query); one
-worker runs the statements, one at a time on the shared connection; any other lane name is exclusive. EOF
-drains the lanes (bounded), then the shutdown hooks run: `Database` rolls back an open transaction — never
-commits — before `Session` closes the connection.
+Every request runs on its own virtual thread (ADR-0028): the read loop never blocks, so ping and cancel
+are always answerable mid-query. The one thing serialized is the shared session connection — a fair lock
+inside `Database`, which `cancel` never takes (`Statement.cancel` is the one JDBC call defined as safe
+from another thread) and the introspect sweep bypasses by running on sibling connections, one sweep at a
+time. EOF drains the in-flight requests (bounded), then the shutdown hooks run: `Database` rolls back an
+open transaction — never commits — before `Session` closes the connection.

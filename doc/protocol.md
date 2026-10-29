@@ -35,10 +35,11 @@ Current `protocolVersion`: **1**.
 
 ## Threading contract (sidecar side)
 
-`initialize`, `ping`, `cancel` and `shutdown` are answered on the read thread, so a `cancel` is always
-answerable while a statement runs. `connect`, statements and catalog requests run on a single worker;
-`catalog/introspect` runs on its own single-thread executor, one sweep at a time. Two statements never
-touch the shared JDBC connection concurrently (ADR-0012).
+Every request runs on its own thread, so the read loop never blocks and `ping`/`cancel` are always
+answerable while a statement runs (ADR-0028). What is serialized is the shared JDBC connection - the
+session (ADR-0012): statements and catalog questions take its lock one at a time, in arrival order;
+`cancel` never takes it, which is what lets it reach the running statement. `catalog/introspect` runs one
+sweep at a time, outside the lock, on sibling connections of its own.
 
 ## Methods (client → sidecar)
 

@@ -18,27 +18,26 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /**
  * A JSON-RPC 2.0 server over stdio, one message per line (doc/protocol.md).
  *
  * The server owns everything that is protocol and threading: framing, the
- * initialize handshake, which lane answers (the read loop itself for "read",
- * one shared worker, or an exclusive named lane), the envelope of every result
- * and error, the bounded drain on EOF, and notifications. Handlers are plain
- * annotated functions on plain classes; this class knows nothing about what
- * they do - it has no imports from the application, which is what keeps the
- * sidecar a program any JSON-RPC client can talk to.
+ * initialize handshake, the envelope of every result and error, the bounded
+ * drain on EOF, and notifications. Handlers are plain annotated functions on
+ * plain classes; this class knows nothing about what they do - it has no
+ * imports from the application, which is what keeps the sidecar a program any
+ * JSON-RPC client can talk to.
  *
- * Requests are read on the main thread and run on a single worker, so a cancel
- * can be read while a query is still running; an exclusive lane runs one call
- * at a time on a thread of its own, which is how a minutes-long catalog sweep
- * never blocks the user's statements.
+ * Every request runs on its own virtual thread (ADR-0028), so the read loop
+ * never blocks and a cancel is always answerable while a query runs. Whatever
+ * must be serialized - the shared session connection - is a lock where its
+ * owner lives, not a thread model here: handlers declare nothing about
+ * threading.
  */
 public final class RpcServer {
-    private record Registered(Object instance, Method method, String lane) {}
+    private record Registered(Object instance, Method method) {}
 
     private final BufferedReader in;
     private final PrintWriter out;
@@ -49,9 +48,7 @@ public final class RpcServer {
     private final Map<Class<?>, Function<Throwable, RpcException>> mappers;
     private final long drainSeconds;
 
-    private final ExecutorService worker = lane("worker");
-    private final Map<String, ExecutorService> exclusiveLanes = new LinkedHashMap<>();
-    private final Map<String, AtomicBoolean> exclusiveBusy = new LinkedHashMap<>();
+    private final ExecutorService requests = Executors.newVirtualThreadPerTaskExecutor();
     private boolean initialized = false;
 
     private RpcServer(Builder builder, Map<String, Registered> methods, List<RpcLifecycle> lifecycle) {
@@ -64,20 +61,6 @@ public final class RpcServer {
         this.lifecycle = lifecycle;
         this.mappers = builder.mappers;
         this.drainSeconds = builder.drainSeconds;
-        for (Registered registered : methods.values()) {
-            if (!registered.lane().equals("read") && !registered.lane().equals("worker")) {
-                exclusiveLanes.computeIfAbsent(registered.lane(), RpcServer::lane);
-                exclusiveBusy.computeIfAbsent(registered.lane(), name -> new AtomicBoolean());
-            }
-        }
-    }
-
-    private static ExecutorService lane(String name) {
-        return Executors.newSingleThreadExecutor(task -> {
-            Thread thread = new Thread(task, "neogrip-" + name);
-            thread.setDaemon(true);
-            return thread;
-        });
     }
 
     public static Builder builder() {
@@ -144,36 +127,12 @@ public final class RpcServer {
                 continue;
             }
 
-            switch (registered.lane()) {
-                case "read" -> handle(registered, id, params);
-                case "worker" -> worker.submit(() -> handle(registered, id, params));
-                default -> {
-                    AtomicBoolean busy = exclusiveBusy.get(registered.lane());
-                    if (!busy.compareAndSet(false, true)) {
-                        send(Wire.error(
-                                id,
-                                Wire.INVALID_REQUEST,
-                                "another " + registered.lane() + " operation is already running",
-                                null));
-                        continue;
-                    }
-                    exclusiveLanes.get(registered.lane()).submit(() -> {
-                        try {
-                            handle(registered, id, params);
-                        } finally {
-                            busy.set(false);
-                        }
-                    });
-                }
-            }
+            requests.submit(() -> handle(registered, id, params));
         }
 
         // Work already submitted still finishes: a shutdown arriving while a
         // query is in flight should still return that query's answer.
-        drain(worker);
-        for (ExecutorService executor : exclusiveLanes.values()) {
-            drain(executor);
-        }
+        drain(requests);
         for (int i = lifecycle.size() - 1; i >= 0; i--) {
             lifecycle.get(i).onShutdown();
         }
@@ -312,11 +271,9 @@ public final class RpcServer {
             // this holder, filled in just below.
             RpcServer[] holder = new RpcServer[1];
             Notifier notifier = (method, params) -> holder[0].notify(method, params);
-            Worker workerLane = task -> holder[0].worker.submit(task);
 
             Map<Class<?>, Object> built = new LinkedHashMap<>();
             built.put(Notifier.class, notifier);
-            built.put(Worker.class, workerLane);
 
             List<Class<?>> pending = new ArrayList<>(componentClasses);
             pending.addAll(handlerClasses);
@@ -421,7 +378,7 @@ public final class RpcServer {
                     if (!method.trySetAccessible()) {
                         throw new IllegalStateException("cannot access " + wireName);
                     }
-                    if (methods.put(wireName, new Registered(instance, method, annotation.lane())) != null) {
+                    if (methods.put(wireName, new Registered(instance, method)) != null) {
                         throw new IllegalStateException("duplicate rpc method: " + wireName);
                     }
                 }

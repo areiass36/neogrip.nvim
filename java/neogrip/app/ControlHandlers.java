@@ -4,7 +4,7 @@ import java.util.Map;
 import neogrip.db.Database;
 import neogrip.rpc.RpcMethod;
 
-/** The read-lane methods: answerable even while the worker runs a statement. */
+/** ping and cancel: answerable while a statement runs, because neither takes the session lock. */
 final class ControlHandlers {
     private final Database db;
 
@@ -12,12 +12,12 @@ final class ControlHandlers {
         this.db = db;
     }
 
-    @RpcMethod(lane = "read")
+    @RpcMethod
     Map<String, Object> ping() {
         return Map.of();
     }
 
-    @RpcMethod(lane = "read")
+    @RpcMethod
     Map<String, Object> cancel() {
         return Map.of("cancelled", db.cancel());
     }

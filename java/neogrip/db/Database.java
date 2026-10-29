@@ -10,6 +10,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import neogrip.app.Session;
 import neogrip.db.catalog.Details;
 import neogrip.db.catalog.Introspect;
@@ -19,7 +20,6 @@ import neogrip.db.catalog.Snapshot;
 import neogrip.db.types.Types;
 import neogrip.rpc.Notifier;
 import neogrip.rpc.RpcLifecycle;
-import neogrip.rpc.Worker;
 
 /**
  * The one object that controls the lifecycle of everything executed on the
@@ -29,12 +29,21 @@ import neogrip.rpc.Worker;
  * it reads the live connection from the Session when an operation arrives, so
  * it only comes alive at the first query after connect, and "not connected"
  * falls out of that accessor with no guard plumbing anywhere.
+ *
+ * Requests arrive each on its own thread (ADR-0028); the session lock here is
+ * what serializes them onto the one connection JDBC allows. cancel never takes
+ * the lock - Statement.cancel is the one JDBC call defined as safe from
+ * another thread, and a cancel that queued behind the statement it should kill
+ * would never kill anything. The sweep keeps its own one-at-a-time flag and,
+ * as before, runs on sibling connections rather than under the lock.
  */
 public final class Database implements RpcLifecycle {
     private final Session session;
     private final Notifier notifier;
-    /** The statement worker lane: the watchdog's rollback runs there, where it cannot race a statement. */
-    private final Worker worker;
+    /** Fair, so queued statements keep their arrival order. */
+    private final ReentrantLock sessionLock = new ReentrantLock(true);
+    /** One sweep at a time: a second would double the connections it opens. */
+    private final AtomicBoolean sweeping = new AtomicBoolean();
 
     private final AtomicReference<Statement> running = new AtomicReference<>();
     /** A catalog sweep has no statement to cancel, so a cancel reaches it as a flag. */
@@ -50,10 +59,9 @@ public final class Database implements RpcLifecycle {
     private volatile NativeDdl nativeDdl;
     private volatile Introspect introspect;
 
-    public Database(Session session, Notifier notifier, Worker worker) {
+    public Database(Session session, Notifier notifier) {
         this.session = session;
         this.notifier = notifier;
-        this.worker = worker;
         startTransactionWatchdog();
     }
 
@@ -77,27 +85,60 @@ public final class Database implements RpcLifecycle {
         return this;
     }
 
+    /** The serialization of the shared connection, in one place. */
+    private <T> T locked(SessionCall<T> call) throws SQLException, IOException {
+        sessionLock.lock();
+        try {
+            return call.run();
+        } finally {
+            sessionLock.unlock();
+        }
+    }
+
+    @FunctionalInterface
+    private interface SessionCall<T> {
+        T run() throws SQLException, IOException;
+    }
+
+    /** The SQL-only overload, so statement callers do not declare IOException. */
+    private <T> T lockedSql(SqlCall<T> call) throws SQLException {
+        sessionLock.lock();
+        try {
+            return call.run();
+        } finally {
+            sessionLock.unlock();
+        }
+    }
+
+    @FunctionalInterface
+    private interface SqlCall<T> {
+        T run() throws SQLException;
+    }
+
     // --- statements -------------------------------------------------------
 
     public Optional<Types.TxState> intercept(String sql) throws SQLException {
-        return bind().transactions.intercept(sql);
+        return lockedSql(() -> bind().transactions.intercept(sql));
     }
 
     public Object query(String sql, int limit, int offset, int timeoutSeconds) throws SQLException {
-        return bind().statements.query(sql, limit, offset, timeoutSeconds);
+        return lockedSql(() -> bind().statements.query(sql, limit, offset, timeoutSeconds));
     }
 
     public Types.UpdateResult exec(String sql, int timeoutSeconds) throws SQLException {
-        return bind().statements.exec(sql, timeoutSeconds);
+        return lockedSql(() -> bind().statements.exec(sql, timeoutSeconds));
     }
 
     public void validate(String sql) throws SQLException {
-        bind().statements.validate(sql);
+        lockedSql(() -> {
+            bind().statements.validate(sql);
+            return null;
+        });
     }
 
     public Types.ExportResult export(String sql, String path, String format, String nullMarker, int timeoutSeconds)
             throws SQLException, IOException {
-        return bind().exports.export(sql, path, format, nullMarker, timeoutSeconds);
+        return locked(() -> bind().exports.export(sql, path, format, nullMarker, timeoutSeconds));
     }
 
     /**
@@ -123,45 +164,61 @@ public final class Database implements RpcLifecycle {
     // --- catalog ----------------------------------------------------------
 
     public Types.Rows<Types.Named> catalogs() throws SQLException {
-        return bind().listings.catalogs();
+        return lockedSql(() -> bind().listings.catalogs());
     }
 
     public Types.Rows<Types.Named> schemas(String catalogName) throws SQLException {
-        return bind().listings.schemas(catalogName);
+        return lockedSql(() -> bind().listings.schemas(catalogName));
     }
 
     public Types.Rows<Types.TableRow> tables(String catalogName, String schema, String pattern)
             throws SQLException {
-        return bind().listings.tables(catalogName, schema, pattern);
+        return lockedSql(() -> bind().listings.tables(catalogName, schema, pattern));
     }
 
     public Types.Rows<?> columns(String catalogName, String schema, String table) throws SQLException {
-        return bind().listings.columns(catalogName, schema, table);
+        return lockedSql(() -> bind().listings.columns(catalogName, schema, table));
     }
 
     public Types.Rows<Types.TableWithColumns> snapshot(String catalogName, String schema) throws SQLException {
-        return bind().snapshots.snapshot(catalogName, schema);
+        return lockedSql(() -> bind().snapshots.snapshot(catalogName, schema));
     }
 
     public Object details(String catalogName, String schema, String table) throws SQLException {
-        return bind().tableDetails.details(catalogName, schema, table);
+        return lockedSql(() -> bind().tableDetails.details(catalogName, schema, table));
     }
 
     public Object ddl(String catalogName, String schema, String table) throws SQLException {
-        return bind().tableDetails.ddl(catalogName, schema, table);
+        return lockedSql(() -> bind().tableDetails.ddl(catalogName, schema, table));
     }
 
     public Types.Ddl nativeDdl(String catalogName, String schema, String table) {
-        return bind().nativeDdl.nativeDdl(catalogName, schema, table);
+        sessionLock.lock();
+        try {
+            return bind().nativeDdl.nativeDdl(catalogName, schema, table);
+        } finally {
+            sessionLock.unlock();
+        }
     }
 
     public Types.IntrospectSummary introspect(
             String catalogName, String path, int parallelism, long budgetMs, boolean details)
             throws SQLException, IOException {
-        // The flag is shared with a running statement's cancel, so a cancel
-        // sent before this sweep must not end it on sight.
-        cancelled.set(false);
-        return bind().introspect.introspect(catalogName, path, parallelism, budgetMs, details);
+        if (!sweeping.compareAndSet(false, true)) {
+            throw new neogrip.rpc.RpcException(
+                    neogrip.rpc.Wire.INVALID_REQUEST, "a catalog sweep is already running on this connection");
+        }
+        try {
+            // The flag is shared with a running statement's cancel, so a cancel
+            // sent before this sweep must not end it on sight. The sweep runs
+            // outside the session lock on purpose: it opens sibling connections
+            // of its own, and holding the lock for minutes would queue every
+            // statement behind it - the exact thing it exists to avoid.
+            cancelled.set(false);
+            return bind().introspect.introspect(catalogName, path, parallelism, budgetMs, details);
+        } finally {
+            sweeping.set(false);
+        }
     }
 
     // --- the idle-transaction watchdog (ADR-0013) -------------------------
@@ -179,7 +236,7 @@ public final class Database implements RpcLifecycle {
                     thread.setDaemon(true);
                     return thread;
                 })
-                .scheduleAtFixedRate(() -> worker.submit(this::rollbackIfIdle), 15, 15, TimeUnit.SECONDS);
+                .scheduleAtFixedRate(this::rollbackIfIdle, 15, 15, TimeUnit.SECONDS);
     }
 
     private void rollbackIfIdle() {
@@ -191,10 +248,14 @@ public final class Database implements RpcLifecycle {
                 || System.currentTimeMillis() - session.lastRequestAt() < idleMs) {
             return;
         }
+        // Under the session lock, where it cannot race a running statement.
+        sessionLock.lock();
         try {
             open.rollback();
         } catch (SQLException ignored) {
             // The connection will report its own state on the next statement.
+        } finally {
+            sessionLock.unlock();
         }
         notifier.notify("status", Map.of("phase", "transaction", "message", "idle transaction rolled back"));
     }
@@ -205,10 +266,13 @@ public final class Database implements RpcLifecycle {
         // closes the connection, because shutdown hooks fire in reverse order.
         Transactions open = transactions;
         if (open != null && open.inTransaction()) {
+            sessionLock.lock();
             try {
                 open.rollback();
             } catch (SQLException ignored) {
                 // Shutting down anyway.
+            } finally {
+                sessionLock.unlock();
             }
         }
     }
