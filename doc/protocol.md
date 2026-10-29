@@ -89,9 +89,11 @@ of assuming SQL semantics (ADR-0020).
   `catalog/columns {catalog?, schema?, table}` → small listings.
 - `catalog/details {catalog?, schema?, table}` → keys, indexes, references for one table.
 - `catalog/ddl {catalog?, schema?, table}` / `catalog/nativeDdl {...}` → rendered definitions.
-- `catalog/snapshot {catalog, path}` → `{tables}` — the full snapshot goes to `path`, file-side.
-- `catalog/introspect {catalog, path, parallelism, budgetMs, details}` → `{tables, partial}` — the deep
-  sweep, written to `path`, honouring the time budget and the cancel flag.
+- `catalog/snapshot {catalog?, schema}` → `{rows}` — one whole schema (every table with its columns) in a
+  single round trip; small enough to ride in-band.
+- `catalog/introspect {catalog?, path, parallelism, budgetMs, details}` → `{schemas, tables, columns,
+  details, partial, parallel, elapsedMs}` — the deep sweep of the whole catalog, written to `path`
+  file-side (ADR-0010), honouring the time budget and the cancel flag.
 
 ### shutdown (notification)
 

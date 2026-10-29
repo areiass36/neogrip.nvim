@@ -47,16 +47,41 @@ public final class Main {
         thread.setDaemon(true);
         return thread;
     });
+    /**
+     * A catalog sweep runs here and not on the worker, because the worker is
+     * the user's statements: a sweep of a warehouse takes minutes, and either
+     * it waits behind a query or the next query waits behind it.
+     */
+    private final ExecutorService introspector = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "neogrip-introspect");
+        thread.setDaemon(true);
+        return thread;
+    });
+    /** One sweep at a time: a second would double the connections it opens. */
+    private final AtomicBoolean introspecting = new AtomicBoolean();
     private final AtomicReference<java.sql.Statement> running = new AtomicReference<>();
     /** A catalog sweep has no statement to cancel, so a cancel reaches it as a flag. */
     private final AtomicBoolean cancelled = new AtomicBoolean();
-    /** The worker methods that exist; catalog ones join with the schema phase. */
-    private static final java.util.Set<String> STATEMENT_METHODS =
-            java.util.Set.of("query", "exec", "validate", "export");
+    /** The worker methods that exist. */
+    private static final java.util.Set<String> STATEMENT_METHODS = java.util.Set.of(
+            "query",
+            "exec",
+            "validate",
+            "export",
+            "catalog/catalogs",
+            "catalog/schemas",
+            "catalog/tables",
+            "catalog/columns",
+            "catalog/snapshot",
+            "catalog/details",
+            "catalog/ddl",
+            "catalog/nativeDdl",
+            "catalog/introspect");
     private boolean initialized = false;
     /** Set by connect, on the worker; read only on the worker after that. */
     private Connection connection;
     private Queries queries;
+    private Catalog catalog;
 
     public static void main(String[] args) throws Exception {
         BufferedReader input =
@@ -145,14 +170,40 @@ public final class Main {
                     send(response.toString());
                     continue;
                 }
+                case "catalog/introspect" -> {
+                    // Its own executor and its own one-at-a-time flag, so the
+                    // user's statements never queue behind a sweep.
+                    if (!introspecting.compareAndSet(false, true)) {
+                        StringBuilder response = new StringBuilder();
+                        Rpc.writeError(
+                                response,
+                                id,
+                                Rpc.INVALID_REQUEST,
+                                "a catalog sweep is already running on this connection",
+                                null);
+                        send(response.toString());
+                        continue;
+                    }
+                    introspector.submit(() -> {
+                        try {
+                            handle(id, method, params);
+                        } finally {
+                            introspecting.set(false);
+                        }
+                    });
+                }
                 default -> worker.submit(() -> handle(id, method, params));
             }
         }
 
         // Work already submitted still finishes: a shutdown arriving while a
         // query is in flight should still return that query's answer.
+        // A sweep that is still running has nowhere to deliver its answer, and
+        // telling it so is what makes it delete the half-written snapshot
+        // instead of leaving it where the editor reads a finished one.
         cancelled.set(true);
         drain(worker);
+        drain(introspector);
         if (connection != null) {
             try {
                 // Never commit on the way out (ADR-0013); rollback is a no-op
@@ -240,6 +291,48 @@ public final class Main {
                             string(params, "format"),
                             string(params, "nullMarker"),
                             integer(params, "timeoutSeconds", 0));
+                    case "catalog/catalogs" -> catalog.catalogs(response, id);
+                    case "catalog/schemas" -> catalog.schemas(response, id, string(params, "catalog"));
+                    case "catalog/tables" -> catalog.tables(
+                            response,
+                            id,
+                            string(params, "catalog"),
+                            string(params, "schema"),
+                            string(params, "pattern"));
+                    case "catalog/columns" -> catalog.columns(
+                            response,
+                            id,
+                            string(params, "catalog"),
+                            string(params, "schema"),
+                            string(params, "table"));
+                    case "catalog/snapshot" -> catalog.snapshot(
+                            response, id, string(params, "catalog"), string(params, "schema"));
+                    case "catalog/details" -> catalog.details(
+                            response,
+                            id,
+                            string(params, "catalog"),
+                            string(params, "schema"),
+                            string(params, "table"));
+                    case "catalog/ddl" -> catalog.ddl(
+                            response,
+                            id,
+                            string(params, "catalog"),
+                            string(params, "schema"),
+                            string(params, "table"));
+                    case "catalog/nativeDdl" -> catalog.nativeDdl(
+                            response,
+                            id,
+                            string(params, "catalog"),
+                            string(params, "schema"),
+                            string(params, "table"));
+                    case "catalog/introspect" -> catalog.introspect(
+                            response,
+                            id,
+                            string(params, "catalog"),
+                            string(params, "path"),
+                            integer(params, "parallelism", 1),
+                            integer(params, "budgetMs", 0),
+                            bool(params, "details", true));
                     default -> throw new IllegalStateException("unreachable: " + method);
                 }
             }
@@ -311,6 +404,9 @@ public final class Main {
             }
         }
         queries = new Queries(connection, running, readonly);
+        // The url and the properties go with it so a catalog sweep can open
+        // connections of its own rather than take this one.
+        catalog = new Catalog(connection, cancelled, running, url, properties);
 
         Map<String, Object> result = new LinkedHashMap<>();
         Map<String, Object> capabilities = new LinkedHashMap<>();
@@ -346,6 +442,11 @@ public final class Main {
     private static String string(Map<?, ?> params, String key) {
         Object value = params.get(key);
         return value instanceof String text ? text : "";
+    }
+
+    private static boolean bool(Map<?, ?> params, String key, boolean fallback) {
+        Object value = params.get(key);
+        return value instanceof Boolean flag ? flag : fallback;
     }
 
     private static int integer(Map<?, ?> params, String key, int fallback) {
