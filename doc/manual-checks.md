@@ -31,6 +31,14 @@ names `:KVStore <key>`.
 1. On Windows, run a long statement and kill the Neovim process from Task Manager (no clean exit).
 2. Confirm the sidecar java.exe disappears within a few seconds (stdin EOF path).
 
+## Token authentication
+
+1. Store a bearer token under a kvstore key and configure `auth.type = "token"` against a Trino or Azure
+   SQL endpoint.
+2. Confirm the connection opens and a statement runs.
+3. Let the token expire and confirm the statement fails with the server's own error, and that storing a
+   fresh value plus `:NGripDisconnect` recovers.
+
 ## Interactive authentication (when the Entra phase lands)
 
 Entra ID interactive login opens a browser and cannot run in CI.

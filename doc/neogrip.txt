@@ -1,0 +1,209 @@
+*neogrip.txt*  A SQL and data-manipulation client in the editor
+
+Author: Augusto Areias <https://github.com/areiass36>
+License: MIT
+
+==============================================================================
+CONTENTS                                                        *neogrip*
+
+  1. Introduction ........................... |neogrip-introduction|
+  2. Requirements ........................... |neogrip-requirements|
+  3. Setup .................................. |neogrip-setup|
+  4. Connections ............................ |neogrip-connections|
+  5. Commands ............................... |neogrip-commands|
+  6. Grid actions ........................... |neogrip-grid|
+  7. Language services ...................... |neogrip-lsp|
+  8. Statusline ............................. |neogrip-statusline|
+  9. Options ................................ |neogrip-options|
+ 10. Highlights ............................. |neogrip-highlights|
+ 11. Limitations ............................ |neogrip-limitations|
+
+==============================================================================
+1. INTRODUCTION                                 *neogrip-introduction*
+
+Neogrip turns Neovim into a SQL and data-manipulation client: pick which
+database a file runs against, run the statement under the cursor, read the
+result in a grid, and query that result again with SQL through DuckDB.
+
+A Lua plugin talks JSON-RPC over stdio to a small Java sidecar, which speaks
+JDBC to the databases. The plugin downloads its own pinned, checksum-verified
+JDK and driver jars on first use and compiles the sidecar from the sources in
+the repository - nothing to install.
+
+Engines: PostgreSQL, MySQL/MariaDB, SQL Server, Azure SQL, Trino, MongoDB,
+SQLite and DuckDB.
+
+==============================================================================
+2. REQUIREMENTS                                 *neogrip-requirements*
+
+- Neovim 0.12 or newer.
+- kvstore.nvim (https://github.com/areiass36/kvstore.nvim): every secret is
+  read from it and from nowhere else. Store one with `:KVStore <key>`.
+- Optional: telescope.nvim (a richer explorer; without it the same tree walks
+  through |vim.ui.select|), nvim-cmp (a completion source), jq (pretty
+  printing of Mongo documents).
+
+==============================================================================
+3. SETUP                                        *neogrip-setup* *neogrip.setup()*
+
+`require("neogrip").setup(opts)` is the single entry point; the plugin does
+nothing before it is called, and downloads nothing until the first connect.
+With lazy.nvim: >lua
+    {
+      "areiass36/neogrip.nvim",
+      dependencies = { "areiass36/kvstore.nvim" },
+      opts = {},
+    }
+<
+==============================================================================
+4. CONNECTIONS                                  *neogrip-connections*
+
+Connections live in `.nvim/database.json` at the project root (and a global
+file under |stdpath|("state")); `:NGripInit` writes a starter. Schema v2: >json
+    {
+      "version": 2,
+      "default": "replica",
+      "connections": [
+        {
+          "id": "replica",
+          "name": "Transactional (replica)",
+          "driver": "postgres",
+          "host": "db.example.com",
+          "port": 5432,
+          "database": "app",
+          "readonly": true,
+          "production": true,
+          "auth": {
+            "type": "password",
+            "user": "fulano",
+            "password": { "kvstore": "replica-password" }
+          }
+        }
+      ],
+      "bindings": [
+        { "glob": "db/migrations/**/*.sql", "connection": "replica" }
+      ]
+    }
+<
+Every secret-bearing field must be a `{ "kvstore": "<key>" }` reference; a
+literal value is a hard validation error. `auth.type` is one of `none`,
+`password`, `token` (bearer, via the driver's accessToken property);
+`entra_interactive`, `service_principal` and `managed_identity` are carried
+by the schema and land in a later phase. Drivers: `postgres`, `mysql`,
+`mariadb`, `mssql` (also `azuresql`), `sqlite`, `duckdb`, `trino`,
+`mongodb` - file engines take `"file"` instead of host/port.
+
+Which connection a buffer uses is resolved most-specific-first: an explicit
+choice, a saved binding for the file, a glob from the project file, the
+project default, the last one used. `:NGripWhich` explains the answer.
+
+==============================================================================
+5. COMMANDS                                     *neogrip-commands*
+
+:NGripRun [sql]        Run a statement, or the one under the cursor.
+:NGripCancel           Cancel the running query - a real server-side cancel.
+:NGripValidate         Check the statement on the server; nothing executes.
+:NGripUse {id}         Use a connection in this buffer.
+:NGripWhich            Which connection applies here, and why.
+:NGripConnections      List the configured connections.
+:NGripReload           Re-read the connection files.
+:NGripExplore          Walk the schema: databases, schemas, tables, columns.
+:NGripIntrospect[!] [catalog]
+                       Sweep the whole database into the on-disk catalog;
+                       ! cancels a running sweep.
+:NGripSchemaReload     Drop the cached catalog for this buffer's connection.
+:NGripResults          Query the current result with SQL (DuckDB views
+                       r1, r2, ... and the alias `last`).
+:NGripCsv {file}       Query any CSV file with SQL.
+:NGripExport           Export the result: CSV or JSON, page or everything.
+:NGripKeep [file]      Write the page somewhere it will not be cleaned up.
+:NGripNewQuery         A query buffer against this buffer's connection.
+:NGripDisconnect[!] [id]
+                       Stop a connection's sidecar; ! stops every one.
+:NGripInit             Write a starter .nvim/database.json.
+:NGripDoctor           Check the JDK, sidecar, drivers and connections.
+
+==============================================================================
+6. GRID ACTIONS                                 *neogrip-grid*
+
+The result buffer (filetype `neogrip-grid`) has no keymaps: every action is a
+function on `require("neogrip.grid.actions")`, for the user to map (the
+README carries a complete recipe).
+
+  next_column  prev_column  down  up          movement, cell by cell
+  first_column last_column  first_row last_row
+  yank_cell    yank_row     yank_column       the stored value, untruncated
+  sort_asc     sort_desc                      server-side, covers every page
+  page_next    page_prev                      the next page, re-run
+  follow_fk                                   open the row this key points at
+  show_document                               the whole Mongo document
+  export       materialise  close
+
+Yanks and exports always read the stored value, never the drawn text: what is
+on screen may be truncated.
+
+==============================================================================
+7. LANGUAGE SERVICES                            *neogrip-lsp*
+
+An in-process LSP server per connection answers from the catalog that
+`:NGripIntrospect` swept: hover (K), document and workspace symbols (gO),
+plus two functions to map yourself - `require("neogrip.lsp").definition()`
+jumps to the object under the cursor and `.references()` lists its
+foreign-key neighbours in the quickfix list. Completion is a separate
+nvim-cmp source named `neogrip`; add `{ name = "neogrip" }` to your cmp
+sources where you want it.
+
+Saving a `.sql` buffer validates the statement on the server (nothing runs);
+see |neogrip-options| `validate_on_save`.
+
+==============================================================================
+8. STATUSLINE                                   *neogrip-statusline*
+
+`require("neogrip.statusline").component()` renders `replica [RO][PROD][TX]`
+for the current buffer: read-only, production - the one effect
+`production: true` has - and an open explicit transaction. `status(bufnr)`
+returns the same facts as a table; `is_production(bufnr)` is the single flag.
+
+==============================================================================
+9. OPTIONS                                      *neogrip-options*
+
+Defaults, overridable through `setup(opts)` (each is documented where it
+lives, `lua/neogrip/config.lua`): >lua
+    require("neogrip").setup({
+      limit = 200,                   -- rows per result page
+      timeout_ms = 30000,            -- server-side statement timeout
+      max_column_width = 60,         -- grid truncation; yanks are whole
+      null_text = "NULL",
+      stripe_rows = true,
+      result_retention_days = 2,     -- orphaned result files
+      schema_ttl_seconds = 3600,     -- per-question catalog cache
+      introspect_parallelism = 4,    -- sweep connections
+      introspect_details = true,     -- keys and indexes in the sweep
+      validate_on_save = true,
+      transaction_idle_seconds = 600,-- idle open tx is rolled back
+      icons = {},                    -- database, folder, table, file, branch
+    })
+<
+==============================================================================
+10. HIGHLIGHTS                                  *neogrip-highlights*
+
+Every group is defined with `default = true`, so your own |nvim_set_hl()|
+wins. The grid's groups are prefixed `NGripGrid`: Header, HeaderSorted, Rule,
+Separator, Stripe, Ellipsis, Cell, Null, Number, Boolean, Temporal, Uuid,
+Json, Binary, Footer, Connection, Production, Count, Elapsed, Slow.
+
+==============================================================================
+11. LIMITATIONS                                 *neogrip-limitations*
+
+- No confirmations for dangerous statements: `readonly: true` refuses writes
+  in layers, `production: true` is a visible signal, and the strongest
+  protection is a database user with read-only permissions.
+- Secrets live in kvstore.nvim, nowhere else; the connection file holds only
+  key names. An expired token fails the statement - nothing renews it
+  silently; store a fresh value and `:NGripDisconnect`.
+- Entra ID interactive, service principal, managed identity and SSH tunnels
+  are declared in the schema but not implemented yet.
+- MongoDB speaks the wrapper's script dialect, not SQL; collections have
+  sampled fields, not columns.
+
+vim:tw=78:ts=8:noet:ft=help:norl:

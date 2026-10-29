@@ -4,8 +4,10 @@ Turn Neovim into a SQL and data-manipulation client: pick which database a file 
 statement under the cursor, read the result in a grid, and query that result again with SQL — on macOS,
 Windows and Linux, with no Java to install.
 
-> **Status: under construction.** The architecture is decided and recorded in [doc/adr/](doc/adr/README.md);
-> the implementation is landing in phases. Nothing below is usable yet unless the feature's tests exist.
+> **Status: usable, with open tracks.** Run statements, page and sort results, explore and sweep schemas,
+> re-query results and CSVs with SQL, export, validate on save, and work in transactions — all covered by
+> the test suite. Entra ID interactive, service principal, managed identity and SSH tunnels are declared in
+> the connection schema but not implemented yet; see [doc/adr/](doc/adr/README.md) for every decision.
 
 ## How it works
 
@@ -13,8 +15,13 @@ A Lua plugin in the editor talks JSON-RPC over stdio to a small Java sidecar, wh
 databases. The plugin downloads its own pinned, checksum-verified JDK and driver jars on first use and
 compiles the sidecar from the sources in this repository — nothing to install, nothing on your PATH.
 
-Planned engines: PostgreSQL, MySQL, SQL Server, Azure SQL, Trino, MongoDB and DuckDB — DuckDB doubling as
-the engine that lets you re-query any result (or any CSV) with SQL.
+Engines: PostgreSQL, MySQL/MariaDB, SQL Server, Azure SQL, Trino, MongoDB, SQLite and DuckDB — DuckDB
+doubling as the engine that lets you re-query any result (or any CSV) with SQL: `:NGripResults` turns the
+grid into views `r1`, `r2`, … (alias `last`) in a scratch DuckDB, and results compose.
+
+Connections live in `.nvim/database.json` (`:NGripInit` writes a starter); which one a buffer uses is
+resolved most-specific-first — explicit choice, saved binding, glob, project default, last used — and
+`:NGripWhich` explains the answer. `:help neogrip` covers everything.
 
 ## Requirements
 
@@ -104,7 +111,11 @@ A statusline component is available too: `require("neogrip.statusline").componen
 - It does not confirm dangerous statements. A connection marked `readonly: true` refuses writes in layers,
   and `production: true` is a visible signal — nothing more. The strongest protection is a database user
   with read-only permissions.
-- It does not store secrets. kvstore.nvim does, and the connection file holds only key names.
+- It does not store secrets. kvstore.nvim does, and the connection file holds only key names; secrets
+  reach the sidecar inside one request on the pipe, never in a command line or the environment.
+- It does not renew tokens. An expired bearer token fails the statement; store a fresh value under the
+  same kvstore key and `:NGripDisconnect`.
+- It does not yet speak Entra ID interactive, service principal, managed identity or SSH tunnels.
 
 ## Development
 
