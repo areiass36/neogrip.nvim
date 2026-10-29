@@ -35,3 +35,4 @@ in the author's Neovim configuration; where the two disagreed, the record states
 | 0024 | [User commands are prefixed NGrip](0024-ngrip-prefix.md) | Accepted |
 | 0025 | [The MongoDB wrapper is DataGrip's mongo-jdbc-driver 1.21](0025-mongodb-wrapper-chosen.md) | Accepted |
 | 0026 | [An expired token fails the statement; nothing renews it silently](0026-token-expiry.md) | Accepted |
+| 0027 | [Sidecar methods are annotated functions returning typed records](0027-annotated-rpc-methods.md) | Accepted |
