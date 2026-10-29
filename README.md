@@ -117,6 +117,9 @@ A statusline component is available too: `require("neogrip.statusline").componen
 - It does not renew tokens. An expired bearer token fails the statement; store a fresh value under the
   same kvstore key and `:NGripDisconnect`.
 - It does not yet speak Entra ID interactive, service principal, managed identity or SSH tunnels.
+- MongoDB rides a third-party JDBC wrapper: querying and collection listing work, but field detail is
+  best-effort — the wrapper's metadata is unreliable, so columns appear when it manages a clean sample and
+  are quietly absent otherwise (ADR-0029).
 
 ## Development
 

@@ -37,3 +37,4 @@ in the author's Neovim configuration; where the two disagreed, the record states
 | 0026 | [An expired token fails the statement; nothing renews it silently](0026-token-expiry.md) | Accepted |
 | 0027 | [Sidecar methods are annotated functions returning typed records](0027-annotated-rpc-methods.md) | Accepted |
 | 0028 | [Every request runs on its own thread; the session is a lock](0028-virtual-threads-session-lock.md) | Accepted |
+| 0029 | [MongoDB metadata through the wrapper is best-effort](0029-mongodb-metadata-is-best-effort.md) | Accepted |

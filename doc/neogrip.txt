@@ -204,6 +204,7 @@ Json, Binary, Footer, Connection, Production, Count, Elapsed, Slow.
 - Entra ID interactive, service principal, managed identity and SSH tunnels
   are declared in the schema but not implemented yet.
 - MongoDB speaks the wrapper's script dialect, not SQL; collections have
-  sampled fields, not columns.
+  sampled fields, not columns, and that field sampling is best-effort - the
+  third-party wrapper's metadata is unreliable (ADR-0029).
 
 vim:tw=78:ts=8:noet:ft=help:norl:

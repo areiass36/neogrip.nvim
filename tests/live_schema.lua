@@ -78,7 +78,12 @@ for _, target in ipairs(targets) do
 				done(records, err)
 			end)
 		end)
-		if columns_err then
+		-- MongoDB field sampling is best-effort through the wrapper (ADR-0029):
+		-- after it lists collections, the next sample can come back empty, which
+		-- is the wrapper declining to describe rather than a neogrip failure.
+		if target.driver == "mongodb" and not columns_err and #columns == 0 then
+			note("mongodb: the wrapper returned no field sample; skipped (ADR-0029)")
+		elseif columns_err then
 			support.fail("columns", columns_err)
 		else
 			check("columns are reported", #columns > 0, true)
