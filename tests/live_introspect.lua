@@ -71,8 +71,9 @@ for _, engine in ipairs(ENGINES) do
 	if not java or not jar then
 		note("skipped: no JDK or no driver yet (both download on first use)")
 	else
-		local file =
-			vim.fs.normalize(("%s/db/introspect-test.%s"):format(vim.fn.stdpath("state"), engine.driver))
+		local state_dir = require("neogrip").state_dir
+		vim.fn.mkdir(state_dir, "p")
+		local file = vim.fs.normalize(("%s/introspect-test.%s"):format(state_dir, engine.driver))
 		pcall(vim.fn.delete, file)
 		local connection = {
 			id = ("__test_introspect_%s__"):format(engine.driver),
