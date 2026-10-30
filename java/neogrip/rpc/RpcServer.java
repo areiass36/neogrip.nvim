@@ -169,7 +169,12 @@ public final class RpcServer {
             response = Wire.result(id, result);
         } catch (InvocationTargetException e) {
             response = errorLine(id, e.getCause() == null ? e : e.getCause());
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // Throwable, not Exception: an Error leaves this thread without a
+            // response, and a client with no timeout then waits forever. That
+            // is not hypothetical - a class cache compiled by a newer JDK than
+            // the one running made every statement hang on a LinkageError
+            // instead of saying so. A request always gets an answer.
             response = errorLine(id, e);
         }
         send(response);
