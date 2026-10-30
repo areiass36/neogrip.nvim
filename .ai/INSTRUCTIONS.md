@@ -44,7 +44,7 @@ secret hygiene and portability rules are strict.
 stylua .
 stylua --check .
 luacheck lua tests
-javac -parameters -Xlint:all -Werror -d build/classes $(find java -name '*.java')
+javac --release 21 -parameters -Xlint:all -Werror -d build/classes $(find java -name '*.java')
 ```
 
 ## Comments
@@ -62,6 +62,10 @@ javac -parameters -Xlint:all -Werror -d build/classes $(find java -name '*.java'
   never fail, when the server is not there.
 - Tests never use real credentials and never require the real kvstore.nvim: `tests/minimal.lua` preloads
   `tests/fake_kvstore.lua` in its place.
+- Run the live suites with an isolated `XDG_DATA_HOME` (as CI does). The sidecar compiles into the
+  plugin's real data directory otherwise, and a run whose `NEOGRIP_TEST_JDK` is newer than the pinned JDK
+  then leaves a class cache the pinned runtime cannot load - which surfaces as every statement hanging,
+  not as a build error.
 
 ## Secret Rules
 

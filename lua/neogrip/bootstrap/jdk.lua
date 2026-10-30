@@ -47,6 +47,12 @@ local RELEASES = {
 
 local M = {}
 
+-- The Java language level the sidecar is written to and, more importantly,
+-- compiled against: the pinned runtime above is what has to load the classes,
+-- and a javac from a newer JDK would otherwise emit bytecode it cannot read
+-- (ADR-0005; virtual threads are what put the floor at 21, ADR-0028).
+M.LANGUAGE_LEVEL = 21
+
 M.dir = neogrip.data_dir .. "/jdk"
 
 --- The layout differs: macOS nests the runtime under Contents/Home. CI and

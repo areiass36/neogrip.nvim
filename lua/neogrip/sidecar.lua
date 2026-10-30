@@ -57,7 +57,22 @@ function M.build(on_done)
 
 	vim.fn.mkdir(M.classes_dir, "p")
 	-- -parameters keeps parameter names for the sidecar's named binding.
-	local command = { javac, "-encoding", "UTF-8", "-parameters", "-d", M.classes_dir }
+	--
+	-- --release pins the class file version to the JDK this plugin downloads
+	-- and runs (ADR-0005), rather than to whichever javac happened to be
+	-- found: NEOGRIP_TEST_JDK can point at a newer one, and classes compiled
+	-- by it then fail to load at runtime with UnsupportedClassVersionError -
+	-- which, before this flag, read as every statement hanging.
+	local command = {
+		javac,
+		"--release",
+		tostring(jdk.LANGUAGE_LEVEL),
+		"-encoding",
+		"UTF-8",
+		"-parameters",
+		"-d",
+		M.classes_dir,
+	}
 	vim.list_extend(command, files)
 	vim.system(
 		command,

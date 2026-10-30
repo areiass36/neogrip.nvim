@@ -12,6 +12,9 @@ lua_modules/
 # Java build output
 *.class
 build/
+# The isolated data directory the live suites run against, so a local run
+# never touches the plugin's real JDK, class cache or driver jars.
+.testdata/
 
 # Local tooling (stylua and luacheck binaries)
 .tools/
