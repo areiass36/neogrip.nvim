@@ -102,7 +102,7 @@ end
 local sent = {}
 runner.run = function(request, callback)
 	sent[#sent + 1] = request.sql
-	callback({ columns = {}, rows = {}, has_more = false }, nil)
+	callback({ columns = {}, rows = {}, done = true }, nil)
 	return { done = true }
 end
 grid.show = function() end

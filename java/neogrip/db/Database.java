@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
@@ -51,6 +52,7 @@ public final class Database implements RpcLifecycle {
 
     private volatile Connection bound;
     private volatile Statements statements;
+    private volatile Cursors cursors;
     private volatile Exports exports;
     private volatile Transactions transactions;
     private volatile Listings listings;
@@ -70,7 +72,8 @@ public final class Database implements RpcLifecycle {
         Connection connection = session.connection();
         if (connection != bound) {
             ReadonlyGuard guard = new ReadonlyGuard(session.readonly());
-            statements = new Statements(connection, running, guard);
+            cursors = new Cursors();
+            statements = new Statements(connection, running, guard, cursors);
             exports = new Exports(connection, running, guard);
             transactions = new Transactions(connection);
             listings = new Listings(connection);
@@ -121,8 +124,13 @@ public final class Database implements RpcLifecycle {
         return lockedSql(() -> bind().transactions.intercept(sql));
     }
 
-    public Object query(String sql, int limit, int offset, int timeoutSeconds) throws SQLException {
-        return lockedSql(() -> bind().statements.query(sql, limit, offset, timeoutSeconds));
+    public Object query(String hash, String sql, int limit, int timeoutSeconds) throws SQLException {
+        return lockedSql(() -> bind().statements.query(hash, sql, limit, timeoutSeconds));
+    }
+
+    /** The next batch of an open result (ADR-0031). */
+    public Types.QueryPage next(String hash, int limit) throws SQLException {
+        return lockedSql(() -> bind().statements.next(hash, limit));
     }
 
     public Types.UpdateResult exec(String sql, int timeoutSeconds) throws SQLException {
@@ -142,9 +150,38 @@ public final class Database implements RpcLifecycle {
     }
 
     /**
-     * Stop whatever runs. Handled on the read lane, so it is answerable while
-     * the worker is busy; the flag reaches a catalog sweep, which has no
-     * statement to cancel.
+     * Stop and close one open result (ADR-0031).
+     *
+     * The cancel itself takes no lock - Statement.cancel is the one JDBC call
+     * defined as safe from another thread - and only the close that follows
+     * waits for the connection to be free, because closing a ResultSet is
+     * touching it. Waiting here costs nothing structural: every request runs on
+     * its own virtual thread (ADR-0028), so the read loop is never what waits.
+     */
+    public boolean cancel(String hash) {
+        if (hash == null || hash.isEmpty()) {
+            return cancel();
+        }
+        Cursors open = cursors;
+        Cursor cursor = open == null ? null : open.peek(hash);
+        if (cursor == null) {
+            return false;
+        }
+        cursor.interrupt();
+        sessionLock.lock();
+        try {
+            open.detach(hash);
+            cursor.close();
+        } finally {
+            sessionLock.unlock();
+        }
+        return true;
+    }
+
+    /**
+     * Stop whatever runs. Handled without the session lock, so it is
+     * answerable while a statement is busy; the flag reaches a catalog sweep,
+     * which has no statement to cancel.
      */
     public boolean cancel() {
         cancelled.set(true);
@@ -236,7 +273,35 @@ public final class Database implements RpcLifecycle {
                     thread.setDaemon(true);
                     return thread;
                 })
-                .scheduleAtFixedRate(this::rollbackIfIdle, 15, 15, TimeUnit.SECONDS);
+                .scheduleAtFixedRate(this::sweepIdle, 15, 15, TimeUnit.SECONDS);
+    }
+
+    private void sweepIdle() {
+        rollbackIfIdle();
+        closeIdleCursors();
+    }
+
+    /**
+     * An open result nobody has continued is memory held on both sides, so one
+     * untouched for the configured window is closed (ADR-0031). Taken out of
+     * the registry first and closed under the session lock, which is where
+     * touching the connection belongs.
+     */
+    private void closeIdleCursors() {
+        Cursors open = cursors;
+        if (open == null) {
+            return;
+        }
+        List<Cursor> expired = open.expired(session.cursorIdleMs());
+        if (expired.isEmpty()) {
+            return;
+        }
+        sessionLock.lock();
+        try {
+            expired.forEach(Cursor::close);
+        } finally {
+            sessionLock.unlock();
+        }
     }
 
     private void rollbackIfIdle() {
@@ -262,6 +327,18 @@ public final class Database implements RpcLifecycle {
 
     @Override
     public void onShutdown() {
+        // Every open result goes before the connection does, which is the
+        // other reason this hook has to run before the Session one.
+        Cursors results = cursors;
+        if (results != null) {
+            sessionLock.lock();
+            try {
+                results.drain().forEach(Cursor::close);
+            } finally {
+                sessionLock.unlock();
+            }
+        }
+
         // Never commit on the way out (ADR-0013); this runs before the Session
         // closes the connection, because shutdown hooks fire in reverse order.
         Transactions open = transactions;

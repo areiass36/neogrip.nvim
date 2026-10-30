@@ -25,7 +25,8 @@ final class ConnectHandler {
             Map<String, Object> properties,
             Map<String, Object> auth,
             boolean readonly,
-            long transactionIdleSeconds)
+            long transactionIdleSeconds,
+            long cursorIdleSeconds)
             throws SQLException {
         Properties merged = new Properties();
         for (Map.Entry<String, Object> entry : properties.entrySet()) {
@@ -59,7 +60,7 @@ final class ConnectHandler {
             default -> throw new RpcException(Wire.AUTH_ERROR, "auth type not implemented yet: " + type);
         }
 
-        session.open(url, merged, readonly, transactionIdleSeconds);
+        session.open(url, merged, readonly, transactionIdleSeconds, cursorIdleSeconds);
         return new ConnectResult(session.product(), session.driverName(), session.capabilities());
     }
 }

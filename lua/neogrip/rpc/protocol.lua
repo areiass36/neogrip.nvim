@@ -2,8 +2,9 @@
 -- read their numbers from a single place: this file in Lua, Rpc.java in Java.
 local M = {}
 
--- Bumped only by an ADR; a major mismatch is refused at initialize.
-M.VERSION = 1
+-- Bumped only by an ADR; a major mismatch is refused at initialize. Version 2
+-- made a result a cursor the client names (ADR-0031).
+M.VERSION = 2
 
 M.ERRORS = {
 	-- JSON-RPC standard codes.

@@ -7,6 +7,11 @@ M.defaults = {
 	-- Rows fetched per page. One extra row is always requested to learn whether
 	-- another page exists without paying for a count(*) (ADR-0014).
 	limit = 200,
+	-- An open result is a cursor on the sidecar (ADR-0031), so paging forward
+	-- costs nothing. One that has seen no page for this long is closed, because
+	-- it holds rows in memory on both sides. Zero keeps them until the result is
+	-- replaced or the process ends.
+	cursor_idle_seconds = 300,
 	-- Statement timeout, enforced on the server. Zero means no timeout: the
 	-- query runs as long as it takes and :NGripCancel stops it by hand.
 	timeout_ms = 30000,

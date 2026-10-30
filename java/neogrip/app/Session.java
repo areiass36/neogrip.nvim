@@ -24,6 +24,7 @@ public final class Session implements RpcLifecycle {
     private volatile Connection connection;
     private volatile boolean readonly;
     private volatile long transactionIdleMs;
+    private volatile long cursorIdleMs;
     private volatile long lastRequestAt = System.currentTimeMillis();
     private volatile String url = "";
     private volatile Properties properties = new Properties();
@@ -32,8 +33,8 @@ public final class Session implements RpcLifecycle {
     private volatile Map<String, Object> capabilities = Map.of();
 
     /** The one connect per process; a second is a client bug, said plainly. */
-    public void open(String url, Properties properties, boolean readonly, long transactionIdleSeconds)
-            throws SQLException {
+    public void open(String url, Properties properties, boolean readonly, long transactionIdleSeconds,
+            long cursorIdleSeconds) throws SQLException {
         if (connection != null) {
             throw new RpcException(Wire.INVALID_REQUEST, "already connected");
         }
@@ -49,6 +50,7 @@ public final class Session implements RpcLifecycle {
         this.properties = properties;
         this.readonly = readonly;
         this.transactionIdleMs = transactionIdleSeconds * 1000L;
+        this.cursorIdleMs = cursorIdleSeconds * 1000L;
         describe(opened);
         this.connection = opened;
     }
@@ -102,6 +104,11 @@ public final class Session implements RpcLifecycle {
 
     public long transactionIdleMs() {
         return transactionIdleMs;
+    }
+
+    /** How long an open result nobody continues is kept (ADR-0031). */
+    public long cursorIdleMs() {
+        return cursorIdleMs;
     }
 
     public long lastRequestAt() {

@@ -14,6 +14,7 @@ local UNIT = {
 	"unit_grid",
 	"unit_scratch",
 	"unit_execute",
+	"unit_cursor",
 	"unit_identifier",
 	"unit_dialect",
 	"unit_store",
@@ -27,6 +28,7 @@ local UNIT = {
 local LIVE = {
 	"live_protocol",
 	"live_jdbc",
+	"live_cursor",
 	"live_flow",
 	"live_requery",
 	"live_tx",

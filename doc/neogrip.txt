@@ -136,13 +136,20 @@ README carries a complete recipe).
   first_column last_column  first_row last_row
   yank_cell    yank_row     yank_column       the stored value, untruncated
   sort_asc     sort_desc                      server-side, covers every page
-  page_next    page_prev                      the next page, re-run
+  page_next    page_prev                      continues the open result
   follow_fk                                   open the row this key points at
   show_document                               the whole Mongo document
   export       materialise  close
 
 Yanks and exports always read the stored value, never the drawn text: what is
 on screen may be truncated.
+
+A result stays open on the sidecar as a cursor, so `page_next` continues it
+instead of running the statement again, and `page_prev` is a redraw of rows
+that never left the editor. Sorting is the exception: the order has to be the
+server's to cover every page, so it opens a new result. An open result is let
+go when the grid shows another one, and after |neogrip-options|
+`cursor_idle_seconds` of nothing asking for a page.
 
 ==============================================================================
 7. LANGUAGE SERVICES                            *neogrip-lsp*
@@ -173,6 +180,7 @@ Defaults, overridable through `setup(opts)` (each is documented where it
 lives, `lua/neogrip/config.lua`): >lua
     require("neogrip").setup({
       limit = 200,                   -- rows per result page
+      cursor_idle_seconds = 300,     -- an open result nobody pages is closed
       timeout_ms = 30000,            -- server-side statement timeout (0 = none)
       max_column_width = 60,         -- grid truncation; yanks are whole
       null_text = "NULL",

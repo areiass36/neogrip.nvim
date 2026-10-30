@@ -239,6 +239,7 @@ function M.connect(connection, auth, on_done)
 				auth = auth,
 				readonly = connection.readonly or false,
 				transactionIdleSeconds = require("neogrip.config").get().transaction_idle_seconds,
+				cursorIdleSeconds = require("neogrip.config").get().cursor_idle_seconds,
 			}, function(result, connect_err)
 				if connect_err then
 					M.stop(launched)

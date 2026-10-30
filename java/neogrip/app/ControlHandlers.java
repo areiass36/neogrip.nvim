@@ -17,8 +17,12 @@ final class ControlHandlers {
         return Map.of();
     }
 
+    /**
+     * Stop what is running, or - given the hash of an open result - stop and
+     * close that one result (ADR-0031).
+     */
     @RpcMethod
-    Map<String, Object> cancel() {
-        return Map.of("cancelled", db.cancel());
+    Map<String, Object> cancel(String hash) {
+        return Map.of("cancelled", db.cancel(hash));
     }
 }

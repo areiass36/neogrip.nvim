@@ -28,7 +28,9 @@ local states = {}
 --- @class neogrip.GridState
 --- @field result table
 --- @field columns string[]
---- @field rows any[][]
+--- @field rows any[][] the page on screen
+--- @field pages any[][][] every page fetched so far, in order
+--- @field page integer which of them is on screen, 1-based
 --- @field spans table
 --- @field kinds table what each cell holds, keyed the same way as spans
 --- @field layout neogrip.Layout
@@ -38,6 +40,16 @@ local states = {}
 
 function M.state(bufnr)
 	return states[bufnr or vim.api.nvim_get_current_buf()]
+end
+
+--- How many rows came before the page on screen. The pages are kept, so this
+--- is a sum rather than a number the server has to be told (ADR-0031).
+local function page_offset(state)
+	local offset = 0
+	for index = 1, (state.page or 1) - 1 do
+		offset = offset + #(state.pages[index] or {})
+	end
+	return offset
 end
 
 --- The footer, and the byte span of each part so they can be told apart: which
@@ -51,7 +63,7 @@ end
 local function footer(state)
 	local result = state.result
 	local connection = result.connection or {}
-	local offset = result.offset or 0
+	local offset = page_offset(state)
 	local range = ("%d-%d"):format(offset + 1, offset + #state.rows)
 	if #state.rows == 0 then
 		range = "no rows"
@@ -66,13 +78,16 @@ local function footer(state)
 			range = ("%d row%s affected"):format(affected, affected == 1 and "" or "s")
 		end
 	end
+	-- More rows exist when the result is still open, and also when a page that
+	-- was already fetched sits ahead of the one on screen.
+	local more = result.done == false or (state.page or 1) < #(state.pages or {})
 	local elapsed = result.elapsed_ms or 0
 	local parts = {
 		{
 			("%s [%s]"):format(connection.name or "?", connection.driver or "?"),
 			connection.production and "NGripGridProduction" or "NGripGridConnection",
 		},
-		{ range .. (result.has_more and " (more)" or ""), "NGripGridCount" },
+		{ range .. (more and " (more)" or ""), "NGripGridCount" },
 		{ ("%d ms"):format(elapsed), elapsed >= SLOW_MS and "NGripGridSlow" or "NGripGridElapsed" },
 	}
 	if state.has_binary then
@@ -277,8 +292,11 @@ function M.show(result, context)
 
 	states[bufnr] = {
 		result = result,
+		bufnr = bufnr,
 		columns = result.columns or {},
 		rows = result.rows or {},
+		pages = { result.rows or {} },
+		page = 1,
 		documents = result.documents,
 		row = 1,
 		column = 1,
@@ -316,7 +334,9 @@ function M.close(bufnr)
 	M.buf = nil
 end
 
---- Replace the rows in place, for paging and sorting.
+--- Replace the whole result in place, for a re-run: a different sort, or the
+--- same statement asked again. The pages already fetched belong to the result
+--- that is being replaced, so they go with it.
 function M.set_result(bufnr, result)
 	local state = states[bufnr]
 	if not state then
@@ -325,7 +345,47 @@ function M.set_result(bufnr, result)
 	state.result = result
 	state.columns = result.columns or {}
 	state.rows = result.rows or {}
+	state.pages = { result.rows or {} }
+	state.page = 1
 	state.documents = result.documents
+	state.row = 1
+	state.column = math.min(state.column, math.max(#state.columns, 1))
+	render(bufnr)
+	local winid = find_window(bufnr)
+	if winid then
+		M.focus_cell(bufnr, winid)
+	end
+end
+
+--- Keep a batch continued from the open cursor and show it (ADR-0031). The
+--- shape only arrives again when a document result grew its own columns, which
+--- is the one case where a later batch can widen the table.
+function M.add_page(bufnr, batch)
+	local state = states[bufnr]
+	if not state then
+		return
+	end
+	state.pages[#state.pages + 1] = batch.rows or {}
+	if batch.columns and #batch.columns > #state.columns then
+		state.columns = batch.columns
+		state.result.column_types = batch.column_types
+		state.result.column_tables = batch.column_tables
+		state.result.column_schemas = batch.column_schemas
+	end
+	state.result.done = batch.done
+	state.result.elapsed_ms = batch.elapsed_ms
+	M.goto_page(bufnr, #state.pages)
+end
+
+--- Show a page that was already fetched. Going back is this and nothing more:
+--- the rows never left the editor.
+function M.goto_page(bufnr, index)
+	local state = states[bufnr]
+	if not state or not state.pages[index] then
+		return
+	end
+	state.page = index
+	state.rows = state.pages[index]
 	state.row = 1
 	state.column = math.min(state.column, math.max(#state.columns, 1))
 	render(bufnr)

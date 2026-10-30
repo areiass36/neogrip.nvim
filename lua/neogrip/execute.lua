@@ -65,7 +65,7 @@ end
 --- Prepare one statement and run it, showing the grid when `show` is set.
 --- Pulled out of M.run so a multi-statement selection can drive it once per
 --- statement in sequence.
---- @param p table { bufnr, connection, statement, limit, offset, order_by, descending, focus, show, label, on_done }
+--- @param p table { bufnr, connection, statement, limit, order_by, descending, focus, show, label, on_done }
 local function execute_statement(p)
 	local bufnr, connection = p.bufnr, p.connection
 	-- No driver wants the terminator, and Trino refuses a statement that
@@ -96,15 +96,14 @@ local function execute_statement(p)
 	end
 
 	-- No LIMIT is spliced into the statement: the driver caps the rows
-	-- (setMaxRows) and the runner skips the offset, which works the same
-	-- whatever the dialect spells it (ADR-0014).
+	-- (setMaxRows) and the result stays open as a cursor, which works the same
+	-- whatever the dialect spells it (ADR-0014, ADR-0031).
 	local handle
 	handle = runner.run({
 		connection = connection,
 		sql = sql,
 		mode = "query",
 		limit = p.limit,
-		offset = p.offset or 0,
 	}, function(result, err)
 		in_flight[bufnr] = nil
 		if err then
@@ -120,6 +119,15 @@ local function execute_statement(p)
 			result.base_sql = base_sql
 			result.order_by = p.order_by
 			result.descending = p.descending
+			-- The grid is about to hold a different result, and the one it held
+			-- is not coming back: the sidecar can let that cursor go now rather
+			-- than wait for its idle sweep (ADR-0031).
+			local previous_buf = grid.current_buf()
+			local previous = previous_buf and grid.state(previous_buf)
+			local stale = previous and previous.result and previous.result.hash
+			if stale and stale ~= result.hash then
+				runner.release(connection, stale)
+			end
 			grid.show(result, { origin_buf = bufnr, statement = p.statement, focus = p.focus })
 		end
 		if p.on_done then
@@ -139,7 +147,7 @@ local function summarise(label, result)
 	if result.update_count and result.update_count >= 0 then
 		return ("%s: %d rows affected"):format(label, result.update_count)
 	end
-	return ("%s: %d rows%s"):format(label, #(result.rows or {}), result.has_more and "+" or "")
+	return ("%s: %d rows%s"):format(label, #(result.rows or {}), result.done == false and "+" or "")
 end
 
 --- Run several statements against one connection one after another. The driver
@@ -165,7 +173,6 @@ local function run_sequence(bufnr, connection, outer, parts, opts)
 				end_line = outer.end_line,
 			},
 			limit = opts.limit,
-			offset = 0,
 			focus = last and opts.focus or false,
 			show = last,
 			label = label,
@@ -184,7 +191,7 @@ local function run_sequence(bufnr, connection, outer, parts, opts)
 	step(1)
 end
 
---- @param opts table|nil { bufnr, statement, visual, limit, offset, order_by, descending, on_done }
+--- @param opts table|nil { bufnr, statement, visual, limit, order_by, descending, on_done }
 function M.run(opts)
 	opts = opts or {}
 	local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
@@ -211,13 +218,12 @@ function M.run(opts)
 	local limit = opts.limit or connection.limit or settings.limit
 
 	-- A selection can hold several statements; one from the cursor or from a
-	-- rerun (paging, sorting) is always a single one. Splitting here is cheap
-	-- and leaves the single case untouched, since a lone statement splits into
-	-- one part. More than one is run as a sequence. The guards keep a rerun -
-	-- which carries its own single base_sql plus an offset or a sort - on the
-	-- single path no matter what.
+	-- rerun (sorting) is always a single one. Splitting here is cheap and
+	-- leaves the single case untouched, since a lone statement splits into one
+	-- part. More than one is run as a sequence. The guards keep a rerun - which
+	-- carries its own single base_sql - on the single path no matter what.
 	local parts = split.statements(statement.text, vim.b[bufnr].neogrip_dialect)
-	if #parts > 1 and not opts.statement and not opts.order_by and (opts.offset or 0) == 0 then
+	if #parts > 1 and not opts.statement and not opts.order_by then
 		return run_sequence(bufnr, connection, statement, parts, {
 			limit = limit,
 			focus = opts.focus,
@@ -234,7 +240,6 @@ function M.run(opts)
 		connection = connection,
 		statement = statement,
 		limit = limit,
-		offset = opts.offset or 0,
 		order_by = opts.order_by,
 		descending = opts.descending,
 		focus = opts.focus,
@@ -260,35 +265,69 @@ function M.cancel(bufnr)
 	end
 end
 
---- Re-run the grid's statement with a different page or order.
+--- Re-run the grid's statement, which is how a different sort is applied: the
+--- order has to be the server's to cover every page, so it opens a new result.
 local function rerun(state, changes)
 	local result = state.result
 	M.run(vim.tbl_extend("force", {
 		bufnr = state.origin_buf or vim.api.nvim_get_current_buf(),
 		statement = { text = result.base_sql or result.sql, start_line = nil },
 		limit = result.limit,
-		offset = result.offset or 0,
 		order_by = result.order_by,
 		descending = result.descending,
 		focus = false,
 	}, changes))
 end
 
+--- Move a page. Backwards is always a redraw and forwards usually is too: a
+--- page already fetched never left the editor, and the one after it is the next
+--- batch of the cursor the sidecar still holds (ADR-0031). Nothing re-runs the
+--- statement, so no page boundary can show a changed world.
 function M.page(state, delta)
-	local result = state.result
-	local limit = result.limit or config.get().limit
-	local offset = (result.offset or 0) + delta * limit
-	if offset < 0 then
+	if not state then
+		return
+	end
+	local bufnr = state.bufnr or grid.current_buf()
+	if not bufnr then
+		return
+	end
+
+	local target = (state.page or 1) + delta
+	if target < 1 then
 		return neogrip.notify("already on the first page")
 	end
-	if delta > 0 and not result.has_more then
+	if state.pages[target] then
+		return grid.goto_page(bufnr, target)
+	end
+	if delta < 0 then
+		return neogrip.notify("already on the first page")
+	end
+
+	local result = state.result
+	if result.done ~= false or not result.hash then
 		return neogrip.notify("no further rows")
 	end
-	rerun(state, { offset = offset })
+
+	local handle = runner.run({
+		connection = result.connection,
+		hash = result.hash,
+		mode = "next",
+		limit = result.limit or config.get().limit,
+	}, function(batch, err)
+		in_flight[state.origin_buf or bufnr] = nil
+		if err then
+			if err.cancelled then
+				return neogrip.notify("cancelled")
+			end
+			return neogrip.notify(err.message, vim.log.levels.ERROR)
+		end
+		grid.add_page(bufnr, batch)
+	end)
+	in_flight[state.origin_buf or bufnr] = handle
 end
 
 function M.sort(state, column, descending)
-	rerun(state, { order_by = column, descending = descending, offset = 0 })
+	rerun(state, { order_by = column, descending = descending })
 end
 
 return M

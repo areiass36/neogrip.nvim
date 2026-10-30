@@ -2,131 +2,75 @@ package neogrip.db;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
-import neogrip.db.types.Types.Column;
 import neogrip.db.types.Types.QueryPage;
 import neogrip.db.types.Types.UpdateResult;
 
-/** Running statements, and turning their results into the wire's records. */
+/** Running statements, and turning their results into the wire records. */
 public final class Statements {
     private final Connection connection;
     private final AtomicReference<Statement> running;
     private final ReadonlyGuard guard;
+    private final Cursors cursors;
 
-    public Statements(Connection connection, AtomicReference<Statement> running, ReadonlyGuard guard) {
+    public Statements(Connection connection, AtomicReference<Statement> running, ReadonlyGuard guard,
+            Cursors cursors) {
         this.connection = connection;
         this.running = running;
         this.guard = guard;
+        this.cursors = cursors;
     }
 
     /**
-     * @param limit rows to return, 0 for everything. One extra is fetched to
-     *              learn whether another page exists, which is cheaper than a
-     *              second count(*) query.
+     * Open a result and answer its first batch (ADR-0031).
+     *
+     * @param hash  the name the client gave this result, under which the
+     *              cursor is kept so the client can continue it. Without one,
+     *              nothing is kept and `done` only reports whether more rows
+     *              exist - which is what a client that never continues wants.
+     * @param limit rows in this batch, 0 for everything in one answer.
      * @return a QueryPage, or an UpdateResult for a statement with no rows.
      */
-    public Object query(String sql, int limit, int offset, int timeoutSeconds) throws SQLException {
+    public Object query(String hash, String sql, int limit, int timeoutSeconds) throws SQLException {
         guard.refuseWrites(sql);
         long start = System.currentTimeMillis();
-        try (Statement statement =
-                connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)) {
-            running.set(statement);
-            if (timeoutSeconds > 0) {
-                tolerate(() -> statement.setQueryTimeout(timeoutSeconds));
+        boolean named = hash != null && !hash.isEmpty();
+        Cursor cursor = Cursor.open(connection, running, sql, limit, timeoutSeconds, named);
+        // Registration is tracked rather than inferred from `named`: a hash
+        // that is already live is refused, and detaching it on the way out
+        // would then take somebody else's cursor out of the registry without
+        // closing it - a leak caused by the client bug that was refused.
+        boolean registered = false;
+        boolean keep = false;
+        try {
+            if (!cursor.hasRows()) {
+                return new UpdateResult(cursor.updateCount(), System.currentTimeMillis() - start);
             }
-            if (limit > 0) {
-                // The driver asks the server for this many and no more, which
-                // beats rewriting the statement with a LIMIT the dialect may
-                // spell differently.
-                tolerate(() -> statement.setMaxRows(limit + offset + 1));
-                tolerate(() -> statement.setFetchSize(Math.min(limit + 1, 1000)));
+            if (named) {
+                // Registered before the first row is read, so a cancel naming
+                // this hash can reach the statement while it is still running.
+                cursors.keep(hash, cursor);
+                registered = true;
             }
-
-            boolean hasResult = statement.execute(sql);
-            if (!hasResult) {
-                return new UpdateResult(statement.getUpdateCount(), System.currentTimeMillis() - start);
-            }
-            try (ResultSet rows = statement.getResultSet()) {
-                return page(rows, limit, offset, start);
-            }
+            QueryPage page = cursor.batch(hash, limit, start);
+            keep = registered && !page.done();
+            return page;
         } finally {
-            running.set(null);
+            if (!keep) {
+                if (registered) {
+                    cursors.detach(hash);
+                }
+                cursor.close();
+            }
         }
     }
 
-    private static QueryPage page(ResultSet rows, int limit, int offset, long start) throws SQLException {
-        ResultSetMetaData meta = rows.getMetaData();
-        int columnCount = meta.getColumnCount();
-
-        // The MongoDB driver answers with a single column holding a document;
-        // the grid wants one column per field.
-        Documents documents = Documents.detect(meta, columnCount);
-
-        List<String> names = new ArrayList<>();
-        List<String> types = new ArrayList<>();
-        // Where each column came from, which is what lets a cell be followed
-        // back to the row it belongs to: a foreign key in a result is only
-        // useful if the editor knows which table the value is a key into. A
-        // document result has no tables, so these stay empty for one.
-        List<String> tables = new ArrayList<>();
-        List<String> schemas = new ArrayList<>();
-        if (documents == null) {
-            for (int i = 1; i <= columnCount; i++) {
-                final int column = i;
-                names.add(meta.getColumnLabel(i));
-                types.add(Values.typeName(meta, i));
-                tables.add(optional(() -> meta.getTableName(column)));
-                schemas.add(optional(() -> meta.getSchemaName(column)));
-            }
-        }
-
-        List<List<Object>> collected = new ArrayList<>();
-        int skipped = 0;
-        boolean hasMore = false;
-        while (rows.next()) {
-            if (skipped < offset) {
-                skipped++;
-                continue;
-            }
-            if (limit > 0 && collected.size() >= limit) {
-                hasMore = true;
-                break;
-            }
-            if (documents != null) {
-                collected.add(documents.row(rows, names, types));
-            } else {
-                List<Object> row = new ArrayList<>(columnCount);
-                for (int i = 1; i <= columnCount; i++) {
-                    row.add(Values.read(rows, meta, i));
-                }
-                collected.add(row);
-            }
-        }
-
-        if (documents != null) {
-            // A field missing from an earlier document has to be filled in
-            // once the later ones have revealed it.
-            documents.pad(collected, names.size());
-        }
-
-        // Built after the rows: a document result's names keep growing while
-        // the rows are read, so only now is the column list complete.
-        List<Column> columns = new ArrayList<>(names.size());
-        for (int i = 0; i < names.size(); i++) {
-            columns.add(new Column(
-                    names.get(i),
-                    types.get(i),
-                    i < tables.size() ? tables.get(i) : null,
-                    i < schemas.size() ? schemas.get(i) : null));
-        }
-        return new QueryPage(columns, collected, hasMore, System.currentTimeMillis() - start);
+    /** The next batch of a result already open under this hash. */
+    public QueryPage next(String hash, int limit) throws SQLException {
+        return cursors.next(hash, limit);
     }
 
     public UpdateResult exec(String sql, int timeoutSeconds) throws SQLException {
@@ -175,7 +119,7 @@ public final class Statements {
 
     /**
      * Apply a setting the driver may not have. Not every JDBC driver
-     * implements every knob - MongoDB's refuses setQueryTimeout outright - and
+     * implements every knob - MongoDB refuses setQueryTimeout outright - and
      * a missing one is no reason to fail the query.
      */
     static void tolerate(SqlAction action) {
@@ -189,32 +133,6 @@ public final class Statements {
     @FunctionalInterface
     interface SqlAction {
         void run() throws SQLException;
-    }
-
-    /**
-     * Read something JDBC describes as optional, and treat it as optional.
-     *
-     * getTableName and getSchemaName are the cases this exists for: DuckDB
-     * answers both with an empty string, SQLite names the table but has no
-     * schema layer to name, an expression has no table to come from on any
-     * engine, and some drivers throw rather than say so. A result the user
-     * asked for still has to come back.
-     *
-     * @return null for a value that is absent, empty or unreadable, so the
-     *         record leaves the field out instead of carrying an empty name.
-     */
-    private static String optional(SqlText source) {
-        try {
-            String value = source.get();
-            return value == null || value.isEmpty() ? null : value;
-        } catch (SQLException | RuntimeException unsupported) {
-            return null;
-        }
-    }
-
-    @FunctionalInterface
-    private interface SqlText {
-        String get() throws SQLException;
     }
 
     private static boolean isShapeless(SQLException e) {

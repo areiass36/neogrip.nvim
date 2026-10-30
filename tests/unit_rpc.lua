@@ -2,6 +2,7 @@
 -- server-initiated traffic and lifecycle. Everything here runs with no JVM and
 -- no network - the mock is another headless nvim.
 local support = require("tests.support")
+local protocol = require("neogrip.rpc.protocol")
 local client = require("neogrip.rpc.client")
 
 support.describe("rpc client")
@@ -12,7 +13,7 @@ local mock_cmd = { vim.v.progpath, "--clean", "-l", mock_path }
 local function start(handlers)
 	local c = client.start(mock_cmd, handlers)
 	local result, err = support.sync(function(done)
-		c:request("initialize", { protocolVersion = 1, clientInfo = { name = "tests" } }, done)
+		c:request("initialize", { protocolVersion = protocol.VERSION, clientInfo = { name = "tests" } }, done)
 	end, 20000)
 	return c, result, err
 end
@@ -20,7 +21,7 @@ end
 -- Handshake.
 local c, init_result, init_err = start()
 support.check("initialize answers with the protocol version", init_err, nil)
-support.check("initialize carries the version", init_result and init_result.protocolVersion, 1)
+support.check("initialize carries the version", init_result and init_result.protocolVersion, protocol.VERSION)
 
 -- Correlation across several requests on one process.
 local first = support.sync(function(done)
@@ -55,7 +56,7 @@ local c2 = client.start(mock_cmd, {
 	end,
 })
 support.sync(function(done)
-	c2:request("initialize", { protocolVersion = 1 }, done)
+	c2:request("initialize", { protocolVersion = protocol.VERSION }, done)
 end, 20000)
 support.sync(function(done)
 	c2:request("emit_notification", {}, done)
@@ -75,7 +76,7 @@ local c3 = client.start(mock_cmd, {
 	end,
 })
 support.sync(function(done)
-	c3:request("initialize", { protocolVersion = 1 }, done)
+	c3:request("initialize", { protocolVersion = protocol.VERSION }, done)
 end, 20000)
 local asked = support.sync(function(done)
 	c3:request("ask", {}, done)
@@ -121,7 +122,7 @@ local c5 = client.start(mock_cmd, {
 	end,
 })
 support.sync(function(done)
-	c5:request("initialize", { protocolVersion = 1 }, done)
+	c5:request("initialize", { protocolVersion = protocol.VERSION }, done)
 end, 20000)
 c5:close()
 support.wait(function()

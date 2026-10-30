@@ -179,6 +179,20 @@ function M.run(connection, sql, opts)
 	end, opts.timeout)
 end
 
+--- The next batch of a result left open under `hash` (ADR-0031).
+function M.next_batch(connection, hash, limit)
+	return M.sync(function(done)
+		require("neogrip.runner").run({
+			connection = connection,
+			mode = "next",
+			hash = hash,
+			limit = limit or 0,
+		}, function(result, err)
+			done(result, err)
+		end)
+	end)
+end
+
 --- First cell of the first row, as a number when it looks like one.
 function M.scalar(connection, sql)
 	local result, err = M.run(connection, sql)

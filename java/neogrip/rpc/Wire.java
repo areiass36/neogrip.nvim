@@ -8,7 +8,7 @@ package neogrip.rpc;
 public final class Wire {
     private Wire() {}
 
-    public static final int PROTOCOL_VERSION = 1;
+    public static final int PROTOCOL_VERSION = 2;
 
     public static final int PARSE_ERROR = -32700;
     public static final int INVALID_REQUEST = -32600;

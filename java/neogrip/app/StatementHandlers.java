@@ -16,15 +16,22 @@ final class StatementHandlers {
         this.db = db;
     }
 
+    /**
+     * Open a result, or continue one (ADR-0031): no `sql` is what makes this a
+     * continuation of the result the client named `hash`.
+     */
     @RpcMethod
-    RpcResult<?> query(String sql, int limit, int offset, int timeoutSeconds) throws SQLException {
+    RpcResult<?> query(String hash, String sql, int limit, int timeoutSeconds) throws SQLException {
+        if (sql == null) {
+            return RpcResult.of(db.next(hash, limit));
+        }
         // A plain BEGIN/COMMIT/ROLLBACK is a transaction command, not a query
-        // (ADR-0013); everything else answers with a page or an update count.
+        // (ADR-0013); everything else answers with a batch or an update count.
         var intercepted = db.intercept(sql);
         if (intercepted.isPresent()) {
             return RpcResult.of(intercepted.get());
         }
-        return RpcResult.of(db.query(sql, limit, offset, timeoutSeconds));
+        return RpcResult.of(db.query(hash, sql, limit, timeoutSeconds));
     }
 
     @RpcMethod

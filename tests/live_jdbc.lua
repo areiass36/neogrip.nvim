@@ -101,15 +101,17 @@ for _, driver in ipairs(order) do
 	end
 end
 
-support.describe("live: paging is the driver's job")
+support.describe("live: a page is a batch of the result the client named")
 local pg = connections.postgres
 if support.reachable(pg) then
 	local page = support.run(pg, "select * from torture order by id", { limit = 1 })
 	check("one row on the page", #page.rows, 1)
-	check("and the driver says there is more", page.has_more, true)
-	local second = support.run(pg, "select * from torture order by id", { limit = 1, offset = 1 })
-	check("the next page is the next row", second.rows[1][1], 2)
-	check("and there is no more", second.has_more, false)
+	check("and the result stays open", page.done, false)
+	check("under the name the client gave it", type(page.hash), "string")
+	local second = support.next_batch(pg, page.hash, 1)
+	check("the next batch is the next row", second.rows[1][1], 2)
+	check("and finishes the result", second.done, true)
+	check("a continuation describes no columns again", second.columns, nil)
 else
 	note("skipped")
 end

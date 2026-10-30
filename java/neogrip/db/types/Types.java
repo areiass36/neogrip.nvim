@@ -18,7 +18,14 @@ public final class Types {
     /** One result column; table/schema only when the driver will say (nulls omitted). */
     public record Column(String name, String type, String table, String schema) {}
 
-    public record QueryPage(List<Column> columns, List<List<Object>> rows, boolean hasMore, long elapsedMs) {}
+    /**
+     * One batch of an open result (ADR-0031). `hash` is echoed back so the
+     * client can assert it is appending the right rows to the right result;
+     * `columns` is absent on a continuation unless a document result grew its
+     * own, and `done` says the result has no more rows and is already closed.
+     */
+    public record QueryPage(
+            String hash, List<Column> columns, List<List<Object>> rows, boolean done, long elapsedMs) {}
 
     public record UpdateResult(int updateCount, long elapsedMs) {}
 

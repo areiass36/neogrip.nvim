@@ -16,6 +16,9 @@ local function respond_error(id, code, message, data)
 	send({ jsonrpc = "2.0", id = id, error = { code = code, message = message, data = data } })
 end
 
+-- Kept in step with lua/neogrip/rpc/protocol.lua by hand: this script runs
+-- under nvim --clean, with the plugin nowhere on its path.
+local VERSION = 2
 local initialized = false
 
 for line in io.lines() do
@@ -28,12 +31,12 @@ for line in io.lines() do
 		if method == "shutdown" then
 			break
 		elseif method == "initialize" then
-			if params.protocolVersion ~= 1 then
+			if params.protocolVersion ~= VERSION then
 				respond_error(id, -32002, "protocol version mismatch")
 				break
 			end
 			initialized = true
-			respond(id, { protocolVersion = 1, sidecarInfo = { name = "mock" } })
+			respond(id, { protocolVersion = VERSION, sidecarInfo = { name = "mock" } })
 		elseif not initialized then
 			respond_error(id, -32002, "initialize first")
 		elseif method == "ping" then

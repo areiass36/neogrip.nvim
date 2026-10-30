@@ -4,7 +4,7 @@ The contract between the Lua plugin and the Java sidecar. This document is the s
 here bumps `protocolVersion`, is recorded in an ADR first, and lands in the same commit as both
 implementations (`lua/neogrip/rpc/` and `java/neogrip/`).
 
-Current `protocolVersion`: **1**.
+Current `protocolVersion`: **2**.
 
 ## Transport and framing
 
@@ -46,8 +46,8 @@ sweep at a time, outside the lock, on sibling connections of its own.
 ### initialize
 
 ```json
-→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientInfo":{"name":"neogrip.nvim"}}}
-← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"sidecarInfo":{"java":"21.0.3"}}}
+→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":2,"clientInfo":{"name":"neogrip.nvim"}}}
+← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":2,"sidecarInfo":{"java":"21.0.3"}}}
 ```
 
 A major-version mismatch is refused with error `-32002` and the sidecar exits.
@@ -73,12 +73,17 @@ Implemented auth types: `none`, `password`, and `token` (a bearer token handed t
 `accessToken` property - SQL Server and Trino both read it). `entra_interactive`, `service_principal` and
 `managed_identity` are carried by the schema and refused by the sidecar with `-32011` until their phase
 lands. `transactionIdleSeconds` arms the idle-transaction watchdog (ADR-0013); zero disables it.
+`cursorIdleSeconds` is how long an untouched open result is kept before the same watchdog closes it
+(ADR-0031); zero disables that sweep.
 
 ### Statements
 
-- `query {sql, limit, offset, timeoutSeconds}` → `{columns:[{name,type,table,schema}], rows:[[...]],
-  hasMore, elapsedMs}` — at most `limit` rows per page (ADR-0014); cell values are strings, numbers,
-  booleans or null, rendered per `java/neogrip/Values.java`'s rules.
+- `query {hash, sql, limit, timeoutSeconds}` → `{hash, columns:[{name,type,table,schema}], rows:[[...]],
+  done, elapsedMs}` — at most `limit` rows per batch; cell values are strings, numbers, booleans or null,
+  rendered per `java/neogrip/db/Values.java`'s rules. A result is a cursor the client names: see
+  [Cursors](#cursors).
+- `query {hash, limit}` → `{hash, rows, done, elapsedMs}` — the next batch of the result named `hash`.
+  No `sql` is what makes it a continuation rather than a new statement.
 - `exec {sql, timeoutSeconds}` → `{updateCount, elapsedMs}`
 - A plain `BEGIN`/`COMMIT`/`ROLLBACK` sent as `query` or `exec` is intercepted and mapped to the JDBC
   calls (ADR-0013); the result is `{transaction: true|false}` saying whether the session now has one open.
@@ -87,10 +92,35 @@ lands. `transactionIdleSeconds` arms the idle-transaction watchdog (ADR-0013); z
 - `export {sql, path, format, nullMarker, timeoutSeconds}` → `{rows, path}` — streams to `path`,
   format `csv` or `json`.
 
-### Control (read thread)
+### Control
 
 - `ping {}` → `{}`
-- `cancel {}` → `{cancelled}` — calls `Statement.cancel()` on whatever is running.
+- `cancel {}` → `{cancelled}` — calls `Statement.cancel()` on whatever is running. Takes no lock, so it
+  is answerable while a statement holds the connection.
+- `cancel {hash}` → `{cancelled}` — cancels and closes one result (ADR-0031). The cancel itself takes no
+  lock either; the close that follows it does, so this answers late while another statement is running.
+
+## Cursors
+
+A `query` carrying `sql` opens a result and the sidecar keeps its `ResultSet` open, registered under the
+`hash` the client minted for it (ADR-0031). `query` with the same `hash` and no `sql` returns the next
+batch; `done` is true when the result has no more rows, and the sidecar has then already closed it.
+
+- The `hash` is an opaque string the client chooses, and the sidecar never interprets it. It is echoed in
+  every response so a client can assert it is appending the right rows to the right result.
+- `done: false` means the hash is still valid. A `hash` that is unknown, or already finished, is
+  `-32600`; so is opening a second result under a hash that is still live.
+- A named result opens with the window: the sidecar pulls at most 1001 rows per execution, 1000 to hand
+  out and one to learn the table has more, so the pages after the first cost nothing. A `query` with no
+  `hash` asks for `limit + 1` instead, which is what a preview or a sample wants. When the window drains
+  the sidecar re-executes the same statement and skips what it already delivered, keeping the same hash.
+  The client is not told - a refill is indistinguishable from a continuation.
+- A document result (ADR-0020) discovers its columns while reading, so a continuation may carry a grown
+  `columns` list. When it does, the client replaces its own; a field absent from an earlier document is
+  null in that row.
+- `limit: 0` means "everything": no cursor is kept and `done` is true.
+- Lifetime: `cancel {hash}`, `cursorIdleSeconds` of no use, at most four live per connection (oldest
+  closed first), and all of them on shutdown.
 
 ### Catalog
 
