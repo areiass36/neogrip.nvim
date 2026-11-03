@@ -290,7 +290,12 @@ local function cached_columns(connection, catalog, schema, table_name)
 	end
 	for _, record in ipairs(snapshot) do
 		if tostring(record.name) == tostring(table_name) then
-			return record.columns
+			-- Empty is not an answer; see store.columns for why a collection
+			-- arrives that way and what it costs to believe it.
+			if record.columns and #record.columns > 0 then
+				return record.columns
+			end
+			return nil
 		end
 	end
 	return nil

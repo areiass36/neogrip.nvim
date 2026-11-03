@@ -195,10 +195,22 @@ local function table_of(connection, catalog, schema_name, table_name)
 	return schema and schema.by_table[tostring(table_name or "")] or nil
 end
 
+--- The columns the sweep recorded, or nil when it recorded none.
+---
+--- An empty list is not an answer: a table always has a column, so zero of
+--- them means the sweep never filled this entry in - which is exactly what a
+--- MongoDB collection gets, because the snapshot lists collections with no
+--- columns and their fields come from sampling instead. Returning the empty
+--- list made that sampling unreachable, and the editor blamed the wrapper for
+--- declining (ADR-0029) when it had never been asked.
 --- @return table[]|nil
 function M.columns(connection, catalog, schema_name, table_name)
 	local entry = table_of(connection, catalog, schema_name, table_name)
-	return entry and entry.columns or nil
+	local columns = entry and entry.columns
+	if columns and #columns > 0 then
+		return columns
+	end
+	return nil
 end
 
 --- One table, in the shape schema.details answers with.
