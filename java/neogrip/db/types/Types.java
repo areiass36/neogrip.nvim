@@ -2,14 +2,14 @@ package neogrip.db.types;
 
 import java.util.List;
 import java.util.Map;
-import neogrip.rpc.Json;
+import neogrip.dataformat.json.JsonName;
 
 /**
  * The domain records the wire already implies, one file because they are
  * fifteen lines of shape and no behavior. Adding a future method means
- * declaring its record here and returning it from a handler; JsonCodec
+ * declaring its record here and returning it from a handler; JsonMapper
  * serializes components in declaration order, leaves null ones out (that is
- * how the wire's optional fields behave), and honours @Json for the names
+ * how the wire's optional fields behave), and honours @JsonName for the names
  * that are not Java spellings.
  */
 public final class Types {
@@ -48,15 +48,15 @@ public final class Types {
             String name,
             String type,
             boolean nullable,
-            @Json("is_pk") boolean isPk,
-            @Json("default_expr") String defaultExpr,
+            @JsonName("is_pk") boolean isPk,
+            @JsonName("default_expr") String defaultExpr,
             String remarks,
-            @Json("auto_increment") Boolean autoIncrement,
+            @JsonName("auto_increment") Boolean autoIncrement,
             Boolean generated,
             int position) {}
 
     /** A sampled MongoDB field: collections have no columns to ask for. */
-    public record MongoField(String name, String type, boolean nullable, @Json("is_pk") boolean isPk, int count) {}
+    public record MongoField(String name, String type, boolean nullable, @JsonName("is_pk") boolean isPk, int count) {}
 
     /** One table of a schema snapshot: name, kind and every column at once. */
     public record TableWithColumns(String name, String kind, String remarks, List<ColumnRow> columns) {}
@@ -69,19 +69,19 @@ public final class Types {
             String schema,
             String table,
             List<String> columns,
-            @Json("ref_columns") List<String> refColumns,
-            @Json("on_delete") String onDelete,
-            @Json("on_update") String onUpdate) {}
+            @JsonName("ref_columns") List<String> refColumns,
+            @JsonName("on_delete") String onDelete,
+            @JsonName("on_update") String onUpdate) {}
 
     /** Everything the table view draws. The arrays are always present, never null. */
     public record TableDetails(
             List<ColumnRow> rows,
-            @Json("primary_key") List<String> primaryKey,
-            @Json("primary_key_name") String primaryKeyName,
+            @JsonName("primary_key") List<String> primaryKey,
+            @JsonName("primary_key_name") String primaryKeyName,
             String remarks,
             List<IndexInfo> indexes,
-            @Json("foreign_keys") List<KeyInfo> foreignKeys,
-            @Json("referenced_by") List<KeyInfo> referencedBy) {}
+            @JsonName("foreign_keys") List<KeyInfo> foreignKeys,
+            @JsonName("referenced_by") List<KeyInfo> referencedBy) {}
 
     /** The server's own CREATE TABLE, or null for the engines that have none. */
     public record Ddl(String ddl) {}

@@ -1,4 +1,4 @@
-package neogrip.rpc;
+package neogrip.dataformat.json;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -13,7 +13,7 @@ import java.io.UncheckedIOException;
  * escaped, and a lone surrogate is replaced rather than passed through,
  * because it would make the decoder on the other side fail.
  */
-public final class JsonStream {
+public final class JsonWriter {
     private static final byte TOP = 0;
     private static final byte OBJECT_EMPTY = 1;
     private static final byte OBJECT_AFTER = 2;
@@ -25,7 +25,7 @@ public final class JsonStream {
     private byte[] stack = new byte[16];
     private int depth = 0;
 
-    public JsonStream(Appendable out) {
+    public JsonWriter(Appendable out) {
         this.out = out;
         stack[0] = TOP;
     }
@@ -69,14 +69,14 @@ public final class JsonStream {
         }
     }
 
-    public JsonStream beginObject() {
+    public JsonWriter beginObject() {
         beforeValue();
         append('{');
         push(OBJECT_EMPTY);
         return this;
     }
 
-    public JsonStream endObject() {
+    public JsonWriter endObject() {
         if (stack[depth] != OBJECT_EMPTY && stack[depth] != OBJECT_AFTER) {
             throw new IllegalStateException("not inside an object");
         }
@@ -85,14 +85,14 @@ public final class JsonStream {
         return this;
     }
 
-    public JsonStream beginArray() {
+    public JsonWriter beginArray() {
         beforeValue();
         append('[');
         push(ARRAY_EMPTY);
         return this;
     }
 
-    public JsonStream endArray() {
+    public JsonWriter endArray() {
         if (stack[depth] != ARRAY_EMPTY && stack[depth] != ARRAY_AFTER) {
             throw new IllegalStateException("not inside an array");
         }
@@ -101,7 +101,7 @@ public final class JsonStream {
         return this;
     }
 
-    public JsonStream name(String key) {
+    public JsonWriter name(String key) {
         switch (stack[depth]) {
             case OBJECT_EMPTY -> stack[depth] = NAME_PENDING;
             case OBJECT_AFTER -> {
@@ -115,7 +115,7 @@ public final class JsonStream {
         return this;
     }
 
-    public JsonStream value(String text) {
+    public JsonWriter value(String text) {
         beforeValue();
         if (text == null) {
             append("null");
@@ -125,13 +125,13 @@ public final class JsonStream {
         return this;
     }
 
-    public JsonStream value(long number) {
+    public JsonWriter value(long number) {
         beforeValue();
         append(Long.toString(number));
         return this;
     }
 
-    public JsonStream value(double number) {
+    public JsonWriter value(double number) {
         beforeValue();
         // NaN and infinity are not JSON; they go out as text so the editor can
         // still show what the database returned.
@@ -143,13 +143,13 @@ public final class JsonStream {
         return this;
     }
 
-    public JsonStream value(boolean flag) {
+    public JsonWriter value(boolean flag) {
         beforeValue();
         append(flag ? "true" : "false");
         return this;
     }
 
-    public JsonStream nullValue() {
+    public JsonWriter nullValue() {
         beforeValue();
         append("null");
         return this;

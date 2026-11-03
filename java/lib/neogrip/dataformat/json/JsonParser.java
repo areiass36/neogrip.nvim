@@ -1,4 +1,4 @@
-package neogrip.rpc;
+package neogrip.dataformat.json;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -15,16 +15,16 @@ import java.util.Map;
  * IllegalArgumentException naming the position; the caller decides whether
  * that is a protocol error or a driver banner to skip.
  */
-public final class JsonReader {
+public final class JsonParser {
     private final String text;
     private int position;
 
-    private JsonReader(String text) {
+    private JsonParser(String text) {
         this.text = text;
     }
 
     public static Object parse(String text) {
-        JsonReader reader = new JsonReader(text);
+        JsonParser reader = new JsonParser(text);
         reader.skipWhitespace();
         Object value = reader.value();
         reader.skipWhitespace();

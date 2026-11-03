@@ -1,8 +1,8 @@
-package neogrip.db;
+package neogrip.dataformat.csv;
 
 /** RFC 4180 fields, for the streaming export. */
-public final class Csv {
-    private Csv() {}
+public final class CsvField {
+    private CsvField() {}
 
     public static String field(String value, String nullMarker) {
         if (value == null) {

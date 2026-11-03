@@ -18,9 +18,9 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import neogrip.dataformat.json.JsonMapper;
+import neogrip.dataformat.json.JsonWriter;
 import neogrip.db.types.Types;
-import neogrip.rpc.JsonCodec;
-import neogrip.rpc.JsonStream;
 import neogrip.rpc.RpcException;
 import neogrip.rpc.Wire;
 
@@ -310,7 +310,7 @@ public final class Introspect {
             AtomicBoolean cancelled)
             throws IOException {
         try {
-            JsonStream out = new JsonStream(file);
+            JsonWriter out = new JsonWriter(file);
             out.beginObject();
             out.name("at").value(System.currentTimeMillis() / 1000);
             out.name("product").value(product);
@@ -348,7 +348,7 @@ public final class Introspect {
      * of them is the one that can come back empty on an engine that does not
      * support it.
      */
-    private static void writeTable(JsonStream out, Snapshot.SchemaBody schema, String table, String kind) {
+    private static void writeTable(JsonWriter out, Snapshot.SchemaBody schema, String table, String kind) {
         Details.DetailParts details = schema.details.get(table);
         out.beginObject();
         out.name("name").value(table);
@@ -361,22 +361,22 @@ public final class Introspect {
         List<Types.ColumnRow> columns =
                 details != null && details.columns != null ? details.columns : schema.columns.get(table);
         out.name("columns");
-        JsonCodec.write(out, columns == null ? List.of() : columns);
+        JsonMapper.write(out, columns == null ? List.of() : columns);
 
         Keys.PrimaryKey primaryKey =
                 details != null ? details.primaryKey : schema.keys.getOrDefault(table, Keys.PrimaryKey.NONE);
         out.name("primary_key");
-        JsonCodec.write(out, new ArrayList<>(primaryKey.columns));
+        JsonMapper.write(out, new ArrayList<>(primaryKey.columns));
         if (primaryKey.name != null) {
             out.name("primary_key_name").value(primaryKey.name);
         }
 
         out.name("indexes");
-        JsonCodec.write(out, details != null ? details.indexes : List.of());
+        JsonMapper.write(out, details != null ? details.indexes : List.of());
         out.name("foreign_keys");
-        JsonCodec.write(out, details != null ? details.foreignKeys : List.of());
+        JsonMapper.write(out, details != null ? details.foreignKeys : List.of());
         out.name("referenced_by");
-        JsonCodec.write(out, details != null ? details.referencedBy : List.of());
+        JsonMapper.write(out, details != null ? details.referencedBy : List.of());
         out.name("details").value(details != null);
         out.endObject();
     }

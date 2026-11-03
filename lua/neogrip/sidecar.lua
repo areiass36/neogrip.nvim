@@ -14,7 +14,7 @@ local M = {}
 -- The sources ship with the plugin; this file's own path is what locates them,
 -- because a plugin cannot know where a manager cloned it.
 local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h")
-M.sources_dir = plugin_root .. "/java/neogrip"
+M.sources_dir = plugin_root .. "/java"
 M.classes_dir = neogrip.data_dir .. "/classes"
 
 -- The compiled classes are stamped with the protocol version, so a plugin

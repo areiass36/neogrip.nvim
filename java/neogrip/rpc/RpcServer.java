@@ -19,6 +19,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import neogrip.dataformat.json.JsonParser;
 
 /**
  * A JSON-RPC 2.0 server over stdio, one message per line (doc/protocol.md).
@@ -87,7 +88,7 @@ public final class RpcServer {
 
             Object message;
             try {
-                message = JsonReader.parse(line);
+                message = JsonParser.parse(line);
             } catch (IllegalArgumentException e) {
                 send(Wire.error(null, Wire.PARSE_ERROR, "line is not JSON", null));
                 continue;

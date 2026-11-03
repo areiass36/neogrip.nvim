@@ -1,5 +1,8 @@
 package neogrip.rpc;
 
+import neogrip.dataformat.json.JsonMapper;
+import neogrip.dataformat.json.JsonWriter;
+
 /**
  * The protocol constants and the envelope, mirroring doc/protocol.md and the
  * Lua side's rpc/protocol.lua. Only this class spells "jsonrpc": results and
@@ -23,14 +26,14 @@ public final class Wire {
     /** One response line. A null value is the empty result, {}. */
     public static String result(Object id, Object value) {
         StringBuilder line = new StringBuilder();
-        JsonStream out = new JsonStream(line);
+        JsonWriter out = new JsonWriter(line);
         out.beginObject().name("jsonrpc").value("2.0").name("id");
-        JsonCodec.write(out, id);
+        JsonMapper.write(out, id);
         out.name("result");
         if (value == null) {
             out.beginObject().endObject();
         } else {
-            JsonCodec.write(out, value);
+            JsonMapper.write(out, value);
         }
         out.endObject();
         return line.toString();
@@ -38,15 +41,15 @@ public final class Wire {
 
     public static String error(Object id, int code, String message, Object data) {
         StringBuilder line = new StringBuilder();
-        JsonStream out = new JsonStream(line);
+        JsonWriter out = new JsonWriter(line);
         out.beginObject().name("jsonrpc").value("2.0").name("id");
-        JsonCodec.write(out, id);
+        JsonMapper.write(out, id);
         out.name("error").beginObject();
         out.name("code").value(code);
         out.name("message").value(message == null ? "error" : message);
         if (data != null) {
             out.name("data");
-            JsonCodec.write(out, data);
+            JsonMapper.write(out, data);
         }
         out.endObject().endObject();
         return line.toString();
@@ -54,11 +57,11 @@ public final class Wire {
 
     public static String notification(String method, Object params) {
         StringBuilder line = new StringBuilder();
-        JsonStream out = new JsonStream(line);
+        JsonWriter out = new JsonWriter(line);
         out.beginObject().name("jsonrpc").value("2.0").name("method").value(method);
         if (params != null) {
             out.name("params");
-            JsonCodec.write(out, params);
+            JsonMapper.write(out, params);
         }
         out.endObject();
         return line.toString();

@@ -1,4 +1,4 @@
-package neogrip.rpc;
+package neogrip.dataformat.json;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.RecordComponent;
@@ -8,14 +8,14 @@ import java.util.Map;
 /**
  * The one serializer: scalars, Map, List, and records - reflectively, with the
  * components in declaration order, null components left out (which is how the
- * wire's optional fields behave), and @Json wire names honoured. A record on
+ * wire's optional fields behave), and @JsonName wire names honoured. A record on
  * the wire must be public, or its accessors are not callable from here; the
  * error says so by name.
  */
-public final class JsonCodec {
-    private JsonCodec() {}
+public final class JsonMapper {
+    private JsonMapper() {}
 
-    public static void write(JsonStream out, Object value) {
+    public static void write(JsonWriter out, Object value) {
         if (value == null) {
             out.nullValue();
         } else if (value instanceof String text) {
@@ -48,7 +48,7 @@ public final class JsonCodec {
         }
     }
 
-    private static void writeRecord(JsonStream out, Record record) {
+    private static void writeRecord(JsonWriter out, Record record) {
         out.beginObject();
         for (RecordComponent component : record.getClass().getRecordComponents()) {
             Object value;
@@ -64,7 +64,7 @@ public final class JsonCodec {
             if (value == null) {
                 continue;
             }
-            Json name = component.getAnnotation(Json.class);
+            JsonName name = component.getAnnotation(JsonName.class);
             out.name(name != null ? name.value() : component.getName());
             write(out, value);
         }

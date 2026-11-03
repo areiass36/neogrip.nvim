@@ -24,7 +24,8 @@ available. Shutdown is the `shutdown` notification or EOF on stdin.
 
 | Package | What it is |
 | --- | --- |
-| `neogrip.rpc` | the RPC library: framing, handshake, lanes, envelopes, binding, the codec. Zero imports from the rest — the reason any client can talk to the program. |
+| `neogrip.dataformat` | the format library (`java/lib`): one `RecordWriter` per format, with the JSON writer, parser and reflective mapper under `json/` and RFC 4180 quoting under `csv/`. Knows nothing of this program (ADR-0033). |
+| `neogrip.rpc` | the RPC library: framing, handshake, lanes, envelopes, binding. Zero imports from the rest — the reason any client can talk to the program. |
 | `neogrip.app` | the application shell: `App` (lifecycle as configuration), `Session` (connection control and metadata), and the handler classes. |
 | `neogrip.db` | the database logic: `Database` (the lifecycle of everything executed, transactions included), statement/export/transaction units, `types/` (the wire's records), and `catalog/` (the DatabaseMetaData units). |
 
@@ -32,8 +33,9 @@ available. Shutdown is the `shutdown` notification or EOF on stdin.
 
 An RPC method is a plain annotated function; the Java method's own name is the wire name, prefixed by a
 class-level `@RpcNamespace`. Parameters bind by name from the request's `params`; results are returned —
-typed records serialized by `JsonCodec` (components in declaration order, nulls omitted, `@Json("is_pk")`
-for wire spellings that are not Java ones), or `RpcResult<T>` where the answer is polymorphic or empty.
+typed records serialized by `JsonMapper` (components in declaration order, nulls omitted, and
+`@JsonName("is_pk")` for wire spellings that are not Java ones), or `RpcResult<T>` where the answer is
+polymorphic or empty.
 Errors are exceptions: throw `RpcException`, or let a mapped exception (SQLException, Refused) be
 translated.
 

@@ -15,9 +15,10 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.concurrent.atomic.AtomicReference;
+import neogrip.dataformat.csv.CsvField;
+import neogrip.dataformat.json.JsonMapper;
+import neogrip.dataformat.json.JsonWriter;
 import neogrip.db.types.Types.ExportResult;
-import neogrip.rpc.JsonCodec;
-import neogrip.rpc.JsonStream;
 
 /**
  * Stream a result straight to a file - nothing held in memory - written beside
@@ -76,14 +77,14 @@ public final class Exports {
         long written = 0;
         for (int i = 1; i <= columnCount; i++) {
             if (i > 1) file.write(',');
-            file.write(Csv.field(meta.getColumnLabel(i), nullMarker));
+            file.write(CsvField.field(meta.getColumnLabel(i), nullMarker));
         }
         file.write('\n');
         while (rows.next()) {
             for (int i = 1; i <= columnCount; i++) {
                 if (i > 1) file.write(',');
                 Object value = Values.read(rows, meta, i);
-                file.write(Csv.field(value == null ? null : String.valueOf(value), nullMarker));
+                file.write(CsvField.field(value == null ? null : String.valueOf(value), nullMarker));
             }
             file.write('\n');
             written++;
@@ -103,14 +104,14 @@ public final class Exports {
             names[i - 1] = meta.getColumnLabel(i);
         }
         long written = 0;
-        JsonStream out = new JsonStream(file);
+        JsonWriter out = new JsonWriter(file);
         try {
             out.beginArray();
             while (rows.next()) {
                 out.beginObject();
                 for (int i = 1; i <= columnCount; i++) {
                     out.name(names[i - 1]);
-                    JsonCodec.write(out, Values.read(rows, meta, i));
+                    JsonMapper.write(out, Values.read(rows, meta, i));
                 }
                 out.endObject();
                 written++;
