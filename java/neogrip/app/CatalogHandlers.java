@@ -9,8 +9,8 @@ import neogrip.db.types.Types.Named;
 import neogrip.db.types.Types.Rows;
 import neogrip.db.types.Types.TableRow;
 import neogrip.db.types.Types.TableWithColumns;
-import neogrip.rpc.RpcMethod;
-import neogrip.rpc.RpcNamespace;
+import neogrip.jsonrpc.RpcMethod;
+import neogrip.jsonrpc.RpcNamespace;
 
 /**
  * The catalog, through DatabaseMetaData. The introspect sweep runs one at a

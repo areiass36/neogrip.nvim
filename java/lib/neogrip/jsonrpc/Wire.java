@@ -1,4 +1,4 @@
-package neogrip.rpc;
+package neogrip.jsonrpc;
 
 import neogrip.dataformat.json.JsonMapper;
 import neogrip.dataformat.json.JsonWriter;

@@ -5,8 +5,8 @@ import java.sql.SQLException;
 import neogrip.db.Database;
 import neogrip.db.types.Types.ExportResult;
 import neogrip.db.types.Types.UpdateResult;
-import neogrip.rpc.RpcMethod;
-import neogrip.rpc.RpcResult;
+import neogrip.jsonrpc.RpcMethod;
+import neogrip.jsonrpc.RpcResult;
 
 /** The statements, on the worker lane: one at a time on the shared connection. */
 final class StatementHandlers {

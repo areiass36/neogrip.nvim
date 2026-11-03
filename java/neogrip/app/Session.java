@@ -7,9 +7,9 @@ import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
-import neogrip.rpc.RpcException;
-import neogrip.rpc.RpcLifecycle;
-import neogrip.rpc.Wire;
+import neogrip.jsonrpc.RpcException;
+import neogrip.jsonrpc.RpcLifecycle;
+import neogrip.jsonrpc.Wire;
 
 /**
  * Connection control and metadata, nothing else: this class does not know or

@@ -1,4 +1,4 @@
-package neogrip.rpc;
+package neogrip.jsonrpc;
 
 /**
  * The generic standard return for the handlers whose answer is polymorphic or

@@ -6,8 +6,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import neogrip.db.types.Types.QueryPage;
-import neogrip.rpc.RpcException;
-import neogrip.rpc.Wire;
+import neogrip.jsonrpc.RpcException;
+import neogrip.jsonrpc.Wire;
 
 /**
  * The open results of one connection, each under the hash its client minted

@@ -5,9 +5,9 @@ import java.util.Map;
 import neogrip.db.Database;
 import neogrip.db.Errors;
 import neogrip.db.ReadonlyGuard;
-import neogrip.rpc.RpcException;
-import neogrip.rpc.RpcServer;
-import neogrip.rpc.Wire;
+import neogrip.jsonrpc.RpcException;
+import neogrip.jsonrpc.RpcServer;
+import neogrip.jsonrpc.Wire;
 
 /**
  * The sidecar's lifecycle, as configuration: the server is built here and

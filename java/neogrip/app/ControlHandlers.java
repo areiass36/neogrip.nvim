@@ -2,7 +2,7 @@ package neogrip.app;
 
 import java.util.Map;
 import neogrip.db.Database;
-import neogrip.rpc.RpcMethod;
+import neogrip.jsonrpc.RpcMethod;
 
 /** ping and cancel: answerable while a statement runs, because neither takes the session lock. */
 final class ControlHandlers {

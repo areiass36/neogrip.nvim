@@ -1,4 +1,4 @@
-package neogrip.rpc;
+package neogrip.jsonrpc;
 
 /**
  * How a handler refuses: throw this and the server writes the error envelope.

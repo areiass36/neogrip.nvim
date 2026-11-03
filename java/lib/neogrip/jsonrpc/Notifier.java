@@ -1,4 +1,4 @@
-package neogrip.rpc;
+package neogrip.jsonrpc;
 
 import java.util.Map;
 

@@ -21,8 +21,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import neogrip.dataformat.json.JsonMapper;
 import neogrip.dataformat.json.JsonWriter;
 import neogrip.db.types.Types;
-import neogrip.rpc.RpcException;
-import neogrip.rpc.Wire;
+import neogrip.jsonrpc.RpcException;
+import neogrip.jsonrpc.Wire;
 
 /**
  * The whole catalog, written to a file instead of answered through the

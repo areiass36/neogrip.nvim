@@ -3,8 +3,8 @@ package neogrip.db;
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import neogrip.rpc.RpcException;
-import neogrip.rpc.Wire;
+import neogrip.jsonrpc.RpcException;
+import neogrip.jsonrpc.Wire;
 
 /**
  * An error the editor can point at.

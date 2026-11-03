@@ -1,4 +1,4 @@
-package neogrip.rpc;
+package neogrip.jsonrpc;
 
 /**
  * Optional hooks a component may implement. onRequest runs on the read thread
