@@ -163,7 +163,7 @@ Commits follow Conventional Commits: `<type>(<scope>): <subject>`.
 - `gripd`: the Java process lifecycle and the Java sources
 - `runner`: request queueing and execution flow
 - `grid`: the result buffer, its actions, exports and requery
-- `explorer`: the schema explorer and document buffers
+- `tree`: the catalog tree API and document buffers
 - `schema`: catalog cache and introspection
 - `lsp`: language services, completion and diagnostics
 - `bootstrap`: JDK, driver and binary downloads
