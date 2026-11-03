@@ -1,14 +1,8 @@
 package neogrip.jsonrpc;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.PrintWriter;
 import java.lang.reflect.InvocationTargetException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,9 +14,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import neogrip.dataformat.json.JsonParser;
 import neogrip.inject.Container;
+import neogrip.jsonrpc.transport.StdioTransport;
+import neogrip.jsonrpc.transport.Transport;
 
 /**
- * A JSON-RPC 2.0 server over stdio, one message per line (doc/protocol.md).
+ * A JSON-RPC 2.0 server: frames in from a {@link Transport}, dispatched to
+ * annotated methods, answers back out the same way.
  *
  * The server owns framing, dispatch, the envelope of every result and error,
  * the bounded drain on EOF, and notifications. It owns no contract of its own:
@@ -38,8 +35,7 @@ import neogrip.inject.Container;
  * threading.
  */
 public final class RpcServer {
-    private final BufferedReader in;
-    private final PrintWriter out;
+    private final Transport transport;
     private final String stopMethod;
     private final Set<String> inline;
     private final Registry registry;
@@ -50,9 +46,7 @@ public final class RpcServer {
     private final ExecutorService requests = Executors.newVirtualThreadPerTaskExecutor();
 
     private RpcServer(Builder builder, Registry registry, List<RpcLifecycle> lifecycle) {
-        this.in = new BufferedReader(new InputStreamReader(builder.stdin, StandardCharsets.UTF_8));
-        this.out = new PrintWriter(
-                new BufferedWriter(new OutputStreamWriter(builder.stdout, StandardCharsets.UTF_8)));
+        this.transport = builder.transport;
         this.stopMethod = builder.stopMethod;
         this.inline = builder.inline;
         this.registry = registry;
@@ -65,9 +59,8 @@ public final class RpcServer {
         return new Builder();
     }
 
-    private synchronized void send(String line) {
-        out.println(line);
-        out.flush();
+    private void send(String line) {
+        transport.write(line);
     }
 
     /** A notification to the client, callable from any thread. */
@@ -84,7 +77,7 @@ public final class RpcServer {
     public ExitReason run() throws Exception {
         ExitReason reason = ExitReason.STOPPED;
         String line;
-        while ((line = in.readLine()) != null) {
+        while ((line = transport.read()) != null) {
             if (line.isBlank()) {
                 continue;
             }
@@ -148,7 +141,6 @@ public final class RpcServer {
         for (int i = lifecycle.size() - 1; i >= 0; i--) {
             lifecycle.get(i).onShutdown();
         }
-        out.flush();
         return reason;
     }
 
@@ -239,8 +231,7 @@ public final class RpcServer {
      * a build without -parameters - fails here, naming the offender.
      */
     public static final class Builder {
-        private InputStream stdin;
-        private OutputStream stdout;
+        private Transport transport;
         private String stopMethod = "shutdown";
         private Set<String> inline = Set.of();
         private final List<Class<?>> componentClasses = new ArrayList<>();
@@ -248,9 +239,13 @@ public final class RpcServer {
         private final Map<Class<?>, Function<Throwable, RpcException>> mappers = new LinkedHashMap<>();
         private long drainSeconds = 30;
 
+        /** The common case: one JSON object per line over a pair of streams. */
         public Builder io(InputStream stdin, OutputStream stdout) {
-            this.stdin = stdin;
-            this.stdout = stdout;
+            return transport(new StdioTransport(stdin, stdout));
+        }
+
+        public Builder transport(Transport transport) {
+            this.transport = transport;
             return this;
         }
 
