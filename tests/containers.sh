@@ -8,6 +8,15 @@ set -e
 PW='p@ss:w/rd#1'
 MSSQL_PW='Str0ng:P/ss#1'
 
+# Git Bash rewrites an argument that starts with a slash into a Windows path
+# before the program sees it, so `docker exec nvdb-ms /opt/mssql-tools18/...`
+# arrives as `C:/Program Files/Git/opt/mssql-tools18/...` and the exec fails
+# with "no such file or directory" - which the readiness loop below reads as a
+# server that never came up, so SQL Server was unseedable on Windows and every
+# test against it failed on a missing table. Ignored on macOS and Linux.
+MSYS_NO_PATHCONV=1
+export MSYS_NO_PATHCONV
+
 # Readiness is the seed itself succeeding. A port that accepts connections is
 # not enough: the postgres image answers pg_isready while still initialising,
 # and then restarts.
