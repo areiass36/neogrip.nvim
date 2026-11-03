@@ -7,19 +7,19 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import neogrip.dataformat.json.JsonParser;
+import neogrip.inject.Container;
 
 /**
  * A JSON-RPC 2.0 server over stdio, one message per line (doc/protocol.md).
@@ -38,13 +38,14 @@ import neogrip.dataformat.json.JsonParser;
  * threading.
  */
 public final class RpcServer {
-    private record Registered(Object instance, Method method) {}
+    /** Names the read loop answers itself, so no handler may claim them. */
+    private static final Set<String> RESERVED = Set.of("initialize", "shutdown");
 
     private final BufferedReader in;
     private final PrintWriter out;
     private final int protocolVersion;
     private final Map<String, Object> serverInfo;
-    private final Map<String, Registered> methods;
+    private final Registry registry;
     private final List<RpcLifecycle> lifecycle;
     private final Map<Class<?>, Function<Throwable, RpcException>> mappers;
     private final long drainSeconds;
@@ -52,13 +53,13 @@ public final class RpcServer {
     private final ExecutorService requests = Executors.newVirtualThreadPerTaskExecutor();
     private boolean initialized = false;
 
-    private RpcServer(Builder builder, Map<String, Registered> methods, List<RpcLifecycle> lifecycle) {
+    private RpcServer(Builder builder, Registry registry, List<RpcLifecycle> lifecycle) {
         this.in = new BufferedReader(new InputStreamReader(builder.stdin, StandardCharsets.UTF_8));
         this.out = new PrintWriter(
                 new BufferedWriter(new OutputStreamWriter(builder.stdout, StandardCharsets.UTF_8)));
         this.protocolVersion = builder.protocolVersion;
         this.serverInfo = builder.serverInfo;
-        this.methods = methods;
+        this.registry = registry;
         this.lifecycle = lifecycle;
         this.mappers = builder.mappers;
         this.drainSeconds = builder.drainSeconds;
@@ -122,13 +123,13 @@ public final class RpcServer {
                 component.onRequest();
             }
 
-            Registered registered = methods.get(method);
-            if (registered == null) {
+            Registry.Target target = registry.find(method);
+            if (target == null) {
                 send(Wire.error(id, Wire.METHOD_NOT_FOUND, "method not found: " + method, null));
                 continue;
             }
 
-            requests.submit(() -> handle(registered, id, params));
+            requests.submit(() -> handle(target, id, params));
         }
 
         // Work already submitted still finishes: a shutdown arriving while a
@@ -160,10 +161,10 @@ public final class RpcServer {
      * sent, so a failure can never leave half an object on the wire; and
      * nothing from params is ever echoed - the connect request carries secrets.
      */
-    private void handle(Registered registered, Object id, Map<?, ?> params) {
+    private void handle(Registry.Target target, Object id, Map<?, ?> params) {
         String response;
         try {
-            Object result = registered.method().invoke(registered.instance(), Binder.bind(registered.method(), params));
+            Object result = target.method().invoke(target.instance(), Binder.bind(target.method(), params));
             if (result instanceof RpcResult<?> wrapped) {
                 result = wrapped.value();
             }
@@ -273,19 +274,23 @@ public final class RpcServer {
 
         public RpcServer build() {
             // The server exists after construction, but components want its
-            // Notifier and Worker at construction time: both delegate through
-            // this holder, filled in just below.
+            // Notifier at construction time: it delegates through this holder,
+            // filled in just below.
             RpcServer[] holder = new RpcServer[1];
             Notifier notifier = (method, params) -> holder[0].notify(method, params);
 
-            Map<Class<?>, Object> built = new LinkedHashMap<>();
-            built.put(Notifier.class, notifier);
-
             List<Class<?>> pending = new ArrayList<>(componentClasses);
             pending.addAll(handlerClasses);
-            List<Object> constructed = construct(pending, built);
+            List<Object> constructed =
+                    new Container().provide(Notifier.class, notifier).construct(pending);
 
-            Map<String, Registered> methods = scan(constructed);
+            // Only the handler classes are scanned; a component with an
+            // annotated method is not reachable from the wire.
+            List<Object> handlers = constructed.stream()
+                    .filter(instance -> handlerClasses.contains(instance.getClass()))
+                    .toList();
+            Registry registry = Registry.scan(handlers, RESERVED);
+
             List<RpcLifecycle> lifecycle = new ArrayList<>();
             for (Object instance : constructed) {
                 if (instance instanceof RpcLifecycle hooks) {
@@ -293,103 +298,9 @@ public final class RpcServer {
                 }
             }
 
-            RpcServer server = new RpcServer(this, methods, lifecycle);
+            RpcServer server = new RpcServer(this, registry, lifecycle);
             holder[0] = server;
             return server;
-        }
-
-        /** Singletons by type, constructor-injected, cycles and gaps named. */
-        private static List<Object> construct(List<Class<?>> pending, Map<Class<?>, Object> built) {
-            List<Class<?>> remaining = new ArrayList<>(pending);
-            List<Object> constructed = new ArrayList<>();
-            while (!remaining.isEmpty()) {
-                boolean progressed = false;
-                for (Class<?> type : new ArrayList<>(remaining)) {
-                    Object instance = tryConstruct(type, built);
-                    if (instance != null) {
-                        if (built.put(type, instance) != null) {
-                            throw new IllegalStateException("two components of type " + type.getName());
-                        }
-                        constructed.add(instance);
-                        remaining.remove(type);
-                        progressed = true;
-                    }
-                }
-                if (!progressed) {
-                    List<String> names = remaining.stream().map(Class::getName).toList();
-                    throw new IllegalStateException(
-                            "cannot construct " + names + ": missing dependency or a cycle");
-                }
-            }
-            return constructed;
-        }
-
-        private static Object tryConstruct(Class<?> type, Map<Class<?>, Object> built) {
-            Constructor<?>[] constructors = type.getDeclaredConstructors();
-            if (constructors.length != 1) {
-                throw new IllegalStateException(type.getName() + " must have exactly one constructor");
-            }
-            Constructor<?> constructor = constructors[0];
-            Class<?>[] wanted = constructor.getParameterTypes();
-            Object[] arguments = new Object[wanted.length];
-            for (int i = 0; i < wanted.length; i++) {
-                Object resolved = resolve(wanted[i], built);
-                if (resolved == null) {
-                    return null;
-                }
-                arguments[i] = resolved;
-            }
-            if (!constructor.trySetAccessible()) {
-                throw new IllegalStateException("cannot access the constructor of " + type.getName());
-            }
-            try {
-                return constructor.newInstance(arguments);
-            } catch (ReflectiveOperationException e) {
-                throw new IllegalStateException("constructing " + type.getName(), e);
-            }
-        }
-
-        private static Object resolve(Class<?> wanted, Map<Class<?>, Object> built) {
-            Object exact = built.get(wanted);
-            if (exact != null) {
-                return exact;
-            }
-            for (Object candidate : built.values()) {
-                if (wanted.isInstance(candidate)) {
-                    return candidate;
-                }
-            }
-            return null;
-        }
-
-        /** Every @RpcMethod on the handler instances, validated and named. */
-        private Map<String, Registered> scan(List<Object> constructed) {
-            Map<String, Registered> methods = new LinkedHashMap<>();
-            for (Object instance : constructed) {
-                if (!handlerClasses.contains(instance.getClass())) {
-                    continue;
-                }
-                RpcNamespace namespace = instance.getClass().getAnnotation(RpcNamespace.class);
-                String prefix = namespace == null ? "" : namespace.value() + "/";
-                for (Method method : instance.getClass().getDeclaredMethods()) {
-                    RpcMethod annotation = method.getAnnotation(RpcMethod.class);
-                    if (annotation == null) {
-                        continue;
-                    }
-                    String wireName = prefix + method.getName();
-                    if (wireName.equals("initialize") || wireName.equals("shutdown")) {
-                        throw new IllegalStateException(wireName + " is reserved by the protocol");
-                    }
-                    Binder.validate(method, wireName);
-                    if (!method.trySetAccessible()) {
-                        throw new IllegalStateException("cannot access " + wireName);
-                    }
-                    if (methods.put(wireName, new Registered(instance, method)) != null) {
-                        throw new IllegalStateException("duplicate rpc method: " + wireName);
-                    }
-                }
-            }
-            return methods;
         }
     }
 }
