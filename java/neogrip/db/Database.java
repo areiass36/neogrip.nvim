@@ -2,12 +2,8 @@ package neogrip.db;
 
 import java.io.IOException;
 import java.sql.SQLException;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import neogrip.db.catalog.Details;
 import neogrip.db.catalog.Introspect;
@@ -17,7 +13,6 @@ import neogrip.db.catalog.Snapshot;
 import neogrip.db.errors.NotConnected;
 import neogrip.db.errors.RequestRefused;
 import neogrip.db.types.Types;
-import neogrip.jsonrpc.Notifier;
 import neogrip.jsonrpc.RpcLifecycle;
 
 /**
@@ -26,10 +21,9 @@ import neogrip.jsonrpc.RpcLifecycle;
  * It owns no mechanism of its own any more: the {@link ExecutionLane} puts
  * requests through the shared connection one at a time, a
  * {@link ConnectionScope} holds everything bound to that connection, and this
- * class is what picks the one out of the other. What is left here is the two
- * things that are genuinely about the connection as a whole - the
- * one-sweep-at-a-time rule, and the watchdog that rolls back an idle
- * transaction (ADR-0013) and closes an abandoned result (ADR-0031).
+ * class is what picks the one out of the other. What is left here is the
+ * one-sweep-at-a-time rule and the end of the connection's life; the idle
+ * transaction and the abandoned result are the watchdog's business.
  *
  * Reading the scope before taking the lane means a request that arrives before
  * connect is refused at once instead of queueing behind a statement it has
@@ -37,7 +31,6 @@ import neogrip.jsonrpc.RpcLifecycle;
  */
 public final class Database implements RpcLifecycle {
     private final Session session;
-    private final Notifier notifier;
     private final ExecutionLane lane = new ExecutionLane();
 
     /** One sweep at a time: a second would double the connections it opens. */
@@ -46,10 +39,9 @@ public final class Database implements RpcLifecycle {
     /** None until connect succeeds, and then one for the life of the process. */
     private volatile ConnectionScope scope;
 
-    public Database(Session session, Notifier notifier) {
+    public Database(Session session, Notifications notifications) {
         this.session = session;
-        this.notifier = notifier;
-        startTransactionWatchdog();
+        new IdleWatchdog(() -> scope, session, notifications).start();
     }
 
     /**
@@ -216,76 +208,6 @@ public final class Database implements RpcLifecycle {
         }
     }
 
-    // --- the idle-transaction watchdog (ADR-0013) -------------------------
-
-    /**
-     * An idle open transaction holds locks, so one that has seen no request
-     * for the configured window is rolled back - never committed - and the
-     * editor is told. The check itself is cheap and runs on a timer; the
-     * rollback goes through the lane, where it cannot race a statement for the
-     * connection.
-     */
-    private void startTransactionWatchdog() {
-        Executors.newSingleThreadScheduledExecutor(task -> {
-                    Thread thread = new Thread(task, "neogrip-tx-watchdog");
-                    thread.setDaemon(true);
-                    return thread;
-                })
-                .scheduleAtFixedRate(this::sweepIdle, 15, 15, TimeUnit.SECONDS);
-    }
-
-    private void sweepIdle() {
-        rollbackIfIdle();
-        closeIdleCursors();
-    }
-
-    /**
-     * An open result nobody has continued is memory held on both sides, so one
-     * untouched for the configured window is closed (ADR-0031). Taken out of
-     * the registry first and closed through the lane, which is where touching
-     * the connection belongs.
-     */
-    private void closeIdleCursors() {
-        ConnectionScope current = scope;
-        if (current == null) {
-            return;
-        }
-        List<Cursor> expired = current.cursors().expired(session.cursorIdleMs());
-        if (expired.isEmpty()) {
-            return;
-        }
-        lane.serializeQuietly(() -> expired.forEach(Cursor::close));
-    }
-
-    private void rollbackIfIdle() {
-        ConnectionScope current = scope;
-        long idleMs = session.transactionIdleMs();
-        if (current == null
-                || idleMs <= 0
-                || !current.transactions().inTransaction()
-                || System.currentTimeMillis() - session.lastRequestAt() < idleMs) {
-            return;
-        }
-        if (!rollback(current)) {
-            return;
-        }
-        notifier.notify("status", Map.of("phase", "transaction", "message", "idle transaction rolled back"));
-    }
-
-    /** @return whether the rollback went through; a failure is the connection's own news to report */
-    private boolean rollback(ConnectionScope current) {
-        try {
-            lane.serializeSql(() -> {
-                current.transactions().rollback();
-                return null;
-            });
-            return true;
-        } catch (SQLException ignored) {
-            // The connection will report its own state on the next statement.
-            return false;
-        }
-    }
-
     @Override
     public void onShutdown() {
         ConnectionScope current = scope;
@@ -295,12 +217,12 @@ public final class Database implements RpcLifecycle {
 
         // Every open result goes before the connection does, which is the
         // other reason this hook has to run before the Session one.
-        lane.serializeQuietly(() -> current.cursors().drain().forEach(Cursor::close));
+        current.closeAllCursors();
 
         // Never commit on the way out (ADR-0013); this runs before the Session
         // closes the connection, because shutdown hooks fire in reverse order.
-        if (current.transactions().inTransaction()) {
-            rollback(current);
+        if (current.inTransaction()) {
+            current.rollbackQuietly();
         }
     }
 }

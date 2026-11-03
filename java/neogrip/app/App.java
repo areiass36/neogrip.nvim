@@ -26,7 +26,7 @@ public final class App {
                 .io(System.in, System.out)
                 .stopOn("shutdown")
                 .inline("initialize")
-                .components(Session.class, Database.class)
+                .components(Session.class, StatusNotifications.class, Database.class)
                 .handlers(
                         HandshakeHandler.class,
                         ControlHandlers.class,

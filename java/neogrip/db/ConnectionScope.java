@@ -1,6 +1,8 @@
 package neogrip.db;
 
 import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.List;
 import neogrip.db.catalog.Details;
 import neogrip.db.catalog.Introspect;
 import neogrip.db.catalog.Listings;
@@ -18,6 +20,7 @@ import neogrip.db.catalog.Snapshot;
  * one is what refuses a statement sent before connect.
  */
 public final class ConnectionScope {
+    private final ExecutionLane lane;
     private final Statements statements;
     private final Cursors cursors;
     private final Exports exports;
@@ -29,6 +32,7 @@ public final class ConnectionScope {
     private final Introspect introspect;
 
     ConnectionScope(Session session, ExecutionLane lane) {
+        this.lane = lane;
         Connection connection = session.connection();
         ReadonlyGuard guard = new ReadonlyGuard(session.readonly());
         this.cursors = new Cursors();
@@ -42,6 +46,43 @@ public final class ConnectionScope {
         // The url and the properties go with it so a catalog sweep can open
         // connections of its own rather than take this one.
         this.introspect = new Introspect(connection, lane.sweepCancelled(), session.url(), session.properties());
+    }
+
+    /** Is a transaction open on this connection? */
+    boolean inTransaction() {
+        return transactions.inTransaction();
+    }
+
+    /**
+     * Roll back through the lane, where it cannot race a statement.
+     *
+     * @return whether it went through; a failure needs no report of its own,
+     *     because the connection says so itself on the next statement
+     */
+    boolean rollbackQuietly() {
+        try {
+            lane.serializeSql(() -> {
+                transactions.rollback();
+                return null;
+            });
+            return true;
+        } catch (SQLException ignored) {
+            return false;
+        }
+    }
+
+    /** Results untouched for longer than the window, taken out and closed. */
+    void closeExpiredCursors(long idleMs) {
+        List<Cursor> expired = cursors.expired(idleMs);
+        if (expired.isEmpty()) {
+            return;
+        }
+        lane.serializeQuietly(() -> expired.forEach(Cursor::close));
+    }
+
+    /** Every open result, on the way out. */
+    void closeAllCursors() {
+        lane.serializeQuietly(() -> cursors.drain().forEach(Cursor::close));
     }
 
     Statements statements() {
