@@ -6,7 +6,6 @@ import java.util.Properties;
 import neogrip.db.types.Types.ConnectResult;
 import neogrip.jsonrpc.RpcException;
 import neogrip.jsonrpc.RpcMethod;
-import neogrip.jsonrpc.Wire;
 
 /**
  * The one frame that carries secrets (ADR-0009): nothing in its params is
@@ -57,7 +56,7 @@ final class ConnectHandler {
                     merged.setProperty("accessToken", token);
                 }
             }
-            default -> throw new RpcException(Wire.AUTH_ERROR, "auth type not implemented yet: " + type);
+            default -> throw new RpcException(ErrorCodes.AUTH_ERROR, "auth type not implemented yet: " + type);
         }
 
         session.open(url, merged, readonly, transactionIdleSeconds, cursorIdleSeconds);

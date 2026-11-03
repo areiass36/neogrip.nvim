@@ -62,13 +62,17 @@ support.wait(function()
 end, 10000)
 support.check("shutdown plus EOF ends the process cleanly", exit_code, 0)
 
+local function raw_sidecar(handlers)
+	return client.start({
+		jdk.java(),
+		"-cp",
+		sidecar.classes_dir,
+		"neogrip.app.App",
+	}, handlers)
+end
+
 -- A fresh process refuses work before the handshake.
-local raw = client.start({
-	jdk.java(),
-	"-cp",
-	sidecar.classes_dir,
-	"neogrip.app.App",
-})
+local raw = raw_sidecar()
 local _, early = support.sync(function(done)
 	raw:request("ping", {}, done)
 end, 30000)
@@ -78,3 +82,22 @@ support.check(
 	protocol.ERRORS.protocol_mismatch
 )
 raw:close()
+
+-- A client speaking another contract is refused and the process goes away:
+-- the server reports why it stopped and main picks the exit code, so a
+-- mismatch has to still be fatal rather than leave a process nobody can use.
+local mismatch_exit = nil
+local wrong = raw_sidecar({
+	on_exit = function(code)
+		mismatch_exit = code
+	end,
+})
+local _, mismatch = support.sync(function(done)
+	wrong:request("initialize", { protocolVersion = protocol.VERSION + 1 }, done)
+end, 30000)
+support.check("a version mismatch is refused", mismatch and mismatch.code, protocol.ERRORS.protocol_mismatch)
+support.wait(function()
+	return mismatch_exit ~= nil
+end, 10000)
+support.check("and the process exits non-zero", mismatch_exit ~= nil and mismatch_exit ~= 0, true)
+wrong:close()

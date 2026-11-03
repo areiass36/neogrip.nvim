@@ -24,12 +24,12 @@ import neogrip.inject.Container;
 /**
  * A JSON-RPC 2.0 server over stdio, one message per line (doc/protocol.md).
  *
- * The server owns everything that is protocol and threading: framing, the
- * initialize handshake, the envelope of every result and error, the bounded
- * drain on EOF, and notifications. Handlers are plain annotated functions on
- * plain classes; this class knows nothing about what they do - it has no
- * imports from the application, which is what keeps the sidecar a program any
- * JSON-RPC client can talk to.
+ * The server owns framing, dispatch, the envelope of every result and error,
+ * the bounded drain on EOF, and notifications. It owns no contract of its own:
+ * the version, the handshake, the error codes beyond the ones JSON-RPC
+ * reserves, and the decision to exit all belong to the program configured into
+ * it. That is what keeps this a library, and the program one that any JSON-RPC
+ * client can talk to.
  *
  * Every request runs on its own virtual thread (ADR-0028), so the read loop
  * never blocks and a cancel is always answerable while a query runs. Whatever
@@ -38,27 +38,23 @@ import neogrip.inject.Container;
  * threading.
  */
 public final class RpcServer {
-    /** Names the read loop answers itself, so no handler may claim them. */
-    private static final Set<String> RESERVED = Set.of("initialize", "shutdown");
-
     private final BufferedReader in;
     private final PrintWriter out;
-    private final int protocolVersion;
-    private final Map<String, Object> serverInfo;
+    private final String stopMethod;
+    private final Set<String> inline;
     private final Registry registry;
     private final List<RpcLifecycle> lifecycle;
     private final Map<Class<?>, Function<Throwable, RpcException>> mappers;
     private final long drainSeconds;
 
     private final ExecutorService requests = Executors.newVirtualThreadPerTaskExecutor();
-    private boolean initialized = false;
 
     private RpcServer(Builder builder, Registry registry, List<RpcLifecycle> lifecycle) {
         this.in = new BufferedReader(new InputStreamReader(builder.stdin, StandardCharsets.UTF_8));
         this.out = new PrintWriter(
                 new BufferedWriter(new OutputStreamWriter(builder.stdout, StandardCharsets.UTF_8)));
-        this.protocolVersion = builder.protocolVersion;
-        this.serverInfo = builder.serverInfo;
+        this.stopMethod = builder.stopMethod;
+        this.inline = builder.inline;
         this.registry = registry;
         this.lifecycle = lifecycle;
         this.mappers = builder.mappers;
@@ -76,11 +72,17 @@ public final class RpcServer {
 
     /** A notification to the client, callable from any thread. */
     public void notify(String method, Map<String, Object> params) {
-        send(Wire.notification(method, params));
+        send(Envelope.notification(method, params));
     }
 
-    /** Blocks on the read loop until shutdown or EOF, then drains and runs the hooks. */
-    public void run() throws Exception {
+    /**
+     * Blocks on the read loop until the stop method or EOF, then drains and
+     * runs the shutdown hooks.
+     *
+     * @return why it ended, for a caller that has to pick an exit code
+     */
+    public ExitReason run() throws Exception {
+        ExitReason reason = ExitReason.STOPPED;
         String line;
         while ((line = in.readLine()) != null) {
             if (line.isBlank()) {
@@ -91,41 +93,49 @@ public final class RpcServer {
             try {
                 message = JsonParser.parse(line);
             } catch (IllegalArgumentException e) {
-                send(Wire.error(null, Wire.PARSE_ERROR, "line is not JSON", null));
+                send(Envelope.error(null, JsonRpc.PARSE_ERROR, "line is not JSON", null));
                 continue;
             }
             if (!(message instanceof Map<?, ?> frame) || !(frame.get("method") instanceof String method)) {
                 // A response to a server-initiated request would land here too;
                 // none exist yet, so anything without a method is invalid.
-                send(Wire.error(null, Wire.INVALID_REQUEST, "expected a request object", null));
+                send(Envelope.error(null, JsonRpc.INVALID_REQUEST, "expected a request object", null));
                 continue;
             }
             Object id = frame.get("id");
             Map<?, ?> params = frame.get("params") instanceof Map<?, ?> map ? map : Map.of();
 
-            if (method.equals("shutdown")) {
+            if (method.equals(stopMethod)) {
                 break;
             }
-            if (method.equals("initialize")) {
-                if (!initialize(id, params)) {
-                    out.flush();
-                    System.exit(1);
+
+            // A component may refuse a request before it is dispatched - a
+            // handshake gate is what needs this - and the refusal is answered
+            // like any other error.
+            RpcException refusal = refuse(method);
+            if (refusal != null) {
+                send(Envelope.error(id, refusal.code(), refusal.getMessage(), refusal.data()));
+                if (refusal.fatal()) {
+                    reason = ExitReason.REFUSED;
+                    break;
                 }
                 continue;
-            }
-            if (!initialized) {
-                // The contract: nothing but initialize before the handshake.
-                send(Wire.error(id, Wire.PROTOCOL_MISMATCH, "initialize first", null));
-                continue;
-            }
-
-            for (RpcLifecycle component : lifecycle) {
-                component.onRequest();
             }
 
             Registry.Target target = registry.find(method);
             if (target == null) {
-                send(Wire.error(id, Wire.METHOD_NOT_FOUND, "method not found: " + method, null));
+                send(Envelope.error(id, JsonRpc.METHOD_NOT_FOUND, "method not found: " + method, null));
+                continue;
+            }
+
+            if (inline.contains(method)) {
+                // Answered before the next line is read, because what this
+                // method puts in effect has to hold for the frame that follows
+                // it, and a client is free to pipe both in at once.
+                if (handle(target, id, params)) {
+                    reason = ExitReason.REFUSED;
+                    break;
+                }
                 continue;
             }
 
@@ -139,38 +149,41 @@ public final class RpcServer {
             lifecycle.get(i).onShutdown();
         }
         out.flush();
+        return reason;
     }
 
-    private boolean initialize(Object id, Map<?, ?> params) {
-        long version = params.get("protocolVersion") instanceof Long value ? value : -1;
-        if (version != protocolVersion) {
-            send(Wire.error(
-                    id,
-                    Wire.PROTOCOL_MISMATCH,
-                    "sidecar speaks protocol " + protocolVersion + ", client sent " + version,
-                    null));
-            return false;
+    /** @return the refusal a component raised for this request, or null */
+    private RpcException refuse(String method) {
+        for (RpcLifecycle component : lifecycle) {
+            try {
+                component.onRequest(method);
+            } catch (RpcException refusal) {
+                return refusal;
+            }
         }
-        initialized = true;
-        send(Wire.result(id, Map.of("protocolVersion", (long) protocolVersion, "sidecarInfo", serverInfo)));
-        return true;
+        return null;
     }
 
     /**
      * One request, end to end. The line is built whole before anything is
      * sent, so a failure can never leave half an object on the wire; and
      * nothing from params is ever echoed - the connect request carries secrets.
+     *
+     * @return whether the handler refused fatally, which ends the server
      */
-    private void handle(Registry.Target target, Object id, Map<?, ?> params) {
+    private boolean handle(Registry.Target target, Object id, Map<?, ?> params) {
         String response;
+        boolean fatal = false;
         try {
             Object result = target.method().invoke(target.instance(), Binder.bind(target.method(), params));
             if (result instanceof RpcResult<?> wrapped) {
                 result = wrapped.value();
             }
-            response = Wire.result(id, result);
+            response = Envelope.result(id, result);
         } catch (InvocationTargetException e) {
-            response = errorLine(id, e.getCause() == null ? e : e.getCause());
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            fatal = cause instanceof RpcException rpc && rpc.fatal();
+            response = errorLine(id, cause);
         } catch (Throwable e) {
             // Throwable, not Exception: an Error leaves this thread without a
             // response, and a client with no timeout then waits forever. That
@@ -180,6 +193,7 @@ public final class RpcServer {
             response = errorLine(id, e);
         }
         send(response);
+        return fatal;
     }
 
     private String errorLine(Object id, Throwable cause) {
@@ -195,11 +209,11 @@ public final class RpcServer {
             }
         }
         if (rpc != null) {
-            return Wire.error(id, rpc.code(), rpc.getMessage(), rpc.data());
+            return Envelope.error(id, rpc.code(), rpc.getMessage(), rpc.data());
         }
-        return Wire.error(
+        return Envelope.error(
                 id,
-                Wire.INTERNAL_ERROR,
+                JsonRpc.INTERNAL_ERROR,
                 cause.getClass().getSimpleName() + ": " + cause.getMessage(),
                 null);
     }
@@ -227,17 +241,12 @@ public final class RpcServer {
     public static final class Builder {
         private InputStream stdin;
         private OutputStream stdout;
-        private int protocolVersion = Wire.PROTOCOL_VERSION;
-        private Map<String, Object> serverInfo = Map.of();
+        private String stopMethod = "shutdown";
+        private Set<String> inline = Set.of();
         private final List<Class<?>> componentClasses = new ArrayList<>();
         private final List<Class<?>> handlerClasses = new ArrayList<>();
         private final Map<Class<?>, Function<Throwable, RpcException>> mappers = new LinkedHashMap<>();
         private long drainSeconds = 30;
-
-        public Builder protocolVersion(int version) {
-            this.protocolVersion = version;
-            return this;
-        }
 
         public Builder io(InputStream stdin, OutputStream stdout) {
             this.stdin = stdin;
@@ -245,8 +254,24 @@ public final class RpcServer {
             return this;
         }
 
-        public Builder serverInfo(Map<String, Object> info) {
-            this.serverInfo = info;
+        /**
+         * The method that ends the read loop, answered by the loop itself and
+         * claimable by no handler.
+         */
+        public Builder stopOn(String method) {
+            this.stopMethod = method;
+            return this;
+        }
+
+        /**
+         * Methods answered on the read thread, before the next frame is read.
+         *
+         * For a handshake, and for little else: everything inline is a request
+         * that cannot be answered while another is in flight, which is the
+         * opposite of what this server is for.
+         */
+        public Builder inline(String... methods) {
+            this.inline = Set.of(methods);
             return this;
         }
 
@@ -289,7 +314,7 @@ public final class RpcServer {
             List<Object> handlers = constructed.stream()
                     .filter(instance -> handlerClasses.contains(instance.getClass()))
                     .toList();
-            Registry registry = Registry.scan(handlers, RESERVED);
+            Registry registry = Registry.scan(handlers, Set.of(stopMethod));
 
             List<RpcLifecycle> lifecycle = new ArrayList<>();
             for (Object instance : constructed) {

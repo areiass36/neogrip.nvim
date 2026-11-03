@@ -24,9 +24,10 @@ available. Shutdown is the `shutdown` notification or EOF on stdin.
 
 | Package | What it is |
 | --- | --- |
+| `neogrip.inject` | the dependency container (`java/lib`): classes in, singletons out, constructor-injected by type. |
 | `neogrip.dataformat` | the format library (`java/lib`): one `RecordWriter` per format, with the JSON writer, parser and reflective mapper under `json/` and RFC 4180 quoting under `csv/`. Knows nothing of this program (ADR-0033). |
-| `neogrip.jsonrpc` | the RPC library (`java/lib`): framing, handshake, lanes, envelopes, binding. Zero imports from the rest — the reason any client can talk to the program. |
-| `neogrip.app` | the application shell: `App` (lifecycle as configuration), `Session` (connection control and metadata), and the handler classes. |
+| `neogrip.jsonrpc` | the RPC library (`java/lib`): framing, dispatch, named binding, envelopes, the virtual-thread lane. No contract of its own — the version, the handshake and every code beyond the ones JSON-RPC reserves belong to the program (ADR-0032). |
+| `neogrip.app` | the application shell: `App` (lifecycle as configuration), `Protocol` and `ErrorCodes` (this program's contract), `HandshakeHandler`, `SqlErrors` (driver errors to envelopes), `Session` (connection control and metadata), and the handler classes. |
 | `neogrip.db` | the database logic: `Database` (the lifecycle of everything executed, transactions included), statement/export/transaction units, `types/` (the wire's records), and `catalog/` (the DatabaseMetaData units). |
 
 ## The programming model

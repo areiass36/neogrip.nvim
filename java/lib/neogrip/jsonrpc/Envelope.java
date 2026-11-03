@@ -4,24 +4,12 @@ import neogrip.dataformat.json.JsonMapper;
 import neogrip.dataformat.json.JsonWriter;
 
 /**
- * The protocol constants and the envelope, mirroring doc/protocol.md and the
- * Lua side's rpc/protocol.lua. Only this class spells "jsonrpc": results and
- * errors alike are enveloped here and nowhere else.
+ * The JSON-RPC 2.0 envelope, and the only class that spells "jsonrpc":
+ * results, errors and notifications are all built here, so a handler never
+ * holds one and the hand-counted braces this replaced cannot come back.
  */
-public final class Wire {
-    private Wire() {}
-
-    public static final int PROTOCOL_VERSION = 2;
-
-    public static final int PARSE_ERROR = -32700;
-    public static final int INVALID_REQUEST = -32600;
-    public static final int METHOD_NOT_FOUND = -32601;
-    public static final int INTERNAL_ERROR = -32603;
-    public static final int PROTOCOL_MISMATCH = -32002;
-    public static final int SQL_ERROR = -32010;
-    public static final int AUTH_ERROR = -32011;
-    public static final int READONLY_REFUSED = -32012;
-    public static final int CANCELLED = -32013;
+public final class Envelope {
+    private Envelope() {}
 
     /** One response line. A null value is the empty result, {}. */
     public static String result(Object id, Object value) {

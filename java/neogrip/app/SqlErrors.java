@@ -4,7 +4,6 @@ import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import neogrip.jsonrpc.RpcException;
-import neogrip.jsonrpc.Wire;
 
 /**
  * An error the editor can point at.
@@ -33,7 +32,7 @@ public final class SqlErrors {
             data.put("line", (long) line);
         }
         String message = e.getMessage() == null ? e.toString() : e.getMessage();
-        return new RpcException(Wire.SQL_ERROR, message.trim(), data);
+        return new RpcException(ErrorCodes.SQL_ERROR, message.trim(), data);
     }
 
     /** PostgreSQL reports the offending character; nothing else does. */

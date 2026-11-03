@@ -136,7 +136,7 @@ public final class Session implements RpcLifecycle {
     }
 
     @Override
-    public void onRequest() {
+    public void onRequest(String method) {
         lastRequestAt = System.currentTimeMillis();
     }
 
