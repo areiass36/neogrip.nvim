@@ -149,9 +149,14 @@ batch; `done` is true when the result has no more rows, and gripd has then alrea
 - `catalog/ddl {catalog?, schema?, table}` / `catalog/nativeDdl {...}` → rendered definitions.
 - `catalog/snapshot {catalog?, schema}` → `{rows}` — one whole schema (every table with its columns) in a
   single round trip; small enough to ride in-band.
-- `catalog/introspect {catalog?, path, parallelism, budgetMs, details}` → `{schemas, tables, columns,
+- `catalog/introspect {catalog?, schema?, path, parallelism, budgetMs, details}` → `{schemas, tables, columns,
   details, partial, parallel, elapsedMs}` — the deep sweep of the whole catalog, written to `path`
   file-side (ADR-0010), honouring the time budget and the cancel flag.
+- `schema` scopes that sweep to one namespace (ADR-0038): what it writes is a snapshot holding that
+  schema alone, which the client folds into the catalog it already has instead of replacing it - for a
+  manual re-introspection after a migration. A name nothing matches sweeps nothing and says so in the
+  counts, which is how a dropped schema reports itself. Without `schema`, the whole catalog is swept into
+  one file exactly as before.
 
 ### shutdown (notification)
 

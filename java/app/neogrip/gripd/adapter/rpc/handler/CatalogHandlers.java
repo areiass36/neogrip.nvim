@@ -75,7 +75,8 @@ public final class CatalogHandlers {
     }
 
     @RpcMethod
-    IntrospectSummary introspect(String catalog, String path, int parallelism, long budgetMs, boolean details) {
-        return db.introspect(catalog, path, parallelism, budgetMs, details);
+    IntrospectSummary introspect(
+            String catalog, String schema, String path, int parallelism, long budgetMs, boolean details) {
+        return db.introspect(catalog, schema, path, parallelism, budgetMs, details);
     }
 }

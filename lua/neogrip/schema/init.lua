@@ -440,7 +440,12 @@ end
 --- store's file (ADR-0010), so a catalog the size of a warehouse never travels
 --- through the request protocol.
 ---
---- @param opts table|nil { parallelism, timeout_ms, details }
+--- A scope of one schema (opts.schema) sweeps only that namespace and folds
+--- the result into what is already known, for a manual re-introspection after
+--- a migration (ADR-0038). Without one, the whole catalog is swept and written
+--- straight to the store's file as before.
+---
+--- @param opts table|nil { parallelism, timeout_ms, details, schema }
 --- @param callback fun(summary: table|nil, err: string|nil)|nil
 function M.introspect(connection, catalog, opts, callback)
 	opts = opts or {}
@@ -451,7 +456,10 @@ function M.introspect(connection, catalog, opts, callback)
 	end
 
 	local settings = config.get()
-	local path = store.path(connection, catalog)
+	local scoped = opts.schema
+	-- A scoped sweep must not land on the store's own file: it holds one
+	-- schema, and writing it there would be throwing the catalog away.
+	local path = scoped and (vim.fn.tempname() .. ".json") or store.path(connection, catalog)
 	local details = opts.details
 	if details == nil then
 		details = settings.introspect_details
@@ -469,6 +477,7 @@ function M.introspect(connection, catalog, opts, callback)
 		end
 		gripd.request(connection, "catalog/introspect", {
 			catalog = catalog,
+			schema = scoped,
 			path = path,
 			parallelism = opts.parallelism or settings.introspect_parallelism,
 			budgetMs = opts.timeout_ms or settings.introspect_timeout_ms,
@@ -479,7 +488,16 @@ function M.introspect(connection, catalog, opts, callback)
 			end
 			-- The file is the answer: drop the decoded copy so the next
 			-- question reads the one that was just written.
-			store.reload(connection, catalog)
+			if scoped then
+				local merged, merge_err = store.merge_from(connection, catalog, path, scoped)
+				pcall(vim.fn.delete, path)
+				if not merged then
+					return finish(nil, merge_err or "could not merge the scoped sweep")
+				end
+				store.reload(connection, catalog)
+			else
+				store.reload(connection, catalog)
+			end
 			finish({
 				schemas = result.schemas or 0,
 				tables = result.tables or 0,
@@ -488,7 +506,8 @@ function M.introspect(connection, catalog, opts, callback)
 				partial = result.partial == true,
 				parallel = result.parallel == true,
 				elapsed_ms = result.elapsedMs or 0,
-				path = path,
+				path = scoped and store.path(connection, catalog) or path,
+				schema = scoped,
 			}, nil)
 		end)
 	end)

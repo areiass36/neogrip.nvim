@@ -226,7 +226,12 @@ public final class Database implements RpcLifecycle {
     }
 
     public Contracts.IntrospectSummary introspect(
-            String catalogName, String path, int parallelism, long budgetMs, boolean details) {
+            String catalogName,
+            String schema,
+            String path,
+            int parallelism,
+            long budgetMs,
+            boolean details) {
         Introspect sweep = scope().introspect();
         if (!sweeping.compareAndSet(false, true)) {
             throw new RequestRefused("a catalog sweep is already running on this connection");
@@ -238,7 +243,7 @@ public final class Database implements RpcLifecycle {
             // own, and holding the lock for minutes would queue every statement
             // behind it - the exact thing it exists to avoid.
             lane.sweepCancelled().set(false);
-            return sweep.introspect(catalogName, path, parallelism, budgetMs, details);
+            return sweep.introspect(catalogName, schema, path, parallelism, budgetMs, details);
         } catch (SQLException | IOException e) {
             throw new DataAccessException(e);
         } finally {

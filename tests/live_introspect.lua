@@ -285,3 +285,71 @@ for _, engine in ipairs(ENGINES) do
 		end
 	end
 end
+
+-- A manual re-introspection of one namespace (ADR-0038).
+--
+-- PostgreSQL because it is the engine with real schemas to tell apart: the
+-- claim is that re-reading one of them after a migration folds into the
+-- catalog instead of replacing it, so the forty schemas nobody touched are
+-- still there afterwards.
+support.describe("live/introspect: a scope of one namespace")
+do
+	local pg = support.connections().postgres
+	if not support.reachable(pg) then
+		note("skipped: nothing listening (tests/containers.sh up)")
+	else
+		for _, statement in ipairs({
+			"create schema if not exists scoped_a",
+			"create schema if not exists scoped_b",
+			"create table if not exists scoped_a.first(id int primary key)",
+			"create table if not exists scoped_b.untouched(id int primary key)",
+			"drop table if exists scoped_a.added",
+		}) do
+			support.run(pg, statement, { mode = "exec" })
+		end
+
+		local catalog = schema.catalog_of(pg)
+		schema.invalidate(pg)
+		local _, whole_err = support.sync(function(done)
+			schema.introspect(pg, catalog, {}, function(result, err)
+				done(result, err)
+			end)
+		end, 120000)
+		check("the whole catalog is swept first", whole_err, nil)
+		local before_a = store.tables(pg, catalog, "scoped_a") or {}
+		local before_b = store.tables(pg, catalog, "scoped_b") or {}
+		check("both schemas are in it", { #before_a, #before_b }, { 1, 1 })
+
+		-- The migration.
+		support.run(pg, "create table scoped_a.added(id int primary key)", { mode = "exec" })
+
+		local summary, scoped_err = support.sync(function(done)
+			schema.introspect(pg, catalog, { schema = "scoped_a" }, function(result, err)
+				done(result, err)
+			end)
+		end, 120000)
+		check("the scoped sweep ran", scoped_err, nil)
+		check("and swept one schema", summary and summary.schemas, 1)
+
+		local after_a = {}
+		for _, record in ipairs(store.tables(pg, catalog, "scoped_a") or {}) do
+			after_a[record.name] = record
+		end
+		check("the new table is in the catalog", after_a.added ~= nil, true)
+		check("beside the one that was already there", after_a.first ~= nil, true)
+
+		-- The point of the whole exercise: the schema nobody asked about is
+		-- still there, with what the earlier sweep found.
+		local after_b = store.tables(pg, catalog, "scoped_b") or {}
+		check("the other schema survived untouched", #after_b, #before_b)
+		check("and it is still the same table", after_b[1] and after_b[1].name, "untouched")
+
+		local columns = store.columns(pg, catalog, "scoped_b", "untouched")
+		check("with its columns", columns ~= nil and #columns > 0, true)
+
+		for _, statement in ipairs({ "drop schema scoped_a cascade", "drop schema scoped_b cascade" }) do
+			support.run(pg, statement, { mode = "exec" })
+		end
+		schema.invalidate(pg)
+	end
+end

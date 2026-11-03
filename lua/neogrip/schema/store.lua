@@ -71,6 +71,27 @@ local function indexed(snapshot)
 	return snapshot
 end
 
+--- A snapshot document from disk, or nil when there is nothing readable.
+---
+--- A half-written or hand-edited file is not worth a traceback: every caller
+--- falls back to asking the server, which is what happened before any of this
+--- existed.
+--- @return table|nil
+local function read_snapshot(path)
+	if vim.fn.filereadable(path) ~= 1 then
+		return nil
+	end
+	local read, lines = pcall(vim.fn.readfile, path)
+	if not read then
+		return nil
+	end
+	local decoded, snapshot = pcall(vim.json.decode, table.concat(lines, "\n"))
+	if not decoded or type(snapshot) ~= "table" or type(snapshot.schemas) ~= "table" then
+		return nil
+	end
+	return snapshot
+end
+
 --- @return neogrip.Snapshot|nil
 function M.load(connection, catalog)
 	if not connection then
@@ -85,20 +106,8 @@ function M.load(connection, catalog)
 		return cached or nil
 	end
 
-	local path = M.path(connection, catalog)
-	if vim.fn.filereadable(path) ~= 1 then
-		loaded[key] = false
-		return nil
-	end
-	local read, lines = pcall(vim.fn.readfile, path)
-	local decoded, snapshot = false, nil
-	if read then
-		decoded, snapshot = pcall(vim.json.decode, table.concat(lines, "\n"))
-	end
-	if not decoded or type(snapshot) ~= "table" or type(snapshot.schemas) ~= "table" then
-		-- A half-written or hand-edited file is not worth a traceback: the
-		-- explorer falls back to asking the server, which is what it did
-		-- before any of this existed.
+	local snapshot = read_snapshot(M.path(connection, catalog))
+	if not snapshot then
 		loaded[key] = false
 		return nil
 	end
@@ -119,6 +128,53 @@ function M.save(connection, catalog, snapshot)
 	snapshot.catalog = snapshot.catalog or catalog
 	loaded[key_of(connection, catalog)] = nil
 	return pcall(vim.fn.writefile, { vim.json.encode(snapshot) }, M.path(connection, catalog))
+end
+
+--- Fold a snapshot of one schema into the one already taken (ADR-0038).
+---
+--- A manual re-introspection of a single namespace writes its own file, which
+--- is merged here rather than replacing the catalog: re-reading one schema
+--- after a migration must not throw away the other forty. With nothing taken
+--- yet, the part becomes the whole of what is known.
+---
+--- The index is dropped before writing because it is derived - it is rebuilt on
+--- the next load, and persisting it would double the file.
+--- @return boolean, string|nil
+function M.merge_from(connection, catalog, path, schema_name)
+	local partial = read_snapshot(path)
+	if not partial then
+		return false, "the scoped sweep wrote nothing readable"
+	end
+
+	local snapshot = M.load(connection, catalog)
+	if not snapshot then
+		return M.save(connection, catalog, { catalog = catalog, schemas = partial.schemas })
+	end
+
+	local wanted = tostring(schema_name)
+	local body = nil
+	for _, schema in ipairs(partial.schemas) do
+		if tostring(schema.name) == wanted then
+			body = schema
+		end
+	end
+
+	local kept = {}
+	for _, schema in ipairs(snapshot.schemas) do
+		if tostring(schema.name) ~= wanted then
+			kept[#kept + 1] = schema
+		end
+	end
+	-- A schema the sweep found nothing for is dropped rather than left stale:
+	-- the name matching nothing is how a dropped schema reports itself.
+	if body then
+		kept[#kept + 1] = body
+	end
+
+	snapshot.schemas = kept
+	snapshot.index = nil
+	snapshot.at = partial.at or os.time()
+	return M.save(connection, catalog, snapshot)
 end
 
 --- Drop every catalog taken for this connection, or every one of them.

@@ -60,7 +60,12 @@ public final class Introspect {
      * not a protocol message.
      */
     public Contracts.IntrospectSummary introspect(
-            String catalog, String outFile, int parallelism, long deadlineMs, boolean wantDetails)
+            String catalog,
+            String scope,
+            String outFile,
+            int parallelism,
+            long deadlineMs,
+            boolean wantDetails)
             throws SQLException, IOException {
         long start = System.currentTimeMillis();
         // No budget at all rather than one that has already run out: a caller
@@ -83,6 +88,23 @@ public final class Introspect {
 
         DatabaseMetaData meta = connection.getMetaData();
         List<Snapshot.SchemaBody> schemas = Snapshot.schemaBodies(meta, catalog);
+        // A scope of one namespace (ADR-0038). The whole machinery below is
+        // unchanged - the pool, the budget, the cancel flag, the atomic write -
+        // and what it sweeps is one schema, so what it writes is a snapshot
+        // holding one schema that the editor merges into what it already has.
+        // A name nothing matches sweeps nothing and says so through the counts,
+        // which is a better answer than a refusal: the schema may have been
+        // dropped since the client last looked.
+        String only = Metadata.orNull(scope);
+        if (only != null) {
+            List<Snapshot.SchemaBody> scoped = new ArrayList<>(1);
+            for (Snapshot.SchemaBody body : schemas) {
+                if (only.equals(body.name)) {
+                    scoped.add(body);
+                }
+            }
+            schemas = scoped;
+        }
         String label = catalog == null || catalog.isEmpty() ? currentCatalog(connection) : catalog;
         String product = product(meta);
 
