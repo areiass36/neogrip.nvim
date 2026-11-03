@@ -138,7 +138,7 @@ public final class Snapshot {
             for (String name : MongoFields.collectionNames(connection)) {
                 collections.add(new Contracts.TableWithColumns(name, "collection", null, List.of()));
             }
-            return new Contracts.Rows<>(collections);
+            return Contracts.Rows.of(collections);
         }
         SchemaBody body = new SchemaBody(schema, schema);
         sweepSchema(body, connection.getMetaData(), catalog, LIMIT, COLUMN_LIMIT);
@@ -152,7 +152,7 @@ public final class Snapshot {
                     body.remarks.get(table.getKey()),
                     columns == null ? List.of() : columns));
         }
-        return new Contracts.Rows<>(list);
+        return Contracts.Rows.of(list);
     }
 
     /**

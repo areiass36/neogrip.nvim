@@ -168,6 +168,65 @@ for _, target in ipairs(targets) do
 	end
 end
 
+support.describe("live/schema: a listing pages by name")
+local duck = connections.duckdb
+if not support.reachable(duck) then
+	note("skipped")
+else
+	local gripd = require("neogrip.gripd")
+	for letter in ("abcdefg"):gmatch(".") do
+		support.run(duck, ("create table if not exists page_%s(id int)"):format(letter), { mode = "exec" })
+	end
+
+	-- Driven through the wire rather than through schema.*: the editor side has
+	-- no paging caller yet (that is the tree), and what is being proved here is
+	-- the contract of ADR-0038.
+	local seen, order, after, pages, cut = {}, {}, nil, 0, nil
+	repeat
+		local params = { schema = "main", limit = 3 }
+		params.after = after
+		local result, err = support.sync(function(done)
+			gripd.request(duck, "catalog/tables", params, function(res, request_err)
+				done(res, request_err)
+			end)
+		end)
+		if err or not result then
+			support.fail("paging", err and err.message or "no answer")
+			break
+		end
+		pages = pages + 1
+		check(("page %d holds at most the limit"):format(pages), #result.rows <= 3, true)
+		for _, row in ipairs(result.rows) do
+			seen[row.name] = (seen[row.name] or 0) + 1
+			order[#order + 1] = row.name
+			after = row.name
+		end
+		cut = result.truncated
+	until not cut or pages >= 20
+
+	check("more than one page was needed", pages > 1, true)
+	check("and the last page is not marked truncated", cut, nil)
+	local increasing = true
+	for index = 2, #order do
+		if order[index - 1]:lower() >= order[index]:lower() then
+			increasing = false
+		end
+	end
+	check("names strictly increase across pages", increasing, true)
+	local missing, repeated = {}, {}
+	for letter in ("abcdefg"):gmatch(".") do
+		local name = "page_" .. letter
+		if not seen[name] then
+			missing[#missing + 1] = name
+		elseif seen[name] > 1 then
+			repeated[#repeated + 1] = name
+		end
+	end
+	check("every table was seen", missing, {})
+	check("and none of them twice", repeated, {})
+	note(("%d names over %d pages"):format(#order, pages))
+end
+
 support.describe("live/schema: a binary column needs no rewriting")
 local pg = connections.postgres
 if support.reachable(pg) then

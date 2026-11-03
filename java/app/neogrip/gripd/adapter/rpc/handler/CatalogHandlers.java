@@ -25,18 +25,18 @@ public final class CatalogHandlers {
     }
 
     @RpcMethod
-    Rows<Named> catalogs() {
-        return db.catalogs();
+    Rows<Named> catalogs(String after, int limit) {
+        return db.catalogs(after, limit);
     }
 
     @RpcMethod
-    Rows<Named> schemas(String catalog) {
-        return db.schemas(catalog);
+    Rows<Named> schemas(String catalog, String after, int limit) {
+        return db.schemas(catalog, after, limit);
     }
 
     @RpcMethod
-    Rows<TableRow> tables(String catalog, String schema, String pattern) {
-        return db.tables(catalog, schema, pattern);
+    Rows<TableRow> tables(String catalog, String schema, String pattern, String after, int limit) {
+        return db.tables(catalog, schema, pattern, after, limit);
     }
 
     @RpcMethod

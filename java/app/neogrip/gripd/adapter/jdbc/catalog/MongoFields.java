@@ -71,7 +71,7 @@ public final class MongoFields {
                     name.equals("_id"),
                     counts.getOrDefault(field.getKey(), 0)));
         }
-        return new Contracts.Rows<>(list);
+        return Contracts.Rows.of(list);
     }
 
     /**

@@ -177,19 +177,20 @@ public final class Database implements RpcLifecycle {
 
     // --- catalog ----------------------------------------------------------
 
-    public Contracts.Rows<Contracts.Named> catalogs() {
+    public Contracts.Rows<Contracts.Named> catalogs(String after, int limit) {
         Listings listings = scope().listings();
-        return onConnection(listings::catalogs);
+        return onConnection(() -> listings.catalogs(after, limit));
     }
 
-    public Contracts.Rows<Contracts.Named> schemas(String catalogName) {
+    public Contracts.Rows<Contracts.Named> schemas(String catalogName, String after, int limit) {
         Listings listings = scope().listings();
-        return onConnection(() -> listings.schemas(catalogName));
+        return onConnection(() -> listings.schemas(catalogName, after, limit));
     }
 
-    public Contracts.Rows<Contracts.TableRow> tables(String catalogName, String schema, String pattern) {
+    public Contracts.Rows<Contracts.TableRow> tables(
+            String catalogName, String schema, String pattern, String after, int limit) {
         Listings listings = scope().listings();
-        return onConnection(() -> listings.tables(catalogName, schema, pattern));
+        return onConnection(() -> listings.tables(catalogName, schema, pattern, after, limit));
     }
 
     public Contracts.Rows<?> columns(String catalogName, String schema, String table) {

@@ -39,8 +39,19 @@ public final class Contracts {
     /** A bare name, as the catalogs and schemas listings answer. */
     public record Named(String name) {}
 
-    /** The {"rows":[...]} shape every catalog listing answers with. */
-    public record Rows<T>(List<T> rows) {}
+    /**
+     * The {"rows":[...]} shape every catalog listing answers with.
+     *
+     * `truncated` is present only when a page was cut, so the client knows the
+     * difference between "that is all of them" and "ask again after the last
+     * name you got" (ADR-0038). Everything that is not paged - a table's
+     * columns, a schema snapshot - answers through {@link #of}.
+     */
+    public record Rows<T>(List<T> rows, Boolean truncated) {
+        public static <T> Rows<T> of(List<T> rows) {
+            return new Rows<>(rows, null);
+        }
+    }
 
     public record TableRow(String name, String kind, String schema, String remarks) {}
 

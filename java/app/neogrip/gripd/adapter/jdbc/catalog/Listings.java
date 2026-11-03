@@ -7,17 +7,55 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Function;
 import neogrip.gripd.contract.Contracts;
 
 /** The small catalog listings: catalogs, schemas, tables, columns. */
 public final class Listings {
+    /**
+     * How many names a listing answers at once (ADR-0038).
+     *
+     * A ceiling on what is sent and not on what exists: before paging, a
+     * schema with six hundred tables answered five hundred of them and said
+     * nothing about the rest, which in a tree reads as missing data.
+     */
+    static final int PAGE = 500;
+
     private final Connection connection;
 
     public Listings(Connection connection) {
         this.connection = connection;
     }
 
-    public Contracts.Rows<Contracts.Named> catalogs() throws SQLException {
+    /**
+     * One page of an ordered listing: what sorts after `after`, at most
+     * `limit` of it.
+     *
+     * Keyset rather than offset, and stateless because of it: the client sends
+     * back the last name it received and this resumes with the comparator the
+     * list was ordered by, so nothing is skipped or repeated even if the
+     * catalog changed between two pages.
+     */
+    private static <T> Contracts.Rows<T> page(
+            List<T> ordered, Function<T, String> name, String after, int limit) {
+        int size = limit > 0 ? limit : PAGE;
+        boolean resuming = after != null && !after.isEmpty();
+        List<T> out = new ArrayList<>(Math.min(size, ordered.size()));
+        boolean more = false;
+        for (T item : ordered) {
+            if (resuming && Metadata.BY_NAME.compare(name.apply(item), after) <= 0) {
+                continue;
+            }
+            if (out.size() == size) {
+                more = true;
+                break;
+            }
+            out.add(item);
+        }
+        return new Contracts.Rows<>(out, more ? Boolean.TRUE : null);
+    }
+
+    public Contracts.Rows<Contracts.Named> catalogs(String after, int limit) throws SQLException {
         DatabaseMetaData meta = connection.getMetaData();
         List<String> names = new ArrayList<>();
         try (ResultSet rows = meta.getCatalogs()) {
@@ -34,23 +72,27 @@ public final class Listings {
             }
         }
         names.sort(Metadata.BY_NAME);
-        return named(names);
+        return page(named(names), Contracts.Named::name, after, limit);
     }
 
-    public Contracts.Rows<Contracts.Named> schemas(String catalog) throws SQLException {
-        return named(Metadata.schemaNames(connection.getMetaData(), catalog, Snapshot.LIMIT));
+    public Contracts.Rows<Contracts.Named> schemas(String catalog, String after, int limit)
+            throws SQLException {
+        // Every name, because the page is cut here: a cap inside the read would
+        // make the last page depend on which names the driver answered first.
+        List<String> names = Metadata.schemaNames(connection.getMetaData(), catalog, Integer.MAX_VALUE);
+        return page(named(names), Contracts.Named::name, after, limit);
     }
 
-    private static Contracts.Rows<Contracts.Named> named(List<String> names) {
+    private static List<Contracts.Named> named(List<String> names) {
         List<Contracts.Named> rows = new ArrayList<>(names.size());
         for (String name : names) {
             rows.add(new Contracts.Named(String.valueOf(name)));
         }
-        return new Contracts.Rows<>(rows);
+        return rows;
     }
 
-    public Contracts.Rows<Contracts.TableRow> tables(String catalog, String schema, String pattern)
-            throws SQLException {
+    public Contracts.Rows<Contracts.TableRow> tables(
+            String catalog, String schema, String pattern, String after, int limit) throws SQLException {
         if (MongoFields.isMongo(connection)) {
             List<Contracts.TableRow> collections = new ArrayList<>();
             String needle = pattern == null ? "" : pattern.toLowerCase(java.util.Locale.ROOT);
@@ -60,7 +102,7 @@ public final class Listings {
                 }
             }
             collections.sort(Comparator.comparing(Contracts.TableRow::name, Metadata.BY_NAME));
-            return new Contracts.Rows<>(collections);
+            return page(collections, Contracts.TableRow::name, after, limit);
         }
         DatabaseMetaData meta = connection.getMetaData();
         String namePattern = pattern == null || pattern.isEmpty() ? "%" : "%" + pattern + "%";
@@ -72,7 +114,7 @@ public final class Listings {
         // requested and the system objects are dropped here.
         try (ResultSet rows =
                 meta.getTables(Metadata.orNull(catalog), Metadata.orNull(Metadata.literal(meta, schema)), namePattern, null)) {
-            while (rows.next() && list.size() < Snapshot.LIMIT) {
+            while (rows.next()) {
                 String tableType = rows.getString("TABLE_TYPE");
                 if (Metadata.isSystem(tableType)) {
                     continue;
@@ -85,7 +127,7 @@ public final class Listings {
             }
         }
         list.sort(Comparator.comparing(Contracts.TableRow::name, Metadata.BY_NAME));
-        return new Contracts.Rows<>(list);
+        return page(list, Contracts.TableRow::name, after, limit);
     }
 
     /**
@@ -114,6 +156,6 @@ public final class Listings {
                 list.add(Metadata.columnRow(rows, primaryKey.columns));
             }
         }
-        return new Contracts.Rows<>(list);
+        return Contracts.Rows.of(list);
     }
 }

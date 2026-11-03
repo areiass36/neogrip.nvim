@@ -124,8 +124,13 @@ batch; `done` is true when the result has no more rows, and gripd has then alrea
 
 ### Catalog
 
-- `catalog/catalogs {}`, `catalog/schemas {catalog?}`, `catalog/tables {catalog?, schema?}`,
+- `catalog/catalogs {after?, limit?}`, `catalog/schemas {catalog?, after?, limit?}`,
+  `catalog/tables {catalog?, schema?, pattern?, after?, limit?}`,
   `catalog/columns {catalog?, schema?, table}` → small listings.
+- The three name listings are **ordered by name** and **paged by keyset** (ADR-0038): `limit` is the page
+  size (500 when absent), `after` is the last name the client received, and the answer carries
+  `truncated: true` when a page was cut. Paging is stateless on the server — the ordering is what makes
+  resuming exact. `catalog/columns` is not paged: columns have a declared position and keep it.
 - A listed table's `kind` is one of exactly three (ADR-0036): `table`, `view` or `collection`. A
   materialized view is a `view`; everything else selectable - foreign, partitioned, temporary, system, an
   alias, a sequence, a type no driver here has reported before - is a `table`. The engine's own
