@@ -21,7 +21,7 @@ import neogrip.jsonrpc.RpcException;
 import neogrip.jsonrpc.RpcServer;
 
 /**
- * The sidecar's lifecycle, as configuration: the server is built here and
+ * The daemon's lifecycle, as configuration: the server is built here and
  * nothing else is constructed by hand - components and handlers are classes
  * the builder instantiates, constructor-injecting each by type. The program is
  * editor-agnostic: NDJSON JSON-RPC on stdio, contract in doc/protocol.md, and

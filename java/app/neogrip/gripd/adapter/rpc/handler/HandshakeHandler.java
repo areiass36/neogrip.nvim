@@ -33,10 +33,10 @@ public final class HandshakeHandler implements RpcLifecycle {
             // never going to work.
             throw RpcException.fatal(
                     ErrorCodes.PROTOCOL_MISMATCH,
-                    "sidecar speaks protocol " + Protocol.VERSION + ", client sent " + protocolVersion);
+                    "gripd speaks protocol " + Protocol.VERSION + ", client sent " + protocolVersion);
         }
         done = true;
-        return Map.of("protocolVersion", (long) Protocol.VERSION, "sidecarInfo", info);
+        return Map.of("protocolVersion", (long) Protocol.VERSION, "gripdInfo", info);
     }
 
     @Override

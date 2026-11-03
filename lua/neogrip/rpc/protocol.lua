@@ -1,10 +1,12 @@
 -- The protocol constants, mirroring doc/protocol.md. Both sides of the wire
--- read their numbers from a single place: this file in Lua, Rpc.java in Java.
+-- read their numbers from a single place: this file in Lua, Protocol.java in
+-- Java.
 local M = {}
 
--- Bumped only by an ADR; a major mismatch is refused at initialize. Version 2
--- made a result a cursor the client names (ADR-0031).
-M.VERSION = 2
+-- Bumped only by an ADR; a mismatch is refused at initialize. Version 2 made a
+-- result a cursor the client names (ADR-0031); version 3 renamed the
+-- handshake's sidecarInfo to gripdInfo with the program (ADR-0034).
+M.VERSION = 3
 
 M.ERRORS = {
 	-- JSON-RPC standard codes.

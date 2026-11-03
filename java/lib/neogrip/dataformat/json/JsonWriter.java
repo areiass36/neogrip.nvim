@@ -5,9 +5,9 @@ import java.io.UncheckedIOException;
 
 /**
  * A structured JSON writer over any Appendable: a StringBuilder for an in-band
- * response, a BufferedWriter for a file the sidecar streams into. Commas,
+ * response, a BufferedWriter for a file a program streams into. Commas,
  * quoting and escaping live here and nowhere else - the hand-counted braces
- * this library replaced were the sidecar's steadiest source of almost-bugs.
+ * this library replaced were a steady source of almost-bugs.
  *
  * Escaping rules carried over from the previous writer: control characters are
  * escaped, and a lone surrogate is replaced rather than passed through,

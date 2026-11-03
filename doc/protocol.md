@@ -4,7 +4,7 @@ The contract between the Lua plugin and gripd, its Java daemon. This document is
 here bumps `protocolVersion`, is recorded in an ADR first, and lands in the same commit as both
 implementations (`lua/neogrip/rpc/` and `java/neogrip/`).
 
-Current `protocolVersion`: **2**.
+Current `protocolVersion`: **3**.
 
 ## Transport and framing
 
@@ -46,8 +46,8 @@ sweep at a time, outside the lock, on sibling connections of its own.
 ### initialize
 
 ```json
-→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":2,"clientInfo":{"name":"neogrip.nvim"}}}
-← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":2,"sidecarInfo":{"java":"21.0.3"}}}
+→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":3,"clientInfo":{"name":"neogrip.nvim"}}}
+← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":3,"gripdInfo":{"java":"21.0.3"}}}
 ```
 
 A major-version mismatch is refused with error `-32002` and gripd exits.

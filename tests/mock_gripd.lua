@@ -18,7 +18,7 @@ end
 
 -- Kept in step with lua/neogrip/rpc/protocol.lua by hand: this script runs
 -- under nvim --clean, with the plugin nowhere on its path.
-local VERSION = 2
+local VERSION = 3
 local initialized = false
 
 for line in io.lines() do
@@ -36,7 +36,7 @@ for line in io.lines() do
 				break
 			end
 			initialized = true
-			respond(id, { protocolVersion = VERSION, sidecarInfo = { name = "mock" } })
+			respond(id, { protocolVersion = VERSION, gripdInfo = { name = "mock" } })
 		elseif not initialized then
 			respond_error(id, -32002, "initialize first")
 		elseif method == "ping" then

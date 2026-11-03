@@ -33,7 +33,7 @@ support.check(
 )
 support.check(
 	"the handshake names the java runtime",
-	type(init_result and init_result.sidecarInfo.java),
+	type(init_result and init_result.gripdInfo.java),
 	"string"
 )
 
