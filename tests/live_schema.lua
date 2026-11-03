@@ -17,7 +17,8 @@ local targets = {
 	{ driver = "mssql", schema_name = "dbo", table_name = "torture" },
 	{ driver = "sqlite", schema_name = nil, table_name = "torture" },
 	{ driver = "duckdb", schema_name = "main", table_name = "torture" },
-	{ driver = "mongodb", schema_name = nil, table_name = "orders" },
+	-- A collection is a set like any other, and its kind says which (ADR-0036).
+	{ driver = "mongodb", schema_name = nil, table_name = "orders", kind = "collection" },
 }
 
 -- Only the connections this suite uses: invalidate(nil) would also delete the
@@ -83,7 +84,7 @@ for _, target in ipairs(targets) do
 				kinds[record.kind] = true
 				if record.name == target.table_name then
 					found = true
-					check("the table is a table", record.kind, "table")
+					check("the set carries its kind", record.kind, target.kind or "table")
 				end
 				if record.name == "torture_v" then
 					check("and a view is a view", record.kind, "view")
