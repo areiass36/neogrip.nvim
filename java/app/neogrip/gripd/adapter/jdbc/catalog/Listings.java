@@ -5,6 +5,7 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import neogrip.gripd.contract.Contracts;
 
@@ -32,6 +33,7 @@ public final class Listings {
                 names.add(current);
             }
         }
+        names.sort(Metadata.BY_NAME);
         return named(names);
     }
 
@@ -57,6 +59,7 @@ public final class Listings {
                     collections.add(new Contracts.TableRow(name, "collection", null, null));
                 }
             }
+            collections.sort(Comparator.comparing(Contracts.TableRow::name, Metadata.BY_NAME));
             return new Contracts.Rows<>(collections);
         }
         DatabaseMetaData meta = connection.getMetaData();
@@ -81,9 +84,14 @@ public final class Listings {
                         Metadata.remarksOf(rows)));
             }
         }
+        list.sort(Comparator.comparing(Contracts.TableRow::name, Metadata.BY_NAME));
         return new Contracts.Rows<>(list);
     }
 
+    /**
+     * Columns are deliberately not sorted: they have a declared position, and
+     * the order a table was defined in is information the editor shows.
+     */
     public Contracts.Rows<?> columns(String catalog, String schema, String table) throws SQLException {
         if (MongoFields.isMongo(connection)) {
             // The JDBC driver's getColumns needs the Atlas SQL schema, which a

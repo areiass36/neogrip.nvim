@@ -4,6 +4,7 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -17,6 +18,19 @@ import neogrip.gripd.contract.Contracts;
 public final class Metadata {
     private Metadata() {}
 
+    /**
+     * The order every listing answers in (ADR-0036).
+     *
+     * Case-insensitive because a tree reads better that way, with the exact
+     * bytes breaking ties so the order is total and deterministic - which is
+     * what keyset paging needs: the client echoes back the last name it saw and
+     * the server resumes with this same comparator, so no name is skipped or
+     * repeated. Drivers answer in whatever order their catalog tables happen to
+     * have, which can differ between two calls.
+     */
+    static final Comparator<String> BY_NAME =
+            Comparator.nullsFirst(String.CASE_INSENSITIVE_ORDER.thenComparing(Comparator.naturalOrder()));
+
     static String orNull(String value) {
         return value == null || value.isEmpty() ? null : value;
     }
@@ -26,14 +40,17 @@ public final class Metadata {
      *
      * DuckDB reports main, information_schema and pg_catalog once per attached
      * catalog, so a database with three attached answers with main three
-     * times - and the explorer draws a row per schema with a table count, so
-     * the user is shown three identical schemas, two of which answer with the
-     * same tables as the first. The first occurrence is the one kept, so the
-     * order the driver listed them in survives.
+     * times - and a tree draws a row per schema, so the user is shown three
+     * identical schemas, two of which answer with the same tables as the
+     * first. Only the duplicates are dropped; the answer then comes back in
+     * {@link #BY_NAME} order like every other listing (ADR-0036), not in the
+     * order the driver happened to use.
      *
-     * Names are compared exactly. An engine that tells Main from main has two
-     * schemas there, and folding the case would hide one of them behind the
-     * other - which is the same bug as this one, with no way to notice it.
+     * Names are deduplicated exactly. An engine that tells Main from main has
+     * two schemas there, and folding the case would hide one of them behind the
+     * other - which is the same bug as this one, with no way to notice it. The
+     * ordering folds case and then breaks the tie on the exact bytes, so both
+     * survive and land next to each other.
      */
     static List<String> schemaNames(DatabaseMetaData meta, String catalog, int limit) {
         Set<String> names = new LinkedHashSet<>();
@@ -46,7 +63,9 @@ public final class Metadata {
         } catch (SQLException ignored) {
             // MySQL and SQLite have no schema layer.
         }
-        return new ArrayList<>(names);
+        List<String> sorted = new ArrayList<>(names);
+        sorted.sort(BY_NAME);
+        return sorted;
     }
 
     static boolean isSystem(String tableType) {

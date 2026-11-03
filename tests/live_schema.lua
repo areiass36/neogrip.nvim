@@ -90,6 +90,20 @@ for _, target in ipairs(targets) do
 				end
 			end
 			check(("%s is listed"):format(target.table_name), found, true)
+
+			-- Ordered by the server (ADR-0036). Not cosmetic: the keyset paging
+			-- of ADR-0038 resumes from the last name received, which is only
+			-- exact while the order is total and the same on every call.
+			local names, ordered = {}, true
+			for _, record in ipairs(tables) do
+				names[#names + 1] = tostring(record.name)
+			end
+			for index = 2, #names do
+				if names[index - 1]:lower() > names[index]:lower() then
+					ordered = false
+				end
+			end
+			check("the listing comes back ordered by name", ordered, true)
 			-- Nothing outside the three; a matview or a foreign table arriving
 			-- under its own name would show up right here.
 			for kind in pairs(kinds) do
