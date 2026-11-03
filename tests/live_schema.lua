@@ -228,6 +228,55 @@ else
 	note(("%d names over %d pages"):format(#order, pages))
 end
 
+support.describe("live/schema: approximate row counts")
+do
+	local gripd = require("neogrip.gripd")
+	-- PostgreSQL keeps no estimate until the table has been analysed: reltuples
+	-- is -1 on one autovacuum has not reached yet, which is not an estimate and
+	-- is left out rather than reported as a count. Asking for the analyze is
+	-- what makes this test about the query and not about the clock.
+	local count_targets = {
+		{ driver = "postgres", schema_name = "public", prepare = "analyze torture" },
+		{ driver = "mysql", schema_name = "testdb" },
+		{ driver = "mssql", schema_name = "dbo" },
+		{ driver = "duckdb", schema_name = "main", empty = true },
+		{ driver = "sqlite", empty = true },
+		{ driver = "mongodb", empty = true },
+	}
+	for _, target in ipairs(count_targets) do
+		local connection = connections[target.driver]
+		if not support.reachable(connection) then
+			note(("%s: skipped"):format(target.driver))
+		else
+			if target.prepare then
+				support.run(connection, target.prepare, { mode = "exec" })
+			end
+			local result, err = support.sync(function(done)
+				gripd.request(
+					connection,
+					"catalog/counts",
+					{ schema = target.schema_name },
+					function(res, request_err)
+						done(res, request_err)
+					end
+				)
+			end)
+			check(("%s answers without failing"):format(target.driver), err, nil)
+			if result then
+				if target.empty then
+					-- No cheap estimate there, and nothing counts rows on its
+					-- own behalf (ADR-0038).
+					check(("%s keeps no estimate"):format(target.driver), vim.tbl_count(result.counts), 0)
+				else
+					local estimate = result.counts and result.counts.torture
+					check(("%s estimates torture"):format(target.driver), type(estimate), "number")
+					note(("%s: torture ~ %s rows"):format(target.driver, tostring(estimate)))
+				end
+			end
+		end
+	end
+end
+
 support.describe("live/schema: a binary column needs no rewriting")
 local pg = connections.postgres
 if support.reachable(pg) then

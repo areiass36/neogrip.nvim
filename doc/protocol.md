@@ -2,7 +2,7 @@
 
 The contract between the Lua plugin and gripd, its Java daemon. This document is the source of truth: a change
 here bumps `protocolVersion`, is recorded in an ADR first, and lands in the same commit as both
-implementations (`lua/neogrip/rpc/` and `java/neogrip/`).
+implementations (`lua/neogrip/rpc/` and `java/app/neogrip/gripd/`).
 
 Current `protocolVersion`: **4**.
 
@@ -80,7 +80,7 @@ lands. `transactionIdleSeconds` arms the idle-transaction watchdog (ADR-0013); z
 
 - `query {hash, sql, limit, timeoutSeconds}` → `{hash, columns:[{name,type,table,schema}], rows:[[...]],
   done, elapsedMs}` — at most `limit` rows per batch; cell values are strings, numbers, booleans or null,
-  rendered per `java/neogrip/db/Values.java`'s rules. A result is a cursor the client names: see
+  rendered per `java/app/neogrip/gripd/adapter/jdbc/Values.java`'s rules. A result is a cursor the client names: see
   [Cursors](#cursors).
 - `query {hash, limit}` → `{hash, rows, done, elapsedMs}` — the next batch of the result named `hash`.
   No `sql` is what makes it a continuation rather than a new statement.
@@ -135,6 +135,11 @@ batch; `done` is true when the result has no more rows, and gripd has then alrea
   materialized view is a `view`; everything else selectable - foreign, partitioned, temporary, system, an
   alias, a sequence, a type no driver here has reported before - is a `table`. The engine's own
   `TABLE_TYPE` is not carried.
+- `catalog/counts {catalog?, schema}` → `{counts}` — a map of set name to approximate row count for one
+  namespace, in one statement (ADR-0038). A set the engine keeps no estimate for is absent rather than
+  zero, and an engine that keeps none at all - sqlite, duckdb, trino, the Mongo wrapper - answers `{}`:
+  nothing here runs `count(*)` on a client's behalf. PostgreSQL answers nothing for a table that has never
+  been analysed, because `reltuples` is -1 there and that is not an estimate.
 - `catalog/details {catalog?, schema?, table}` → keys, indexes, references for one table.
 - `catalog/ddl {catalog?, schema?, table}` / `catalog/nativeDdl {...}` → rendered definitions.
 - `catalog/snapshot {catalog?, schema}` → `{rows}` — one whole schema (every table with its columns) in a

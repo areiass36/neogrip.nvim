@@ -1,6 +1,7 @@
 package neogrip.gripd.adapter.rpc.handler;
 
 import neogrip.gripd.adapter.jdbc.Database;
+import neogrip.gripd.contract.Contracts.Counts;
 import neogrip.gripd.contract.Contracts.Ddl;
 import neogrip.gripd.contract.Contracts.IntrospectSummary;
 import neogrip.gripd.contract.Contracts.Named;
@@ -37,6 +38,15 @@ public final class CatalogHandlers {
     @RpcMethod
     Rows<TableRow> tables(String catalog, String schema, String pattern, String after, int limit) {
         return db.tables(catalog, schema, pattern, after, limit);
+    }
+
+    /**
+     * Approximate row counts for a whole namespace in one statement, for the
+     * engines that keep an estimate; an empty answer everywhere else.
+     */
+    @RpcMethod
+    Counts counts(String catalog, String schema) {
+        return db.counts(catalog, schema);
     }
 
     @RpcMethod

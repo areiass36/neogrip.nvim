@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 import neogrip.gripd.adapter.export.Exports;
+import neogrip.gripd.adapter.jdbc.catalog.Counts;
 import neogrip.gripd.adapter.jdbc.catalog.Details;
 import neogrip.gripd.adapter.jdbc.catalog.Introspect;
 import neogrip.gripd.adapter.jdbc.catalog.Listings;
@@ -211,6 +212,12 @@ public final class Database implements RpcLifecycle {
     public Object ddl(String catalogName, String schema, String table) {
         Details details = scope().details();
         return onConnection(() -> details.ddl(catalogName, schema, table));
+    }
+
+    /** Approximate row counts for a namespace, cheap or absent (ADR-0038). */
+    public Contracts.Counts counts(String catalogName, String schema) {
+        Counts estimates = scope().counts();
+        return onConnection(() -> estimates.counts(catalogName, schema));
     }
 
     public Contracts.Ddl nativeDdl(String catalogName, String schema, String table) {

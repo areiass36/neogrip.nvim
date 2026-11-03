@@ -55,6 +55,14 @@ public final class Contracts {
 
     public record TableRow(String name, String kind, String schema, String remarks) {}
 
+    /**
+     * Approximate row counts for one namespace, by set name (ADR-0038).
+     *
+     * A set the engine keeps no estimate for is absent rather than zero: a
+     * client shows no number instead of a wrong one.
+     */
+    public record Counts(Map<String, Long> counts) {}
+
     public record ColumnRow(
             String name,
             String type,

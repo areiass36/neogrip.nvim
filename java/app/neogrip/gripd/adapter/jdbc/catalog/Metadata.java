@@ -1,5 +1,6 @@
 package neogrip.gripd.adapter.jdbc.catalog;
 
+import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -33,6 +34,46 @@ public final class Metadata {
 
     static String orNull(String value) {
         return value == null || value.isEmpty() ? null : value;
+    }
+
+    /**
+     * Which engine this is, preferring the url the driver reports over the one
+     * this process was started with, and falling back to what the server calls
+     * itself for a url the scheme cannot be read out of.
+     */
+    static String engine(Connection connection, String url) {
+        String jdbcUrl = url == null ? "" : url;
+        try {
+            String reported = connection.getMetaData().getURL();
+            if (reported != null && !reported.isEmpty()) {
+                jdbcUrl = reported;
+            }
+        } catch (SQLException ignored) {
+            // The url this process was started with names the same engine.
+        }
+        String named = schemeOf(jdbcUrl);
+        if (!named.isEmpty()) {
+            return named;
+        }
+        try {
+            return String.valueOf(connection.getMetaData().getDatabaseProductName()).toLowerCase();
+        } catch (SQLException ignored) {
+            return "";
+        }
+    }
+
+    /**
+     * The scheme between jdbc: and the next colon, and nothing else of the
+     * url: the rest of it can carry a file path, and a DuckDB file called
+     * postgres_dump.duckdb must not be mistaken for a PostgreSQL server.
+     */
+    private static String schemeOf(String jdbcUrl) {
+        String lower = jdbcUrl.toLowerCase();
+        if (!lower.startsWith("jdbc:")) {
+            return "";
+        }
+        int end = lower.indexOf(':', "jdbc:".length());
+        return end > 0 ? lower.substring("jdbc:".length(), end) : "";
     }
 
     /**

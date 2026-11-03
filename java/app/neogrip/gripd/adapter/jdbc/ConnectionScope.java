@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
 import neogrip.gripd.adapter.export.Exports;
+import neogrip.gripd.adapter.jdbc.catalog.Counts;
 import neogrip.gripd.adapter.jdbc.catalog.Details;
 import neogrip.gripd.adapter.jdbc.catalog.Introspect;
 import neogrip.gripd.adapter.jdbc.catalog.Listings;
@@ -31,6 +32,7 @@ public final class ConnectionScope {
     private final Snapshot snapshots;
     private final Details details;
     private final NativeDdl nativeDdl;
+    private final Counts counts;
     private final Introspect introspect;
 
     ConnectionScope(Session session, ExecutionLane lane) {
@@ -45,6 +47,7 @@ public final class ConnectionScope {
         this.snapshots = new Snapshot(connection);
         this.details = new Details(connection);
         this.nativeDdl = new NativeDdl(connection, lane.running(), session.url());
+        this.counts = new Counts(connection, lane.running(), session.url());
         // The url and the properties go with it so a catalog sweep can open
         // connections of its own rather than take this one.
         this.introspect = new Introspect(connection, lane.sweepCancelled(), session.url(), session.properties());
@@ -117,6 +120,10 @@ public final class ConnectionScope {
 
     NativeDdl nativeDdl() {
         return nativeDdl;
+    }
+
+    Counts counts() {
+        return counts;
     }
 
     Introspect introspect() {
