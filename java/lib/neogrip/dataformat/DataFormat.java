@@ -1,5 +1,8 @@
 package neogrip.dataformat;
 
+import java.util.Arrays;
+import java.util.Locale;
+import java.util.stream.Collectors;
 import neogrip.dataformat.csv.CsvRecordWriter;
 import neogrip.dataformat.json.JsonRecordWriter;
 
@@ -13,6 +16,30 @@ import neogrip.dataformat.json.JsonRecordWriter;
 public enum DataFormat {
     JSON,
     CSV;
+
+    /**
+     * The format under this name.
+     *
+     * An unknown name is refused, naming the ones that exist, rather than
+     * quietly resolving to a default: the export this library replaced read
+     * every name that was not "json" as CSV, so a typo wrote a CSV file under
+     * a .json name and nothing anywhere said so.
+     */
+    public static DataFormat of(String name) {
+        for (DataFormat format : values()) {
+            if (format.name().equalsIgnoreCase(name)) {
+                return format;
+            }
+        }
+        throw new IllegalArgumentException("unknown format '" + name + "'; this writes " + known());
+    }
+
+    /** The names, for an error message that cannot drift from the enum. */
+    public static String known() {
+        return Arrays.stream(values())
+                .map(format -> format.name().toLowerCase(Locale.ROOT))
+                .collect(Collectors.joining(", "));
+    }
 
     public RecordWriter writer(Appendable sink, FormatOptions options) {
         return switch (this) {

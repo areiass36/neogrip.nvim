@@ -32,6 +32,10 @@ public final class App {
                         CatalogHandlers.class)
                 .mapException(ReadonlyGuard.Refused.class, e -> RpcException.of(Wire.READONLY_REFUSED, e))
                 .mapException(SQLException.class, Errors::toRpcException)
+                // A rejected argument - an export format this build does not
+                // write, say - came from the request, so it answers as a bad
+                // request rather than as an internal error.
+                .mapException(IllegalArgumentException.class, e -> RpcException.of(Wire.INVALID_REQUEST, e))
                 .drainSeconds(30)
                 .build()
                 .run();

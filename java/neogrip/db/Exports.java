@@ -40,7 +40,10 @@ public final class Exports {
     public ExportResult export(String sql, String path, String format, String nullMarker, int timeoutSeconds)
             throws SQLException, IOException {
         guard.refuseWrites(sql);
-        DataFormat chosen = "json".equalsIgnoreCase(format) ? DataFormat.JSON : DataFormat.CSV;
+        // The wire names csv or json (doc/protocol.md), and a client that omits
+        // it gets csv - which is what the editor has always sent by default.
+        // A name that is neither is refused rather than written as csv.
+        DataFormat chosen = format == null || format.isBlank() ? DataFormat.CSV : DataFormat.of(format);
         FormatOptions options = new FormatOptions(nullMarker, ',');
         long start = System.currentTimeMillis();
         long written = 0;

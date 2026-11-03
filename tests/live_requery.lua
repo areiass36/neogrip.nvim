@@ -156,6 +156,20 @@ check("and the file is in place", vim.fn.filereadable(full), 1)
 local full_lines = vim.fn.readfile(full)
 check("with the sidecar's own header", full_lines[1], "id,s_comma,s_null,cjk")
 check("a comma quoted, a null marked", full_lines[2], '1,"a,b",\\N,日本語')
+local bad_path = ("%s/full.xlsx"):format(export.results_dir())
+local _, refused = support.sync(function(done)
+	require("neogrip.runner").run({
+		connection = duck,
+		sql = state.result.sql,
+		mode = "export",
+		format = "xlsx",
+		limit = 0,
+		out_file = bad_path,
+	}, done)
+end, 90000)
+check("a format nothing writes is refused", refused and refused.message:find("xlsx", 1, true) ~= nil, true)
+check("and no file is left behind", vim.fn.filereadable(bad_path), 0)
+
 local exported_json = support.sync(function(done)
 	require("neogrip.runner").run({
 		connection = duck,

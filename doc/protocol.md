@@ -90,7 +90,7 @@ lands. `transactionIdleSeconds` arms the idle-transaction watchdog (ADR-0013); z
   Any other spelling passes through untouched.
 - `validate {sql}` → `{}` — a server-side prepare, parses but never executes.
 - `export {sql, path, format, nullMarker, timeoutSeconds}` → `{rows, path}` — streams to `path`,
-  format `csv` or `json`.
+  format `csv` (the default when absent) or `json`; any other name is refused.
 
 ### Control
 
