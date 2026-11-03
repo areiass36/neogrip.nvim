@@ -3,6 +3,8 @@ package neogrip.app;
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import neogrip.db.errors.DataAccessException;
+import neogrip.jsonrpc.JsonRpc;
 import neogrip.jsonrpc.RpcException;
 
 /**
@@ -17,6 +19,21 @@ import neogrip.jsonrpc.RpcException;
  */
 public final class SqlErrors {
     private SqlErrors() {}
+
+    /**
+     * A failure that came up through a port, with the driver's own exception
+     * inside it.
+     */
+    public static RpcException fromFailure(DataAccessException failure) {
+        if (failure.getCause() instanceof SQLException sql) {
+            return toRpcException(sql);
+        }
+        // A file the export could not write, say: nothing a SQLState explains,
+        // and the type plus the message is all there is to say.
+        Throwable cause = failure.getCause();
+        return new RpcException(
+                JsonRpc.INTERNAL_ERROR, cause.getClass().getSimpleName() + ": " + cause.getMessage());
+    }
 
     public static RpcException toRpcException(SQLException e) {
         Map<String, Object> data = new LinkedHashMap<>();

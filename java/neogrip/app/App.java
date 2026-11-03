@@ -5,6 +5,7 @@ import neogrip.db.Database;
 import neogrip.db.ReadonlyGuard;
 import neogrip.db.Session;
 import neogrip.db.errors.Cancelled;
+import neogrip.db.errors.DataAccessException;
 import neogrip.db.errors.RequestRefused;
 import neogrip.jsonrpc.ExitReason;
 import neogrip.jsonrpc.JsonRpc;
@@ -37,6 +38,7 @@ public final class App {
                 // nowhere else: the code that executes statements throws its
                 // own exceptions and never sees an envelope (ADR-0032).
                 .mapException(ReadonlyGuard.Refused.class, e -> RpcException.of(ErrorCodes.READONLY_REFUSED, e))
+                .mapException(DataAccessException.class, SqlErrors::fromFailure)
                 .mapException(SQLException.class, SqlErrors::toRpcException)
                 .mapException(RequestRefused.class, e -> RpcException.of(JsonRpc.INVALID_REQUEST, e))
                 .mapException(Cancelled.class, e -> RpcException.of(ErrorCodes.CANCELLED, e))

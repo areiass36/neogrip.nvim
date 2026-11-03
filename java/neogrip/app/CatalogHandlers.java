@@ -1,7 +1,5 @@
 package neogrip.app;
 
-import java.io.IOException;
-import java.sql.SQLException;
 import neogrip.db.Database;
 import neogrip.db.types.Types.Ddl;
 import neogrip.db.types.Types.IntrospectSummary;
@@ -27,37 +25,37 @@ final class CatalogHandlers {
     }
 
     @RpcMethod
-    Rows<Named> catalogs() throws SQLException {
+    Rows<Named> catalogs() {
         return db.catalogs();
     }
 
     @RpcMethod
-    Rows<Named> schemas(String catalog) throws SQLException {
+    Rows<Named> schemas(String catalog) {
         return db.schemas(catalog);
     }
 
     @RpcMethod
-    Rows<TableRow> tables(String catalog, String schema, String pattern) throws SQLException {
+    Rows<TableRow> tables(String catalog, String schema, String pattern) {
         return db.tables(catalog, schema, pattern);
     }
 
     @RpcMethod
-    Rows<?> columns(String catalog, String schema, String table) throws SQLException {
+    Rows<?> columns(String catalog, String schema, String table) {
         return db.columns(catalog, schema, table);
     }
 
     @RpcMethod
-    Rows<TableWithColumns> snapshot(String catalog, String schema) throws SQLException {
+    Rows<TableWithColumns> snapshot(String catalog, String schema) {
         return db.snapshot(catalog, schema);
     }
 
     @RpcMethod
-    Object details(String catalog, String schema, String table) throws SQLException {
+    Object details(String catalog, String schema, String table) {
         return db.details(catalog, schema, table);
     }
 
     @RpcMethod
-    Object ddl(String catalog, String schema, String table) throws SQLException {
+    Object ddl(String catalog, String schema, String table) {
         return db.ddl(catalog, schema, table);
     }
 
@@ -67,8 +65,7 @@ final class CatalogHandlers {
     }
 
     @RpcMethod
-    IntrospectSummary introspect(String catalog, String path, int parallelism, long budgetMs, boolean details)
-            throws SQLException, IOException {
+    IntrospectSummary introspect(String catalog, String path, int parallelism, long budgetMs, boolean details) {
         return db.introspect(catalog, path, parallelism, budgetMs, details);
     }
 }

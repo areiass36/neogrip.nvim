@@ -1,6 +1,5 @@
 package neogrip.app;
 
-import java.sql.SQLException;
 import java.util.Map;
 import java.util.Properties;
 import neogrip.db.Database;
@@ -26,8 +25,7 @@ final class ConnectHandler {
             Map<String, Object> auth,
             boolean readonly,
             long transactionIdleSeconds,
-            long cursorIdleSeconds)
-            throws SQLException {
+            long cursorIdleSeconds) {
         Properties merged = new Properties();
         for (Map.Entry<String, Object> entry : properties.entrySet()) {
             merged.setProperty(entry.getKey(), String.valueOf(entry.getValue()));

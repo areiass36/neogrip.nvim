@@ -10,6 +10,7 @@ import neogrip.db.catalog.Introspect;
 import neogrip.db.catalog.Listings;
 import neogrip.db.catalog.NativeDdl;
 import neogrip.db.catalog.Snapshot;
+import neogrip.db.errors.DataAccessException;
 import neogrip.db.errors.NotConnected;
 import neogrip.db.errors.RequestRefused;
 import neogrip.db.types.Types;
@@ -57,9 +58,12 @@ public final class Database implements RpcLifecycle {
             Properties properties,
             boolean readonly,
             long transactionIdleSeconds,
-            long cursorIdleSeconds)
-            throws SQLException {
-        session.open(url, properties, readonly, transactionIdleSeconds, cursorIdleSeconds);
+            long cursorIdleSeconds) {
+        try {
+            session.open(url, properties, readonly, transactionIdleSeconds, cursorIdleSeconds);
+        } catch (SQLException e) {
+            throw new DataAccessException(e);
+        }
         scope = new ConnectionScope(session, lane);
         return new Types.ConnectResult(session.product(), session.driverName(), session.capabilities());
     }
@@ -72,41 +76,65 @@ public final class Database implements RpcLifecycle {
         return current;
     }
 
-    // --- statements -------------------------------------------------------
-
-    public Optional<Types.TxState> intercept(String sql) throws SQLException {
-        Transactions transactions = scope().transactions();
-        return lane.serializeSql(() -> transactions.intercept(sql));
+    /**
+     * Work on the connection, with the driver's exception translated on the
+     * way out.
+     *
+     * Everything below this line speaks JDBC and nothing above it has to: this
+     * is the one place a SQLException becomes something the rest of the
+     * program can carry without declaring it (ADR-0032).
+     */
+    private <T> T onConnection(ExecutionLane.SqlCall<T> call) {
+        try {
+            return lane.serializeSql(call);
+        } catch (SQLException e) {
+            throw new DataAccessException(e);
+        }
     }
 
-    public Object query(String hash, String sql, int limit, int timeoutSeconds) throws SQLException {
+    /** The same, for the work that also writes a file (ADR-0010). */
+    private <T> T onConnectionWritingFiles(ExecutionLane.Call<T> call) {
+        try {
+            return lane.serialize(call);
+        } catch (SQLException | IOException e) {
+            throw new DataAccessException(e);
+        }
+    }
+
+    // --- statements -------------------------------------------------------
+
+    public Optional<Types.TxState> intercept(String sql) {
+        Transactions transactions = scope().transactions();
+        return onConnection(() -> transactions.intercept(sql));
+    }
+
+    public Object query(String hash, String sql, int limit, int timeoutSeconds) {
         Statements statements = scope().statements();
-        return lane.serializeSql(() -> statements.query(hash, sql, limit, timeoutSeconds));
+        return onConnection(() -> statements.query(hash, sql, limit, timeoutSeconds));
     }
 
     /** The next batch of an open result (ADR-0031). */
-    public Types.QueryPage next(String hash, int limit) throws SQLException {
+    public Types.QueryPage next(String hash, int limit) {
         Statements statements = scope().statements();
-        return lane.serializeSql(() -> statements.next(hash, limit));
+        return onConnection(() -> statements.next(hash, limit));
     }
 
-    public Types.UpdateResult exec(String sql, int timeoutSeconds) throws SQLException {
+    public Types.UpdateResult exec(String sql, int timeoutSeconds) {
         Statements statements = scope().statements();
-        return lane.serializeSql(() -> statements.exec(sql, timeoutSeconds));
+        return onConnection(() -> statements.exec(sql, timeoutSeconds));
     }
 
-    public void validate(String sql) throws SQLException {
+    public void validate(String sql) {
         Statements statements = scope().statements();
-        lane.serializeSql(() -> {
+        onConnection(() -> {
             statements.validate(sql);
             return null;
         });
     }
 
-    public Types.ExportResult export(String sql, String path, String format, String nullMarker, int timeoutSeconds)
-            throws SQLException, IOException {
+    public Types.ExportResult export(String sql, String path, String format, String nullMarker, int timeoutSeconds) {
         Exports exports = scope().exports();
-        return lane.serialize(() -> exports.export(sql, path, format, nullMarker, timeoutSeconds));
+        return onConnectionWritingFiles(() -> exports.export(sql, path, format, nullMarker, timeoutSeconds));
     }
 
     /**
@@ -147,40 +175,39 @@ public final class Database implements RpcLifecycle {
 
     // --- catalog ----------------------------------------------------------
 
-    public Types.Rows<Types.Named> catalogs() throws SQLException {
+    public Types.Rows<Types.Named> catalogs() {
         Listings listings = scope().listings();
-        return lane.serializeSql(listings::catalogs);
+        return onConnection(listings::catalogs);
     }
 
-    public Types.Rows<Types.Named> schemas(String catalogName) throws SQLException {
+    public Types.Rows<Types.Named> schemas(String catalogName) {
         Listings listings = scope().listings();
-        return lane.serializeSql(() -> listings.schemas(catalogName));
+        return onConnection(() -> listings.schemas(catalogName));
     }
 
-    public Types.Rows<Types.TableRow> tables(String catalogName, String schema, String pattern)
-            throws SQLException {
+    public Types.Rows<Types.TableRow> tables(String catalogName, String schema, String pattern) {
         Listings listings = scope().listings();
-        return lane.serializeSql(() -> listings.tables(catalogName, schema, pattern));
+        return onConnection(() -> listings.tables(catalogName, schema, pattern));
     }
 
-    public Types.Rows<?> columns(String catalogName, String schema, String table) throws SQLException {
+    public Types.Rows<?> columns(String catalogName, String schema, String table) {
         Listings listings = scope().listings();
-        return lane.serializeSql(() -> listings.columns(catalogName, schema, table));
+        return onConnection(() -> listings.columns(catalogName, schema, table));
     }
 
-    public Types.Rows<Types.TableWithColumns> snapshot(String catalogName, String schema) throws SQLException {
+    public Types.Rows<Types.TableWithColumns> snapshot(String catalogName, String schema) {
         Snapshot snapshots = scope().snapshots();
-        return lane.serializeSql(() -> snapshots.snapshot(catalogName, schema));
+        return onConnection(() -> snapshots.snapshot(catalogName, schema));
     }
 
-    public Object details(String catalogName, String schema, String table) throws SQLException {
+    public Object details(String catalogName, String schema, String table) {
         Details details = scope().details();
-        return lane.serializeSql(() -> details.details(catalogName, schema, table));
+        return onConnection(() -> details.details(catalogName, schema, table));
     }
 
-    public Object ddl(String catalogName, String schema, String table) throws SQLException {
+    public Object ddl(String catalogName, String schema, String table) {
         Details details = scope().details();
-        return lane.serializeSql(() -> details.ddl(catalogName, schema, table));
+        return onConnection(() -> details.ddl(catalogName, schema, table));
     }
 
     public Types.Ddl nativeDdl(String catalogName, String schema, String table) {
@@ -189,8 +216,7 @@ public final class Database implements RpcLifecycle {
     }
 
     public Types.IntrospectSummary introspect(
-            String catalogName, String path, int parallelism, long budgetMs, boolean details)
-            throws SQLException, IOException {
+            String catalogName, String path, int parallelism, long budgetMs, boolean details) {
         Introspect sweep = scope().introspect();
         if (!sweeping.compareAndSet(false, true)) {
             throw new RequestRefused("a catalog sweep is already running on this connection");
@@ -203,6 +229,8 @@ public final class Database implements RpcLifecycle {
             // behind it - the exact thing it exists to avoid.
             lane.sweepCancelled().set(false);
             return sweep.introspect(catalogName, path, parallelism, budgetMs, details);
+        } catch (SQLException | IOException e) {
+            throw new DataAccessException(e);
         } finally {
             sweeping.set(false);
         }
