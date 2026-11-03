@@ -135,6 +135,11 @@ batch; `done` is true when the result has no more rows, and gripd has then alrea
   materialized view is a `view`; everything else selectable - foreign, partitioned, temporary, system, an
   alias, a sequence, a type no driver here has reported before - is a `table`. The engine's own
   `TABLE_TYPE` is not carried.
+- A collection has no columns, so `catalog/columns` answers its **sampled fields** instead: fifty
+  documents from each end of the collection, deduplicated by `_id` (ADR-0038). Each field carries `count`
+  - in how many of the sampled documents it appeared with that type - and `sample_size`, how many
+  documents were actually read. A field holding two types is reported once per type. This is a sample and
+  not a schema: a field only present in documents the windows did not reach is not listed.
 - `catalog/counts {catalog?, schema}` → `{counts}` — a map of set name to approximate row count for one
   namespace, in one statement (ADR-0038). A set the engine keeps no estimate for is absent rather than
   zero, and an engine that keeps none at all - sqlite, duckdb, trino, the Mongo wrapper - answers `{}`:

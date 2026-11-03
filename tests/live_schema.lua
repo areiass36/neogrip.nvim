@@ -228,6 +228,39 @@ else
 	note(("%d names over %d pages"):format(#order, pages))
 end
 
+support.describe("live/schema: a collection is sampled at both ends")
+do
+	local mongo = connections.mongodb
+	if not support.reachable(mongo) then
+		note("skipped")
+	else
+		-- 120 documents, a field only in the first and another only in the
+		-- last: reading just the head sees one of them (ADR-0038).
+		local fields = support.sync(function(done)
+			schema.columns(mongo, nil, "sampling", function(records, err)
+				done(records, err)
+			end)
+		end)
+		if not fields or #fields == 0 then
+			note("mongodb: the wrapper returned no field sample; skipped (ADR-0029)")
+		else
+			local by_name = {}
+			for _, field in ipairs(fields) do
+				by_name[field.name] = field
+			end
+			check("a field only in the first document is seen", by_name.only_first ~= nil, true)
+			check("and one only in the last is seen too", by_name.only_last ~= nil, true)
+			check("the sample says how many it looked at", by_name.filler and by_name.filler.sample_size, 100)
+			note(
+				("sampling: %d fields over %s documents"):format(
+					#fields,
+					tostring(by_name.filler and by_name.filler.sample_size)
+				)
+			)
+		end
+	end
+end
+
 support.describe("live/schema: approximate row counts")
 do
 	local gripd = require("neogrip.gripd")

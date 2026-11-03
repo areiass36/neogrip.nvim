@@ -74,8 +74,21 @@ public final class Contracts {
             Boolean generated,
             int position) {}
 
-    /** A sampled MongoDB field: collections have no columns to ask for. */
-    public record MongoField(String name, String type, boolean nullable, @JsonName("is_pk") boolean isPk, int count) {}
+    /**
+     * A sampled MongoDB field: collections have no columns to ask for.
+     *
+     * `count` is in how many of the sampled documents the field appeared with
+     * this type, and `sample_size` is how many were looked at - so a client can
+     * say "in 12 of 100" and a reader knows this is a sample and not a schema
+     * (ADR-0038).
+     */
+    public record MongoField(
+            String name,
+            String type,
+            boolean nullable,
+            @JsonName("is_pk") boolean isPk,
+            int count,
+            @JsonName("sample_size") int sampleSize) {}
 
     /** One table of a schema snapshot: name, kind and every column at once. */
     public record TableWithColumns(String name, String kind, String remarks, List<ColumnRow> columns) {}
