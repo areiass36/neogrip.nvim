@@ -1,65 +1,50 @@
 package neogrip.db;
 
 import java.io.IOException;
-import java.sql.Connection;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.ReentrantLock;
 import neogrip.db.catalog.Details;
 import neogrip.db.catalog.Introspect;
 import neogrip.db.catalog.Listings;
 import neogrip.db.catalog.NativeDdl;
 import neogrip.db.catalog.Snapshot;
+import neogrip.db.errors.NotConnected;
 import neogrip.db.errors.RequestRefused;
 import neogrip.db.types.Types;
 import neogrip.jsonrpc.Notifier;
 import neogrip.jsonrpc.RpcLifecycle;
 
 /**
- * The one object that controls the lifecycle of everything executed on the
- * database: the running-statement registry and cancellation, query timeouts,
- * and the whole transaction story - interception, the idle watchdog, rollback
- * (never commit) on shutdown. A component like any other: handlers inject it;
- * it reads the live connection from the Session when an operation arrives, so
- * it only comes alive at the first query after connect, and "not connected"
- * falls out of that accessor with no guard plumbing anywhere.
+ * What the handlers ask to have something done on the database.
  *
- * Requests arrive each on its own thread (ADR-0028); the session lock here is
- * what serializes them onto the one connection JDBC allows. cancel never takes
- * the lock - Statement.cancel is the one JDBC call defined as safe from
- * another thread, and a cancel that queued behind the statement it should kill
- * would never kill anything. The sweep keeps its own one-at-a-time flag and,
- * as before, runs on sibling connections rather than under the lock.
+ * It owns no mechanism of its own any more: the {@link ExecutionLane} puts
+ * requests through the shared connection one at a time, a
+ * {@link ConnectionScope} holds everything bound to that connection, and this
+ * class is what picks the one out of the other. What is left here is the two
+ * things that are genuinely about the connection as a whole - the
+ * one-sweep-at-a-time rule, and the watchdog that rolls back an idle
+ * transaction (ADR-0013) and closes an abandoned result (ADR-0031).
+ *
+ * Reading the scope before taking the lane means a request that arrives before
+ * connect is refused at once instead of queueing behind a statement it has
+ * nothing to do with.
  */
 public final class Database implements RpcLifecycle {
     private final Session session;
     private final Notifier notifier;
-    /** Fair, so queued statements keep their arrival order. */
-    private final ReentrantLock sessionLock = new ReentrantLock(true);
+    private final ExecutionLane lane = new ExecutionLane();
+
     /** One sweep at a time: a second would double the connections it opens. */
     private final AtomicBoolean sweeping = new AtomicBoolean();
 
-    private final AtomicReference<Statement> running = new AtomicReference<>();
-    /** A catalog sweep has no statement to cancel, so a cancel reaches it as a flag. */
-    private final AtomicBoolean cancelled = new AtomicBoolean();
-
-    private volatile Connection bound;
-    private volatile Statements statements;
-    private volatile Cursors cursors;
-    private volatile Exports exports;
-    private volatile Transactions transactions;
-    private volatile Listings listings;
-    private volatile Snapshot snapshots;
-    private volatile Details tableDetails;
-    private volatile NativeDdl nativeDdl;
-    private volatile Introspect introspect;
+    /** None until connect succeeds, and then one for the life of the process. */
+    private volatile ConnectionScope scope;
 
     public Database(Session session, Notifier notifier) {
         this.session = session;
@@ -67,86 +52,69 @@ public final class Database implements RpcLifecycle {
         startTransactionWatchdog();
     }
 
-    /** The units, bound to the live connection the first time it is used. */
-    private synchronized Database bind() {
-        Connection connection = session.connection();
-        if (connection != bound) {
-            ReadonlyGuard guard = new ReadonlyGuard(session.readonly());
-            cursors = new Cursors();
-            statements = new Statements(connection, running, guard, cursors);
-            exports = new Exports(connection, running, guard);
-            transactions = new Transactions(connection);
-            listings = new Listings(connection);
-            snapshots = new Snapshot(connection);
-            tableDetails = new Details(connection);
-            nativeDdl = new NativeDdl(connection, running, session.url());
-            // The url and the properties go with it so a catalog sweep can
-            // open connections of its own rather than take this one.
-            introspect = new Introspect(connection, cancelled, session.url(), session.properties());
-            bound = connection;
+    /**
+     * Open the connection and bind everything that runs on it.
+     *
+     * The two steps live together so they cannot be done in the wrong order,
+     * or one of them forgotten: a scope without a connection has nothing to
+     * execute on, and a connection without a scope is what the lazy bind this
+     * replaced existed to paper over.
+     */
+    public Types.ConnectResult open(
+            String url,
+            Properties properties,
+            boolean readonly,
+            long transactionIdleSeconds,
+            long cursorIdleSeconds)
+            throws SQLException {
+        session.open(url, properties, readonly, transactionIdleSeconds, cursorIdleSeconds);
+        scope = new ConnectionScope(session, lane);
+        return new Types.ConnectResult(session.product(), session.driverName(), session.capabilities());
+    }
+
+    private ConnectionScope scope() {
+        ConnectionScope current = scope;
+        if (current == null) {
+            throw new NotConnected();
         }
-        return this;
-    }
-
-    /** The serialization of the shared connection, in one place. */
-    private <T> T locked(SessionCall<T> call) throws SQLException, IOException {
-        sessionLock.lock();
-        try {
-            return call.run();
-        } finally {
-            sessionLock.unlock();
-        }
-    }
-
-    @FunctionalInterface
-    private interface SessionCall<T> {
-        T run() throws SQLException, IOException;
-    }
-
-    /** The SQL-only overload, so statement callers do not declare IOException. */
-    private <T> T lockedSql(SqlCall<T> call) throws SQLException {
-        sessionLock.lock();
-        try {
-            return call.run();
-        } finally {
-            sessionLock.unlock();
-        }
-    }
-
-    @FunctionalInterface
-    private interface SqlCall<T> {
-        T run() throws SQLException;
+        return current;
     }
 
     // --- statements -------------------------------------------------------
 
     public Optional<Types.TxState> intercept(String sql) throws SQLException {
-        return lockedSql(() -> bind().transactions.intercept(sql));
+        Transactions transactions = scope().transactions();
+        return lane.serializeSql(() -> transactions.intercept(sql));
     }
 
     public Object query(String hash, String sql, int limit, int timeoutSeconds) throws SQLException {
-        return lockedSql(() -> bind().statements.query(hash, sql, limit, timeoutSeconds));
+        Statements statements = scope().statements();
+        return lane.serializeSql(() -> statements.query(hash, sql, limit, timeoutSeconds));
     }
 
     /** The next batch of an open result (ADR-0031). */
     public Types.QueryPage next(String hash, int limit) throws SQLException {
-        return lockedSql(() -> bind().statements.next(hash, limit));
+        Statements statements = scope().statements();
+        return lane.serializeSql(() -> statements.next(hash, limit));
     }
 
     public Types.UpdateResult exec(String sql, int timeoutSeconds) throws SQLException {
-        return lockedSql(() -> bind().statements.exec(sql, timeoutSeconds));
+        Statements statements = scope().statements();
+        return lane.serializeSql(() -> statements.exec(sql, timeoutSeconds));
     }
 
     public void validate(String sql) throws SQLException {
-        lockedSql(() -> {
-            bind().statements.validate(sql);
+        Statements statements = scope().statements();
+        lane.serializeSql(() -> {
+            statements.validate(sql);
             return null;
         });
     }
 
     public Types.ExportResult export(String sql, String path, String format, String nullMarker, int timeoutSeconds)
             throws SQLException, IOException {
-        return locked(() -> bind().exports.export(sql, path, format, nullMarker, timeoutSeconds));
+        Exports exports = scope().exports();
+        return lane.serialize(() -> exports.export(sql, path, format, nullMarker, timeoutSeconds));
     }
 
     /**
@@ -162,96 +130,87 @@ public final class Database implements RpcLifecycle {
         if (hash == null || hash.isEmpty()) {
             return cancel();
         }
-        Cursors open = cursors;
-        Cursor cursor = open == null ? null : open.peek(hash);
+        ConnectionScope current = scope;
+        Cursor cursor = current == null ? null : current.cursors().peek(hash);
         if (cursor == null) {
             return false;
         }
         cursor.interrupt();
-        sessionLock.lock();
-        try {
-            open.detach(hash);
+        lane.serializeQuietly(() -> {
+            current.cursors().detach(hash);
             cursor.close();
-        } finally {
-            sessionLock.unlock();
-        }
+        });
         return true;
     }
 
     /**
-     * Stop whatever runs. Handled without the session lock, so it is
-     * answerable while a statement is busy; the flag reaches a catalog sweep,
-     * which has no statement to cancel.
+     * Stop whatever runs. Answerable while a statement is busy because it
+     * never takes the lane; the flag is what reaches a catalog sweep, which
+     * has no statement to cancel.
      */
     public boolean cancel() {
-        cancelled.set(true);
-        Statement statement = running.get();
-        if (statement == null) {
-            return false;
-        }
-        try {
-            statement.cancel();
-            return true;
-        } catch (SQLException refused) {
-            // Some drivers refuse; killing the process is the fallback.
-            return false;
-        }
+        lane.sweepCancelled().set(true);
+        return lane.running().cancel();
     }
 
     // --- catalog ----------------------------------------------------------
 
     public Types.Rows<Types.Named> catalogs() throws SQLException {
-        return lockedSql(() -> bind().listings.catalogs());
+        Listings listings = scope().listings();
+        return lane.serializeSql(listings::catalogs);
     }
 
     public Types.Rows<Types.Named> schemas(String catalogName) throws SQLException {
-        return lockedSql(() -> bind().listings.schemas(catalogName));
+        Listings listings = scope().listings();
+        return lane.serializeSql(() -> listings.schemas(catalogName));
     }
 
     public Types.Rows<Types.TableRow> tables(String catalogName, String schema, String pattern)
             throws SQLException {
-        return lockedSql(() -> bind().listings.tables(catalogName, schema, pattern));
+        Listings listings = scope().listings();
+        return lane.serializeSql(() -> listings.tables(catalogName, schema, pattern));
     }
 
     public Types.Rows<?> columns(String catalogName, String schema, String table) throws SQLException {
-        return lockedSql(() -> bind().listings.columns(catalogName, schema, table));
+        Listings listings = scope().listings();
+        return lane.serializeSql(() -> listings.columns(catalogName, schema, table));
     }
 
     public Types.Rows<Types.TableWithColumns> snapshot(String catalogName, String schema) throws SQLException {
-        return lockedSql(() -> bind().snapshots.snapshot(catalogName, schema));
+        Snapshot snapshots = scope().snapshots();
+        return lane.serializeSql(() -> snapshots.snapshot(catalogName, schema));
     }
 
     public Object details(String catalogName, String schema, String table) throws SQLException {
-        return lockedSql(() -> bind().tableDetails.details(catalogName, schema, table));
+        Details details = scope().details();
+        return lane.serializeSql(() -> details.details(catalogName, schema, table));
     }
 
     public Object ddl(String catalogName, String schema, String table) throws SQLException {
-        return lockedSql(() -> bind().tableDetails.ddl(catalogName, schema, table));
+        Details details = scope().details();
+        return lane.serializeSql(() -> details.ddl(catalogName, schema, table));
     }
 
     public Types.Ddl nativeDdl(String catalogName, String schema, String table) {
-        sessionLock.lock();
-        try {
-            return bind().nativeDdl.nativeDdl(catalogName, schema, table);
-        } finally {
-            sessionLock.unlock();
-        }
+        NativeDdl ddl = scope().nativeDdl();
+        return lane.serializeValue(() -> ddl.nativeDdl(catalogName, schema, table));
     }
 
     public Types.IntrospectSummary introspect(
             String catalogName, String path, int parallelism, long budgetMs, boolean details)
             throws SQLException, IOException {
+        Introspect sweep = scope().introspect();
         if (!sweeping.compareAndSet(false, true)) {
             throw new RequestRefused("a catalog sweep is already running on this connection");
         }
         try {
             // The flag is shared with a running statement's cancel, so a cancel
             // sent before this sweep must not end it on sight. The sweep runs
-            // outside the session lock on purpose: it opens sibling connections
-            // of its own, and holding the lock for minutes would queue every
-            // statement behind it - the exact thing it exists to avoid.
-            cancelled.set(false);
-            return bind().introspect.introspect(catalogName, path, parallelism, budgetMs, details);
+            // outside the lane on purpose: it opens sibling connections of its
+            // own, and holding the lock for minutes would queue every statement
+            // behind it - the exact thing it exists to avoid.
+            lane.sweepCancelled().set(false);
+            return sweep.introspect(catalogName, path, parallelism, budgetMs, details);
         } finally {
             sweeping.set(false);
         }
@@ -263,8 +222,8 @@ public final class Database implements RpcLifecycle {
      * An idle open transaction holds locks, so one that has seen no request
      * for the configured window is rolled back - never committed - and the
      * editor is told. The check itself is cheap and runs on a timer; the
-     * rollback runs on the worker lane, where it cannot race a statement for
-     * the connection.
+     * rollback goes through the lane, where it cannot race a statement for the
+     * connection.
      */
     private void startTransactionWatchdog() {
         Executors.newSingleThreadScheduledExecutor(task -> {
@@ -283,73 +242,65 @@ public final class Database implements RpcLifecycle {
     /**
      * An open result nobody has continued is memory held on both sides, so one
      * untouched for the configured window is closed (ADR-0031). Taken out of
-     * the registry first and closed under the session lock, which is where
-     * touching the connection belongs.
+     * the registry first and closed through the lane, which is where touching
+     * the connection belongs.
      */
     private void closeIdleCursors() {
-        Cursors open = cursors;
-        if (open == null) {
+        ConnectionScope current = scope;
+        if (current == null) {
             return;
         }
-        List<Cursor> expired = open.expired(session.cursorIdleMs());
+        List<Cursor> expired = current.cursors().expired(session.cursorIdleMs());
         if (expired.isEmpty()) {
             return;
         }
-        sessionLock.lock();
-        try {
-            expired.forEach(Cursor::close);
-        } finally {
-            sessionLock.unlock();
-        }
+        lane.serializeQuietly(() -> expired.forEach(Cursor::close));
     }
 
     private void rollbackIfIdle() {
-        Transactions open = transactions;
+        ConnectionScope current = scope;
         long idleMs = session.transactionIdleMs();
-        if (open == null
+        if (current == null
                 || idleMs <= 0
-                || !open.inTransaction()
+                || !current.transactions().inTransaction()
                 || System.currentTimeMillis() - session.lastRequestAt() < idleMs) {
             return;
         }
-        // Under the session lock, where it cannot race a running statement.
-        sessionLock.lock();
-        try {
-            open.rollback();
-        } catch (SQLException ignored) {
-            // The connection will report its own state on the next statement.
-        } finally {
-            sessionLock.unlock();
+        if (!rollback(current)) {
+            return;
         }
         notifier.notify("status", Map.of("phase", "transaction", "message", "idle transaction rolled back"));
     }
 
+    /** @return whether the rollback went through; a failure is the connection's own news to report */
+    private boolean rollback(ConnectionScope current) {
+        try {
+            lane.serializeSql(() -> {
+                current.transactions().rollback();
+                return null;
+            });
+            return true;
+        } catch (SQLException ignored) {
+            // The connection will report its own state on the next statement.
+            return false;
+        }
+    }
+
     @Override
     public void onShutdown() {
+        ConnectionScope current = scope;
+        if (current == null) {
+            return;
+        }
+
         // Every open result goes before the connection does, which is the
         // other reason this hook has to run before the Session one.
-        Cursors results = cursors;
-        if (results != null) {
-            sessionLock.lock();
-            try {
-                results.drain().forEach(Cursor::close);
-            } finally {
-                sessionLock.unlock();
-            }
-        }
+        lane.serializeQuietly(() -> current.cursors().drain().forEach(Cursor::close));
 
         // Never commit on the way out (ADR-0013); this runs before the Session
         // closes the connection, because shutdown hooks fire in reverse order.
-        Transactions open = transactions;
-        if (open != null && open.inTransaction()) {
-            sessionLock.lock();
-            try {
-                open.rollback();
-            } catch (SQLException ignored) {
-                // Shutting down anyway.
-            } finally {
-                sessionLock.unlock();
-            }
+        if (current.transactions().inTransaction()) {
+            rollback(current);
         }
     }
 }

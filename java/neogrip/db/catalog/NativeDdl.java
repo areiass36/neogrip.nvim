@@ -5,7 +5,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.concurrent.atomic.AtomicReference;
+import neogrip.db.Running;
 import neogrip.db.types.Types;
 
 /**
@@ -20,11 +20,11 @@ public final class NativeDdl {
      * Where a statement this class runs is published, so a cancel reaches it:
      * the one catalog operation that runs SQL on the main connection.
      */
-    private final AtomicReference<Statement> running;
+    private final Running running;
     /** What this process connected with, which names the engine. */
     private final String url;
 
-    public NativeDdl(Connection connection, AtomicReference<Statement> running, String url) {
+    public NativeDdl(Connection connection, Running running, String url) {
         this.connection = connection;
         this.running = running;
         this.url = url == null ? "" : url;
@@ -103,7 +103,7 @@ public final class NativeDdl {
         } finally {
             // Cleared here rather than in each branch, so a branch that threw
             // does not leave a closed statement where a cancel would find it.
-            running.set(null);
+            running.clear();
         }
     }
 

@@ -7,7 +7,6 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 import neogrip.db.types.Types.Column;
 import neogrip.db.types.Types.QueryPage;
 
@@ -39,7 +38,7 @@ final class Cursor {
     static final int WINDOW = 1000;
 
     private final Connection connection;
-    private final AtomicReference<Statement> running;
+    private final Running running;
     private final String sql;
     private final int timeoutSeconds;
     private final int fetchSize;
@@ -68,7 +67,7 @@ final class Cursor {
     private int announced;
     private long touchedAt = System.currentTimeMillis();
 
-    private Cursor(Connection connection, AtomicReference<Statement> running, String sql,
+    private Cursor(Connection connection, Running running, String sql,
             int timeoutSeconds, int fetchSize) {
         this.connection = connection;
         this.running = running;
@@ -88,7 +87,7 @@ final class Cursor {
      * @return a cursor holding the statement, whether or not it had rows; the
      *         caller asks hasRows() and closes either way.
      */
-    static Cursor open(Connection connection, AtomicReference<Statement> running, String sql,
+    static Cursor open(Connection connection, Running running, String sql,
             int limit, int timeoutSeconds, boolean continuable) throws SQLException {
         int fetchSize = limit > 0 ? Math.min(limit + 1, 1000) : 1000;
         Cursor cursor = new Cursor(connection, running, sql, timeoutSeconds, fetchSize);
@@ -196,7 +195,7 @@ final class Cursor {
             }
             return new QueryPage(hash, announce(), collected, done, System.currentTimeMillis() - start);
         } finally {
-            running.compareAndSet(statement, null);
+            running.clearIf(statement);
         }
     }
 
@@ -328,7 +327,7 @@ final class Cursor {
             Statements.tolerate(open::close);
         }
         if (target != null) {
-            running.compareAndSet(target, null);
+            running.clearIf(target);
             Statements.tolerate(target::close);
         }
     }

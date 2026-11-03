@@ -3,7 +3,7 @@ package neogrip.app;
 import java.sql.SQLException;
 import java.util.Map;
 import java.util.Properties;
-import neogrip.db.Session;
+import neogrip.db.Database;
 import neogrip.db.types.Types.ConnectResult;
 import neogrip.jsonrpc.RpcException;
 import neogrip.jsonrpc.RpcMethod;
@@ -13,10 +13,10 @@ import neogrip.jsonrpc.RpcMethod;
  * logged, echoed into a response, or written to stderr - here or anywhere.
  */
 final class ConnectHandler {
-    private final Session session;
+    private final Database db;
 
-    ConnectHandler(Session session) {
-        this.session = session;
+    ConnectHandler(Database db) {
+        this.db = db;
     }
 
     @RpcMethod
@@ -60,7 +60,6 @@ final class ConnectHandler {
             default -> throw new RpcException(ErrorCodes.AUTH_ERROR, "auth type not implemented yet: " + type);
         }
 
-        session.open(url, merged, readonly, transactionIdleSeconds, cursorIdleSeconds);
-        return new ConnectResult(session.product(), session.driverName(), session.capabilities());
+        return db.open(url, merged, readonly, transactionIdleSeconds, cursorIdleSeconds);
     }
 }

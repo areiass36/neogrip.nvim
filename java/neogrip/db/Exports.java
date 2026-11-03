@@ -15,7 +15,6 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 import neogrip.dataformat.DataFormat;
 import neogrip.dataformat.FormatOptions;
 import neogrip.dataformat.RecordWriter;
@@ -28,10 +27,10 @@ import neogrip.db.types.Types.ExportResult;
  */
 public final class Exports {
     private final Connection connection;
-    private final AtomicReference<Statement> running;
+    private final Running running;
     private final ReadonlyGuard guard;
 
-    public Exports(Connection connection, AtomicReference<Statement> running, ReadonlyGuard guard) {
+    public Exports(Connection connection, Running running, ReadonlyGuard guard) {
         this.connection = connection;
         this.running = running;
         this.guard = guard;
@@ -65,7 +64,7 @@ public final class Exports {
                 throw e;
             }
         } finally {
-            running.set(null);
+            running.clear();
         }
         try {
             Files.move(partial, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);

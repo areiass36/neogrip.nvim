@@ -5,18 +5,17 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Locale;
-import java.util.concurrent.atomic.AtomicReference;
 import neogrip.db.types.Types.QueryPage;
 import neogrip.db.types.Types.UpdateResult;
 
 /** Running statements, and turning their results into the wire records. */
 public final class Statements {
     private final Connection connection;
-    private final AtomicReference<Statement> running;
+    private final Running running;
     private final ReadonlyGuard guard;
     private final Cursors cursors;
 
-    public Statements(Connection connection, AtomicReference<Statement> running, ReadonlyGuard guard,
+    public Statements(Connection connection, Running running, ReadonlyGuard guard,
             Cursors cursors) {
         this.connection = connection;
         this.running = running;
@@ -85,7 +84,7 @@ public final class Statements {
             int updated = hasResult ? -1 : statement.getUpdateCount();
             return new UpdateResult(updated, System.currentTimeMillis() - start);
         } finally {
-            running.set(null);
+            running.clear();
         }
     }
 
@@ -113,7 +112,7 @@ public final class Statements {
                 }
             }
         } finally {
-            running.set(null);
+            running.clear();
         }
     }
 
