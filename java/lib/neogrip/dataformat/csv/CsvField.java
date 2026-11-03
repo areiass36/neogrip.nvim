@@ -4,11 +4,19 @@ package neogrip.dataformat.csv;
 public final class CsvField {
     private CsvField() {}
 
-    public static String field(String value, String nullMarker) {
+    /**
+     * One field, quoted when it has to be.
+     *
+     * The delimiter is a parameter rather than a comma on sight, because the
+     * character the writer separates fields with and the character that forces
+     * a field to be quoted are the same character, and a quoting rule that
+     * disagreed with the separator would write a file nothing can read back.
+     */
+    public static String field(String value, String nullMarker, char delimiter) {
         if (value == null) {
             return nullMarker == null ? "" : nullMarker;
         }
-        boolean needsQuotes = value.indexOf(',') >= 0
+        boolean needsQuotes = value.indexOf(delimiter) >= 0
                 || value.indexOf('"') >= 0
                 || value.indexOf('\n') >= 0
                 || value.indexOf('\r') >= 0

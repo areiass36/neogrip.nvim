@@ -3,7 +3,6 @@ package neogrip.db;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
-import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -14,10 +13,12 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-import neogrip.dataformat.csv.CsvField;
-import neogrip.dataformat.json.JsonMapper;
-import neogrip.dataformat.json.JsonWriter;
+import neogrip.dataformat.DataFormat;
+import neogrip.dataformat.FormatOptions;
+import neogrip.dataformat.RecordWriter;
 import neogrip.db.types.Types.ExportResult;
 
 /**
@@ -39,11 +40,12 @@ public final class Exports {
     public ExportResult export(String sql, String path, String format, String nullMarker, int timeoutSeconds)
             throws SQLException, IOException {
         guard.refuseWrites(sql);
+        DataFormat chosen = "json".equalsIgnoreCase(format) ? DataFormat.JSON : DataFormat.CSV;
+        FormatOptions options = new FormatOptions(nullMarker, ',');
         long start = System.currentTimeMillis();
         long written = 0;
         Path target = Path.of(path);
         Path partial = target.resolveSibling(target.getFileName() + ".part");
-        boolean json = "json".equalsIgnoreCase(format);
         try (Statement statement =
                 connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)) {
             running.set(statement);
@@ -54,7 +56,7 @@ public final class Exports {
             try (ResultSet rows = statement.executeQuery(sql);
                     Writer file = new BufferedWriter(new OutputStreamWriter(
                             Files.newOutputStream(partial), StandardCharsets.UTF_8))) {
-                written = json ? exportJson(rows, file) : exportCsv(rows, file, nullMarker);
+                written = stream(rows, chosen.writer(file, options));
             } catch (SQLException | IOException | RuntimeException e) {
                 Files.deleteIfExists(partial);
                 throw e;
@@ -70,57 +72,36 @@ public final class Exports {
         return new ExportResult(written, path, System.currentTimeMillis() - start);
     }
 
-    private static long exportCsv(ResultSet rows, Writer file, String nullMarker)
-            throws SQLException, IOException {
-        ResultSetMetaData meta = rows.getMetaData();
-        int columnCount = meta.getColumnCount();
-        long written = 0;
-        for (int i = 1; i <= columnCount; i++) {
-            if (i > 1) file.write(',');
-            file.write(CsvField.field(meta.getColumnLabel(i), nullMarker));
-        }
-        file.write('\n');
-        while (rows.next()) {
-            for (int i = 1; i <= columnCount; i++) {
-                if (i > 1) file.write(',');
-                Object value = Values.read(rows, meta, i);
-                file.write(CsvField.field(value == null ? null : String.valueOf(value), nullMarker));
-            }
-            file.write('\n');
-            written++;
-        }
-        return written;
-    }
-
     /**
-     * One JSON array of objects, keyed by column label, streamed row by row
-     * through the same structured writer the in-band results use.
+     * The column labels, then every row, through whichever format was asked
+     * for. One walk serves them all: before the record writer existed this
+     * loop was written once per format, and the two copies had already drifted
+     * apart in how they turned a value into text.
      */
-    private static long exportJson(ResultSet rows, Writer file) throws SQLException, IOException {
-        ResultSetMetaData meta = rows.getMetaData();
-        int columnCount = meta.getColumnCount();
-        String[] names = new String[columnCount];
-        for (int i = 1; i <= columnCount; i++) {
-            names[i - 1] = meta.getColumnLabel(i);
-        }
-        long written = 0;
-        JsonWriter out = new JsonWriter(file);
-        try {
-            out.beginArray();
+    private static long stream(ResultSet rows, RecordWriter out) throws SQLException, IOException {
+        try (out) {
+            ResultSetMetaData meta = rows.getMetaData();
+            int columnCount = meta.getColumnCount();
+            List<String> names = new ArrayList<>(columnCount);
+            for (int i = 1; i <= columnCount; i++) {
+                names.add(meta.getColumnLabel(i));
+            }
+            out.header(names);
+
+            long written = 0;
             while (rows.next()) {
-                out.beginObject();
+                // A list per row rather than one reused: the writer is free to
+                // keep what it is handed, and a row that outlives its values
+                // is the kind of bug that only shows up in the last format
+                // added.
+                List<Object> values = new ArrayList<>(columnCount);
                 for (int i = 1; i <= columnCount; i++) {
-                    out.name(names[i - 1]);
-                    JsonMapper.write(out, Values.read(rows, meta, i));
+                    values.add(Values.read(rows, meta, i));
                 }
-                out.endObject();
+                out.record(values);
                 written++;
             }
-            out.endArray();
-        } catch (UncheckedIOException e) {
-            throw e.getCause();
+            return written;
         }
-        file.write('\n');
-        return written;
     }
 }
