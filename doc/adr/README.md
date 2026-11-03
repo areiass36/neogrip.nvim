@@ -41,3 +41,4 @@ in the author's Neovim configuration; where the two disagreed, the record states
 | 0030 | [A selection of several statements runs them in sequence](0030-selection-runs-statements-in-sequence.md) | Accepted |
 | 0031 | [A result is a cursor the client names, continued instead of re-run](0031-cursor-paged-results.md) | Accepted |
 | 0032 | [The Java tree is a lib root and an app root with one dependency direction](0032-lib-and-app-source-roots.md) | Accepted |
+| 0033 | [JSON and CSV are a record-writer library, not part of the protocol](0033-data-formats-are-a-record-writer-library.md) | Accepted |
