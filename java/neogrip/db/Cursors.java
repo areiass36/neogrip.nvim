@@ -5,9 +5,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import neogrip.db.errors.RequestRefused;
 import neogrip.db.types.Types.QueryPage;
-import neogrip.jsonrpc.RpcException;
-import neogrip.jsonrpc.Wire;
 
 /**
  * The open results of one connection, each under the hash its client minted
@@ -42,7 +41,7 @@ final class Cursors {
         long start = System.currentTimeMillis();
         Cursor cursor = peek(hash);
         if (cursor == null) {
-            throw new RpcException(Wire.INVALID_REQUEST, "no result is open under " + describe(hash));
+            throw new RequestRefused("no result is open under " + describe(hash));
         }
         QueryPage page = cursor.batch(hash, limit, start);
         if (page.done()) {
@@ -61,8 +60,7 @@ final class Cursors {
         if (live.containsKey(hash)) {
             // Refused, not overwritten, and not closed here either: the cursor
             // being offered still belongs to the caller, which closes it.
-            throw new RpcException(
-                    Wire.INVALID_REQUEST, "a result is already open under " + describe(hash));
+            throw new RequestRefused("a result is already open under " + describe(hash));
         }
         while (live.size() >= MAX_LIVE) {
             String oldest = live.keySet().iterator().next();

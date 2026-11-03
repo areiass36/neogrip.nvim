@@ -7,9 +7,9 @@ import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
-import neogrip.jsonrpc.RpcException;
+import neogrip.db.errors.NotConnected;
+import neogrip.db.errors.RequestRefused;
 import neogrip.jsonrpc.RpcLifecycle;
-import neogrip.jsonrpc.Wire;
 
 /**
  * Connection control and metadata, nothing else: this class does not know or
@@ -36,7 +36,7 @@ public final class Session implements RpcLifecycle {
     public void open(String url, Properties properties, boolean readonly, long transactionIdleSeconds,
             long cursorIdleSeconds) throws SQLException {
         if (connection != null) {
-            throw new RpcException(Wire.INVALID_REQUEST, "already connected");
+            throw new RequestRefused("already connected");
         }
         Connection opened = DriverManager.getConnection(url, properties);
         if (readonly) {
@@ -89,7 +89,7 @@ public final class Session implements RpcLifecycle {
     public Connection connection() {
         Connection open = connection;
         if (open == null) {
-            throw new RpcException(Wire.INVALID_REQUEST, "not connected");
+            throw new NotConnected();
         }
         return open;
     }

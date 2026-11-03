@@ -3,8 +3,9 @@ package neogrip.app;
 import java.sql.SQLException;
 import java.util.Map;
 import neogrip.db.Database;
-import neogrip.db.Errors;
 import neogrip.db.ReadonlyGuard;
+import neogrip.db.errors.Cancelled;
+import neogrip.db.errors.RequestRefused;
 import neogrip.jsonrpc.RpcException;
 import neogrip.jsonrpc.RpcServer;
 import neogrip.jsonrpc.Wire;
@@ -30,8 +31,13 @@ public final class App {
                         ConnectHandler.class,
                         StatementHandlers.class,
                         CatalogHandlers.class)
+                // Every error the wire can carry is translated here and
+                // nowhere else: the code that executes statements throws its
+                // own exceptions and never sees an envelope (ADR-0032).
                 .mapException(ReadonlyGuard.Refused.class, e -> RpcException.of(Wire.READONLY_REFUSED, e))
-                .mapException(SQLException.class, Errors::toRpcException)
+                .mapException(SQLException.class, SqlErrors::toRpcException)
+                .mapException(RequestRefused.class, e -> RpcException.of(Wire.INVALID_REQUEST, e))
+                .mapException(Cancelled.class, e -> RpcException.of(Wire.CANCELLED, e))
                 // A rejected argument - an export format this build does not
                 // write, say - came from the request, so it answers as a bad
                 // request rather than as an internal error.

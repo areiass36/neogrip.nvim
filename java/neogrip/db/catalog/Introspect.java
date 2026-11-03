@@ -21,8 +21,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import neogrip.dataformat.json.JsonMapper;
 import neogrip.dataformat.json.JsonWriter;
 import neogrip.db.types.Types;
-import neogrip.jsonrpc.RpcException;
-import neogrip.jsonrpc.Wire;
+import neogrip.db.errors.Cancelled;
+import neogrip.db.errors.RequestRefused;
 
 /**
  * The whole catalog, written to a file instead of answered through the
@@ -71,14 +71,13 @@ public final class Introspect {
         cancelled.set(false);
 
         if (outFile == null || outFile.isEmpty()) {
-            throw new RpcException(Wire.INVALID_REQUEST, "introspect needs a file to write the catalog to");
+            throw new RequestRefused("introspect needs a file to write the catalog to");
         }
         if (MongoFields.isMongo(connection)) {
             // getColumns wants the Atlas SQL schema a plain mongod does not
             // have, and a snapshot of collections without fields would answer
             // "no fields" where the explorer has to sample documents instead.
-            throw new RpcException(
-                    Wire.INVALID_REQUEST,
+            throw new RequestRefused(
                     "a collection catalog cannot be swept; the explorer samples documents instead");
         }
 
@@ -171,7 +170,7 @@ public final class Introspect {
         // A snapshot that reached its place is an answer even if a cancel
         // arrived a moment later; nothing else can get this far unwritten.
         if (!written) {
-            throw new RpcException(Wire.CANCELLED, "the catalog sweep was cancelled");
+            throw new Cancelled("the catalog sweep was cancelled");
         }
 
         int tables = 0;

@@ -1,4 +1,4 @@
-package neogrip.db;
+package neogrip.app;
 
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
@@ -16,8 +16,8 @@ import neogrip.jsonrpc.Wire;
  * reflectively because reading it properly would mean compiling against every
  * driver.
  */
-public final class Errors {
-    private Errors() {}
+public final class SqlErrors {
+    private SqlErrors() {}
 
     public static RpcException toRpcException(SQLException e) {
         Map<String, Object> data = new LinkedHashMap<>();

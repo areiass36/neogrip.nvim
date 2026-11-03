@@ -18,6 +18,7 @@ import neogrip.db.catalog.Introspect;
 import neogrip.db.catalog.Listings;
 import neogrip.db.catalog.NativeDdl;
 import neogrip.db.catalog.Snapshot;
+import neogrip.db.errors.RequestRefused;
 import neogrip.db.types.Types;
 import neogrip.jsonrpc.Notifier;
 import neogrip.jsonrpc.RpcLifecycle;
@@ -242,8 +243,7 @@ public final class Database implements RpcLifecycle {
             String catalogName, String path, int parallelism, long budgetMs, boolean details)
             throws SQLException, IOException {
         if (!sweeping.compareAndSet(false, true)) {
-            throw new neogrip.jsonrpc.RpcException(
-                    neogrip.jsonrpc.Wire.INVALID_REQUEST, "a catalog sweep is already running on this connection");
+            throw new RequestRefused("a catalog sweep is already running on this connection");
         }
         try {
             // The flag is shared with a running statement's cancel, so a cancel
