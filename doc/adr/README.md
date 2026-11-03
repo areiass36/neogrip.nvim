@@ -44,3 +44,4 @@ in the author's Neovim configuration; where the two disagreed, the record states
 | 0033 | [JSON and CSV are a record-writer library, not part of the protocol](0033-data-formats-are-a-record-writer-library.md) | Accepted |
 | 0034 | [The Java program is gripd, and the handshake names it (protocol 3)](0034-the-program-is-gripd.md) | Accepted |
 | 0035 | [The application ring is collapsed: two rings and a contract](0035-two-rings-and-a-contract.md) | Accepted |
+| 0036 | [The catalog tree is data: six levels and a closed vocabulary](0036-catalog-tree-is-data.md) | Accepted |
