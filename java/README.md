@@ -34,6 +34,12 @@ available. Shutdown is the `shutdown` notification or EOF on stdin.
 | `neogrip.gripd.adapter.export` | a result streamed to a file through the format library (ADR-0010). |
 | `neogrip.gripd.adapter.rpc` | the wire edge: `Protocol`, `ErrorCodes`, `SqlErrors`, the status notifier, and `handler/` - the annotated functions themselves. |
 
+A Java language server reads `.project` and `.classpath` at the repository root to find these two
+source roots. They are editor configuration and nothing else - javac is still the only thing that
+compiles this (ADR-0004) - and they exist because a server with no build file to read guesses the roots
+by scanning for directories full of `.java` files, which picks the deepest package directory and leaves
+every cross-root import unresolvable.
+
 ## The programming model
 
 An RPC method is a plain annotated function; the Java method's own name is the wire name, prefixed by a
