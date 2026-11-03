@@ -55,6 +55,21 @@ for _, target in ipairs(targets) do
 				:sub(1, 70))
 		end
 
+		-- A view, so the collapse of ADR-0036 is asserted and not assumed: every
+		-- engine reports its own TABLE_TYPE and all of them must arrive as one
+		-- of three kinds. Created here rather than in the container fixtures
+		-- because duckdb and sqlite have no container, and the error is ignored
+		-- because a second run finds it already there - no engine agrees on the
+		-- spelling of "create or replace view".
+		if target.driver ~= "mongodb" then
+			support.run(
+				connection,
+				("create view torture_v as select * from %s"):format(target.table_name),
+				{ mode = "exec" }
+			)
+			schema.invalidate(connection)
+		end
+
 		local tables, tables_err = support.sync(function(done)
 			schema.tables(connection, target.schema_name, nil, function(records, err)
 				done(records, err)
@@ -63,14 +78,27 @@ for _, target in ipairs(targets) do
 		if tables_err then
 			support.fail("tables", tables_err)
 		else
-			local found = false
+			local found, kinds = false, {}
 			for _, record in ipairs(tables) do
+				kinds[record.kind] = true
 				if record.name == target.table_name then
 					found = true
-					check("the kind is reported", record.kind ~= nil, true)
+					check("the table is a table", record.kind, "table")
+				end
+				if record.name == "torture_v" then
+					check("and a view is a view", record.kind, "view")
 				end
 			end
 			check(("%s is listed"):format(target.table_name), found, true)
+			-- Nothing outside the three; a matview or a foreign table arriving
+			-- under its own name would show up right here.
+			for kind in pairs(kinds) do
+				check(
+					("%s is one of the three kinds"):format(kind),
+					kind == "table" or kind == "view" or kind == "collection",
+					true
+				)
+			end
 		end
 
 		local columns, columns_err = support.sync(function(done)

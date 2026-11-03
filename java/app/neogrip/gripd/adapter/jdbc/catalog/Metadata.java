@@ -55,13 +55,24 @@ public final class Metadata {
         return type.startsWith("SYSTEM") || type.equals("INDEX") || type.equals("SEQUENCE");
     }
 
+    /**
+     * One of three kinds, and never the driver's own word (ADR-0036).
+     *
+     * A client draws the tree, so what it needs is a set small enough to write
+     * one renderer against: a view is a view however it is materialized, a
+     * collection is a document store's, and `table` is the definition of
+     * everything else selectable - foreign, partitioned, temporary, an alias, a
+     * sequence, and whatever a driver reports that nothing here has seen. The
+     * engine's spelling is deliberately not carried alongside; the grouping is
+     * the contract.
+     */
     static String kind(String tableType) {
         if (tableType == null) return "table";
         return switch (tableType.toUpperCase()) {
-            case "VIEW" -> "view";
-            case "MATERIALIZED VIEW", "MATVIEW" -> "matview";
+            case "VIEW", "MATERIALIZED VIEW", "MATVIEW", "SYSTEM VIEW" -> "view";
+            // The Mongo wrapper's listing builds its rows directly, but a
+            // driver answering getTables with this should land here too.
             case "COLLECTION" -> "collection";
-            case "LOCAL TEMPORARY", "GLOBAL TEMPORARY", "TEMPORARY TABLE" -> "temp";
             default -> "table";
         };
     }

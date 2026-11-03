@@ -18,7 +18,7 @@ end
 
 -- Kept in step with lua/neogrip/rpc/protocol.lua by hand: this script runs
 -- under nvim --clean, with the plugin nowhere on its path.
-local VERSION = 3
+local VERSION = 4
 local initialized = false
 
 for line in io.lines() do

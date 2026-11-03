@@ -4,7 +4,7 @@ The contract between the Lua plugin and gripd, its Java daemon. This document is
 here bumps `protocolVersion`, is recorded in an ADR first, and lands in the same commit as both
 implementations (`lua/neogrip/rpc/` and `java/neogrip/`).
 
-Current `protocolVersion`: **3**.
+Current `protocolVersion`: **4**.
 
 ## Transport and framing
 
@@ -46,8 +46,8 @@ sweep at a time, outside the lock, on sibling connections of its own.
 ### initialize
 
 ```json
-→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":3,"clientInfo":{"name":"neogrip.nvim"}}}
-← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":3,"gripdInfo":{"java":"21.0.3"}}}
+→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":4,"clientInfo":{"name":"neogrip.nvim"}}}
+← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":4,"gripdInfo":{"java":"21.0.3"}}}
 ```
 
 A major-version mismatch is refused with error `-32002` and gripd exits.
@@ -126,6 +126,10 @@ batch; `done` is true when the result has no more rows, and gripd has then alrea
 
 - `catalog/catalogs {}`, `catalog/schemas {catalog?}`, `catalog/tables {catalog?, schema?}`,
   `catalog/columns {catalog?, schema?, table}` → small listings.
+- A listed table's `kind` is one of exactly three (ADR-0036): `table`, `view` or `collection`. A
+  materialized view is a `view`; everything else selectable - foreign, partitioned, temporary, system, an
+  alias, a sequence, a type no driver here has reported before - is a `table`. The engine's own
+  `TABLE_TYPE` is not carried.
 - `catalog/details {catalog?, schema?, table}` → keys, indexes, references for one table.
 - `catalog/ddl {catalog?, schema?, table}` / `catalog/nativeDdl {...}` → rendered definitions.
 - `catalog/snapshot {catalog?, schema}` → `{rows}` — one whole schema (every table with its columns) in a
