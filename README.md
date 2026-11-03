@@ -4,9 +4,9 @@ Turn Neovim into a SQL and data-manipulation client: pick which database a file 
 statement under the cursor, read the result in a grid, and query that result again with SQL — on macOS,
 Windows and Linux, with no Java to install.
 
-> **Status: usable, with open tracks.** Run statements, page and sort results, explore and sweep schemas,
-> re-query results and CSVs with SQL, export, validate on save, and work in transactions — all covered by
-> the test suite. Entra ID interactive, service principal, managed identity and SSH tunnels are declared in
+> **Status: usable, with open tracks.** Run statements, page and sort results, sweep a catalog and walk it
+> as data, re-query results and CSVs with SQL, export, validate on save, and work in transactions — all
+> covered by the test suite. Entra ID interactive, service principal, managed identity and SSH tunnels are declared in
 > the connection schema but not implemented yet; see [doc/adr/](doc/adr/README.md) for every decision.
 
 ## How it works
@@ -23,6 +23,11 @@ grid into views `r1`, `r2`, … (alias `last`) in a scratch DuckDB, and results 
 Connections live in `.nvim/database.json` (`:NGripInit` writes a starter); which one a buffer uses is
 resolved most-specific-first — explicit choice, saved binding, glob, project default, last used — and
 `:NGripWhich` explains the answer. `:help neogrip` covers everything.
+
+There is no schema explorer, on purpose: the plugin answers the catalog as data — six levels, labelled per
+engine, with the engine's quirks on this side — and you draw it with whichever picker or tree plugin you
+already use. See [doc/explorer-recipe.md](doc/explorer-recipe.md) for a working one in about a hundred
+lines, and `:help neogrip-tree` for the API.
 
 ## Requirements
 
@@ -61,8 +66,9 @@ With lazy.nvim:
 
 ## Keymaps
 
-The plugin defines **no keymaps** — not even behind an option. Every action is a `:NGrip*` command or a
-documented Lua function. A complete starting layout, to paste into your config and reshape:
+The plugin defines **no keymaps** — not even behind an option — and no explorer. Every action is a
+`:NGrip*` command or a documented Lua function. A complete starting layout, to paste into your config and
+reshape (the schema tree has its own recipe in [doc/explorer-recipe.md](doc/explorer-recipe.md)):
 
 ```lua
 -- Global, for SQL buffers.

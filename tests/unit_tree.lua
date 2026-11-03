@@ -16,9 +16,16 @@ local function chain(connection)
 	return table.concat(parts, "/")
 end
 
--- A file is its own database and has nothing above the tables.
+-- SQLite is its own database and reports no schemas at all.
 check("sqlite", chain({ driver = "sqlite", file = "/tmp/x.sqlite" }), "server/set/object*/attribute")
-check("duckdb", chain({ driver = "duckdb", file = "/tmp/x.duckdb" }), "server/set/object*/attribute")
+-- DuckDB is a file as well, but it does report schemas - and the sweep keys
+-- its snapshot by them, so pretending otherwise sends a tree to the server for
+-- what it already has.
+check(
+	"duckdb",
+	chain({ driver = "duckdb", file = "/tmp/x.duckdb" }),
+	"server/namespace/set/object*/attribute"
+)
 
 -- Databases but no schema layer; naming one skips the level that chooses it.
 check("mysql", chain({ driver = "mysql" }), "server/instance/set/object*/attribute")

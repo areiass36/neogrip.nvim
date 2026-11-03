@@ -76,7 +76,7 @@ local ENGINES = {
 	{ driver = "mysql", set = "torture" },
 	{ driver = "mssql", set = "torture", namespace = "dbo" },
 	{ driver = "sqlite", set = "torture" },
-	{ driver = "duckdb", set = "torture", fixture = true },
+	{ driver = "duckdb", set = "torture", namespace = "main", fixture = true },
 	{ driver = "mongodb", set = "orders" },
 }
 

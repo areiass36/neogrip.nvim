@@ -1,4 +1,4 @@
--- The catalog of every engine, and the explorer's generated SELECT.
+-- The catalog of every engine, and the SELECT generated for a set.
 local support = require("tests.support")
 local check, note = support.check, support.note
 
@@ -41,8 +41,8 @@ for _, target in ipairs(targets) do
 		if databases_err then
 			support.fail("databases", databases_err)
 		else
-			-- SQLite has no catalog level at all, which is why the explorer
-			-- goes straight from the connection to its tables.
+			-- SQLite has no catalog level at all, which is why the tree goes
+			-- straight from the connection to its sets.
 			if target.driver ~= "sqlite" then
 				check("databases are listed", #databases > 0, true)
 			end

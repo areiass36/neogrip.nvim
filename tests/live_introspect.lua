@@ -2,7 +2,7 @@
 --
 -- File-backed engines rather than the containers: this needs a real JDBC driver
 -- and a real server, but not a network -- the file is the server. So the claim
--- the feature rests on, that after one sweep the explorer answers with nothing
+-- the feature rests on, that after one sweep the tree answers with nothing
 -- running, is checked wherever the JDK and the drivers are, which is anywhere
 -- this config has been used once.
 --
@@ -19,11 +19,10 @@ if not support.has_jdk() then
 	return
 end
 support.seed_secrets()
-local explorer = require("neogrip.explorer")
-local icons = require("neogrip.icons")
 local gripd = require("neogrip.gripd")
 local schema = require("neogrip.schema")
 local store = require("neogrip.schema.store")
+local tree = require("neogrip.tree")
 
 local ENGINES = {
 	{
@@ -85,6 +84,9 @@ for _, engine in ipairs(ENGINES) do
 			client = engine.driver,
 			scope = "global",
 		}
+		-- The tree resolves a connection by id out of the registry, because a
+		-- ref has to be a plain serializable path and not a connection object.
+		require("neogrip.connections").register(connection)
 		local where = engine.schema_name
 
 		local broken = false
@@ -97,9 +99,9 @@ for _, engine in ipairs(ENGINES) do
 			end
 		end
 
-		-- The catalog the explorer would open on, so what is swept is what it
+		-- The catalog the tree would open on, so what is swept is what it
 		-- then reads.
-		local catalog = explorer.entry_point(connection).context.catalog
+		local catalog = schema.catalog_of(connection)
 		schema.invalidate(connection)
 		local summary = nil
 		if not broken then
@@ -181,7 +183,7 @@ for _, engine in ipairs(ENGINES) do
 					true
 				)
 			else
-				-- Nothing to report is an answer: db/explorer/detail.lua writes
+				-- Nothing to report is an answer: neogrip/render.lua writes
 				-- that in the buffer rather than leaving the sections out.
 				note(
 					("this driver reports %d keys, %d indexes, %d foreign keys"):format(
@@ -195,7 +197,7 @@ for _, engine in ipairs(ENGINES) do
 			-- A name is a name, not a pattern. An underscore matches any
 			-- single character in JDBC metadata, so a definition could quietly
 			-- carry another table's columns -- on a warehouse, where every
-			-- name has one, that is what the explorer showed.
+			-- name has one, that is what a client shows.
 			local narrow = support.sync(function(done)
 				schema.details(connection, where, "fato_cliente", function(answer, failure)
 					done(answer, failure)
@@ -223,28 +225,30 @@ for _, engine in ipairs(ENGINES) do
 				true
 			)
 
-			local entries = nil
-			explorer.levels.tables.load(
-				{ connection = connection, catalog = catalog, schema = where },
-				function(list)
-					entries = list
-				end
-			)
-			check("the explorer's table level answers too", entries ~= nil and #entries >= 3, true)
+			-- And the tree answers from the same snapshot. These engines have
+			-- no instance and no namespace, so the sets hang off the server
+			-- itself (ADR-0036).
+			-- SQLite hangs its sets off the connection; DuckDB has a schema
+			-- between the two (ADR-0036), so the walk starts where the shape
+			-- says the sets are.
+			local from = where
+					and { level = "namespace", ref = { server = connection.id, namespace = where } }
+				or { level = "server", ref = { server = connection.id } }
+			local entries = support.sync(function(done)
+				tree.children(from, {}, function(nodes, err)
+					done(nodes, err)
+				end)
+			end, 30000)
+			check("the tree's set level answers too", entries ~= nil and #entries >= 3, true)
 			local by_name = {}
 			for _, entry in ipairs(entries or {}) do
-				by_name[entry.value] = entry
+				by_name[entry.name] = entry
 			end
-			check(
-				"a table wears the table icon",
-				by_name.customers and by_name.customers.text:find(icons.table, 1, true) ~= nil,
-				true
-			)
-			check(
-				"and a view the branch icon",
-				by_name.big_orders and by_name.big_orders.text:find(icons.branch, 1, true) ~= nil,
-				true
-			)
+			-- The kind, not an icon: what a set is belongs to the plugin, how it
+			-- looks belongs to the client (ADR-0037).
+			check("a table says it is a table", by_name.customers and by_name.customers.kind, "table")
+			check("and a view says it is a view", by_name.big_orders and by_name.big_orders.kind, "view")
+			check("both out of the snapshot", by_name.customers and by_name.customers.source, "cache")
 			check("none of which reopened the process", gripd.is_connected(connection.id), false)
 
 			-- Asked again it replaces what it found before, and told to skip the

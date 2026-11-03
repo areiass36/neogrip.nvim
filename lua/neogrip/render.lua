@@ -1,4 +1,4 @@
--- What a table looks like, as a read-only SQL buffer.
+-- What a set looks like, as lines of SQL.
 --
 -- JDBC has no "show me the DDL", but it has every piece one is written from,
 -- so the CREATE TABLE here is rendered rather than fetched. That is the honest
@@ -14,12 +14,10 @@
 -- without enough detail to spell (a generated column whose expression JDBC
 -- does not carry) is said in a comment rather than guessed at.
 --
--- The buffer is a real 'sql' buffer and a real db:// document: naming and
--- filling it is db/document.lua's job, so the explorer's <CR> and an :edit of
--- the same URI from anywhere else land in the one buffer.
-local neogrip = require("neogrip")
-local document = require("neogrip.document")
-local icons = require("neogrip.icons")
+-- Lines, and nothing else: the plugin defines no explorer (ADR-0037), so what
+-- was the picker's definition buffer is a renderer a client may call or
+-- ignore. `neogrip.document` turns these lines into a buffer and the LSP hover
+-- reads them, so this module opens nothing and requires neither.
 local schema = require("neogrip.schema")
 
 local M = {}
@@ -176,7 +174,7 @@ end
 --- Unnamed where it was not, which is what this file emitted before names were
 --- available at all: a bare PRIMARY KEY (...) is still correct, it just cannot
 --- be dropped by name.
-local function constraints(connection, context, details)
+local function constraints(connection, namespace, details)
 	local driver = connection.driver
 	local primary = details.primary_key or {}
 	local keys = details.foreign_keys or {}
@@ -219,7 +217,7 @@ local function constraints(connection, context, details)
 
 	for _, key in ipairs(keys) do
 		local target = ("REFERENCES %s (%s)"):format(
-			schema.qualify(connection, key.schema or context.schema, key.table),
+			schema.qualify(connection, key.schema or namespace, key.table),
 			quote_list(driver, key.ref_columns)
 		)
 		local on_delete, on_update = action(key.on_delete), action(key.on_update)
@@ -247,10 +245,10 @@ local function constraints(connection, context, details)
 end
 
 --- The CREATE TABLE, from the columns and the keys they declare.
-local function create_table(connection, context, table_name, details)
+local function create_table(connection, namespace, table_name, details)
 	local driver = connection.driver
 	local columns = ordered(details.rows or {})
-	local lines = { ("CREATE TABLE %s ("):format(schema.qualify(connection, context.schema, table_name)) }
+	local lines = { ("CREATE TABLE %s ("):format(schema.qualify(connection, namespace, table_name)) }
 
 	-- Line the names and the types up, so a wide table can be read down the
 	-- column rather than across every row of it.
@@ -264,7 +262,7 @@ local function create_table(connection, context, table_name, details)
 	for _, column in ipairs(columns) do
 		entries[#entries + 1] = column_entry(driver, column, widths)
 	end
-	vim.list_extend(entries, constraints(connection, context, details))
+	vim.list_extend(entries, constraints(connection, namespace, details))
 
 	for index, entry in ipairs(entries) do
 		local tail = (index < #entries and "," or "") .. (entry.note and ("  -- " .. entry.note) or "")
@@ -284,9 +282,9 @@ end
 --- Statements rather than the comments this used to write: an index is part of
 --- how a table is defined, and the one worth copying into a migration is the
 --- one the server already has.
-local function indexes(connection, context, table_name, details)
+local function indexes(connection, namespace, table_name, details)
 	local driver = connection.driver
-	local qualified = schema.qualify(connection, context.schema, table_name)
+	local qualified = schema.qualify(connection, namespace, table_name)
 	local primary = table.concat(details.primary_key or {}, "\1")
 	local lines = {}
 
@@ -343,9 +341,9 @@ end
 --- spell a comment inside the column definition instead; rather than guess at
 --- which of those this driver is, the portable form is written and the reader
 --- can see what the server said.
-local function comments(connection, context, table_name, details)
+local function comments(connection, namespace, table_name, details)
 	local driver = connection.driver
-	local qualified = schema.qualify(connection, context.schema, table_name)
+	local qualified = schema.qualify(connection, namespace, table_name)
 	local lines = {}
 
 	local remarks = named(details.remarks)
@@ -369,7 +367,7 @@ end
 --- What points at this table, as comments: it describes the table rather than
 --- recreating it, and a buffer you might yank out of should not hand you
 --- statements that belong to someone else's table.
-local function annotations(connection, context, details)
+local function annotations(connection, namespace, details)
 	local driver = connection.driver
 	local lines = {}
 
@@ -383,7 +381,7 @@ local function annotations(connection, context, details)
 			lines[#lines + 1] = (
 				("--   %s (%s) -> (%s)   %s")
 					:format(
-						schema.qualify(connection, key.schema or context.schema, key.table),
+						schema.qualify(connection, key.schema or namespace, key.table),
 						quote_list(driver, key.ref_columns),
 						quote_list(driver, key.columns),
 						named(key.name) or ""
@@ -421,8 +419,11 @@ local function native(details)
 	return lines
 end
 
+--- The definition of one set, as lines of runnable SQL.
+---
+--- @param namespace string|nil the schema the set is in, when it has one
 --- @return string[] lines
-function M.render(connection, context, table_name, details)
+function M.details(connection, namespace, table_name, details)
 	local columns = details.rows or {}
 	if #columns == 0 then
 		return { ("-- %s: no columns reported"):format(tostring(table_name)) }
@@ -434,10 +435,10 @@ function M.render(connection, context, table_name, details)
 	-- document never ends in whitespace either.
 	local lines = {}
 	for _, section in ipairs({
-		create_table(connection, context, table_name, details),
-		indexes(connection, context, table_name, details),
-		comments(connection, context, table_name, details),
-		annotations(connection, context, details),
+		create_table(connection, namespace, table_name, details),
+		indexes(connection, namespace, table_name, details),
+		comments(connection, namespace, table_name, details),
+		annotations(connection, namespace, details),
 		native(details),
 	}) do
 		while #section > 0 and section[#section] == "" do
@@ -451,61 +452,6 @@ function M.render(connection, context, table_name, details)
 		end
 	end
 	return lines
-end
-
---- Open the rendered definition as a read-only buffer in the current window.
----
---- A thin wrapper over db/document.lua, which owns the naming, the reader and
---- everything a definition buffer is: <CR> here and an :edit of the same db://
---- URI from anywhere else have to be the one buffer, not two that look alike.
-function M.open(connection, context, table_name, lines)
-	return document.open(document.table_uri(connection, context.catalog, context.schema, table_name), lines)
-end
-
---- Fetch and show. The one round trip this costs is for a table someone opened.
---- @param on_done fun(lines: string[], bufnr: integer)|nil
-function M.show(context, table_name, on_done)
-	local connection = context.connection
-
-	local function draw(details, failure)
-		local lines = M.render(connection, context, table_name, details or {})
-		if failure then
-			table.insert(lines, 1, ("-- %s"):format(failure))
-			table.insert(lines, 2, "")
-		end
-		local bufnr = M.open(connection, context, table_name, lines)
-		neogrip.notify(("%s %s"):format(icons.table, table_name))
-		if on_done then
-			on_done(lines, bufnr)
-		end
-		return bufnr
-	end
-
-	schema.details(connection, context.schema, table_name, function(details, err)
-		if err then
-			-- Opening anyway, with the columns and a line saying what was not
-			-- available. The five metadata calls a definition is written from
-			-- fail independently -- a query engine answers for columns and
-			-- refuses keys and indexes outright -- so one refusal is no reason
-			-- to show nothing at all. It is also the difference between a
-			-- notification that scrolls past and a buffer that says why.
-			return schema.columns(connection, context.schema, table_name, function(columns, column_err)
-				draw({ rows = columns or {} }, column_err and ("%s / %s"):format(err, column_err) or err)
-			end, context.catalog)
-		end
-		details = details or {}
-		local bufnr = draw(details, nil)
-
-		-- The server's own DDL is a second round trip and the definition reads
-		-- perfectly without it, so it is appended when it lands rather than
-		-- holding the buffer up for it.
-		document.native_ddl(connection, context, table_name, function(ddl)
-			-- A copy, because the details may be the per-question cache's own
-			-- table and this field has no business being written back to it.
-			local whole = vim.tbl_extend("force", {}, details, { native_ddl = ddl })
-			document.fill(bufnr, M.render(connection, context, table_name, whole))
-		end)
-	end, context.catalog)
 end
 
 return M

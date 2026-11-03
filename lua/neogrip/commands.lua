@@ -1,5 +1,5 @@
 -- Every :NGrip command in one place (ADR-0024). Commands land here as their
--- phases do; the explorer, introspection and requery ones follow their
+-- phases do; the tree, introspection and requery ones follow their
 -- modules.
 local connections = require("neogrip.connections")
 local neogrip = require("neogrip")
@@ -123,10 +123,6 @@ function M.setup()
 		end
 	end, { desc = "Open a query buffer against this buffer's connection" })
 
-	command("NGripExplore", function()
-		require("neogrip.explorer").open({})
-	end, { desc = "Explore the schema" })
-
 	command("NGripSchemaReload", function()
 		-- Only this buffer's connection. Passing nil would clear every
 		-- connection's catalog, which is not what "reload" asks for.
@@ -144,9 +140,9 @@ function M.setup()
 			return
 		end
 		local schema = require("neogrip.schema")
-		-- The catalog the explorer would open on, so what is swept is what the
-		-- explorer then reads. An argument overrides it.
-		local catalog = require("neogrip.explorer").entry_point(connection).context.catalog
+		-- The catalog the tree would open on, so what is swept is what a
+		-- client then reads. An argument overrides it.
+		local catalog = schema.catalog_of(connection)
 		if args.args ~= "" then
 			catalog = args.args
 		end

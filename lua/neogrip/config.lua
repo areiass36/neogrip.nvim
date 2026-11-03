@@ -36,27 +36,17 @@ M.defaults = {
 	-- Catalog queries are cached per connection for this long.
 	schema_ttl_seconds = 3600,
 	-- :NGripIntrospect sweeps the whole connected database and keeps it under
-	-- the state directory, where it answers for every level of the explorer
-	-- and every table preview until it is asked for again. The sweep runs on
+	-- the state directory, where it answers every level of the tree down to a
+	-- column until it is asked for again. The sweep runs on
 	-- connections of its own so the editor is never queued behind it; this is
 	-- how many of them at most. One keeps it on the single connection the
 	-- process already has, which is what a file-backed driver gets anyway.
 	introspect_parallelism = 4,
 	introspect_timeout_ms = 600000,
 	-- Collect each table's indexes and foreign keys as well, which is what
-	-- lets a table's definition be previewed without asking the server. Off,
-	-- the sweep is a good deal cheaper and a definition costs one round trip.
+	-- lets a definition be rendered without asking the server. Off, the sweep
+	-- is a good deal cheaper and a definition costs one round trip.
 	introspect_details = true,
-	-- Sweep once, in the background, the first time the explorer is opened on
-	-- a database that has never been swept. Nothing waits for it.
-	introspect_on_first_use = true,
-	-- Resting on a schema in the explorer fills its cache in the background,
-	-- so walking into it is instant. One round trip per schema, debounced.
-	schema_warm = true,
-	schema_warm_debounce_ms = 250,
-	-- Show a few rows beside a table in the explorer's preview. Off: the
-	-- preview is metadata only, which costs nothing once the schema is cached.
-	preview_sample = false,
 	-- Validate the statement under the cursor on save. The server parses it
 	-- and never runs it, so this is safe for every kind of statement.
 	validate_on_save = true,

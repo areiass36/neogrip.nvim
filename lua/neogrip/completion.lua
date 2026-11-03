@@ -118,7 +118,7 @@ function source.complete(_self, request, callback)
 end
 
 --- Exposed so the tests can ask it for completions without standing up cmp,
---- the same way db/explorer exposes its levels.
+--- the same way neogrip.tree exposes its levels.
 M.source = source
 
 function M.setup()

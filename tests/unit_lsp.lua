@@ -8,7 +8,7 @@
 local support = require("tests.support")
 local check = support.check
 local connections = require("neogrip.connections")
-local detail = require("neogrip.explorer.detail")
+local render = require("neogrip.render")
 local document = require("neogrip.document")
 local lsp = require("neogrip.lsp")
 local schema = require("neogrip.schema")
@@ -274,11 +274,8 @@ check("with the schema document", schema_at, {
 -- Read off the rendered text rather than counted, which is what the server
 -- does: the renderer is free to leave a column out, and a jump that lands a
 -- line off is worse than one that does not land at all.
-local rendered = detail.render(connection, {
-	connection = connection,
-	catalog = CATALOG,
-	schema = "sales",
-}, "customers", store.details(connection, CATALOG, "sales", "customers"))
+local rendered =
+	render.details(connection, "sales", "customers", store.details(connection, CATALOG, "sales", "customers"))
 local email_line = document.column_line(rendered, "email")
 check("the column has a line in its table's definition", email_line ~= nil, true)
 

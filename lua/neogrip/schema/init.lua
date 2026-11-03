@@ -57,7 +57,7 @@ end
 --- The catalog a connection means - and so the key its swept catalog is kept
 --- under on disk.
 ---
---- One definition, because three callers have to agree about it: the explorer
+--- One definition, because three callers have to agree about it: the tree
 --- opens on it, :NGripIntrospect sweeps it, and the store keys its file by it.
 --- They did not agree in the predecessor: completion asked every question with
 --- no catalog at all and therefore never once read the sweep it was supposed
@@ -518,7 +518,7 @@ function M.snapshot_stat(connection, catalog)
 	return store.stat(connection, catalog)
 end
 
---- The SELECT the explorer opens for a table.
+--- The SELECT a client starts from for a set.
 ---
 --- No column rewriting: the Java side renders a binary column as hex because
 --- JDBC tells it the column is binary, so "select *" is safe.

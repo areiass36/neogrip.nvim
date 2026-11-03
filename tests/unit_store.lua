@@ -121,7 +121,7 @@ check(
 )
 
 local details = store.details(CONNECTION, CATALOG, "public", "users")
--- db/explorer/detail.lua renders details.rows, so the column list has to arrive
+-- neogrip/render.lua renders details.rows, so the column list has to arrive
 -- under that name rather than as `columns`.
 check("a definition carries its column list as rows", #details.rows, 2)
 check("the primary key is spelled out", details.primary_key, { "id" })
@@ -229,7 +229,7 @@ store.clear(OTHER)
 
 support.describe("store: a file that is not a snapshot")
 
--- A half-written or hand-edited file is not worth a traceback: the explorer
+-- A half-written or hand-edited file is not worth a traceback: the caller
 -- falls back to asking the server, which is what it did before any of this.
 local path = store.path(CONNECTION, CATALOG)
 vim.fn.writefile({ "this is not json, it is a sentence" }, path)

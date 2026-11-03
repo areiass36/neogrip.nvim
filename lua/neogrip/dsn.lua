@@ -113,7 +113,7 @@ function M.build(connection)
 		-- An empty catalog segment is rejected by the driver, so with no
 		-- catalog the path is left off entirely. A query then names the catalog
 		-- itself (catalog.schema.table), which is how Trino SQL is usually
-		-- written anyway; walking into a catalog in the explorer fills it in.
+		-- written anyway; walking into a catalog in a tree fills it in.
 		return ("jdbc:trino://%s:%d%s%s"):format(
 			host,
 			port,

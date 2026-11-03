@@ -12,11 +12,12 @@ CONTENTS                                                        *neogrip*
   4. Connections ............................ |neogrip-connections|
   5. Commands ............................... |neogrip-commands|
   6. Grid actions ........................... |neogrip-grid|
-  7. Language services ...................... |neogrip-lsp|
-  8. Statusline ............................. |neogrip-statusline|
-  9. Options ................................ |neogrip-options|
- 10. Highlights ............................. |neogrip-highlights|
- 11. Limitations ............................ |neogrip-limitations|
+  7. Catalog tree ........................... |neogrip-tree|
+  8. Language services ...................... |neogrip-lsp|
+  9. Statusline ............................. |neogrip-statusline|
+ 10. Options ................................ |neogrip-options|
+ 11. Highlights ............................. |neogrip-highlights|
+ 12. Limitations ............................ |neogrip-limitations|
 
 ==============================================================================
 1. INTRODUCTION                                 *neogrip-introduction*
@@ -25,10 +26,10 @@ Neogrip turns Neovim into a SQL and data-manipulation client: pick which
 database a file runs against, run the statement under the cursor, read the
 result in a grid, and query that result again with SQL through DuckDB.
 
-A Lua plugin talks JSON-RPC over stdio to gripd, a small Java daemon, which speaks
-JDBC to the databases. The plugin downloads its own pinned, checksum-verified
-JDK and driver jars on first use and compiles gripd from the sources in
-the repository - nothing to install.
+A Lua plugin talks JSON-RPC over stdio to gripd, a small Java daemon that
+speaks JDBC to the databases. The plugin downloads its own pinned,
+checksum-verified JDK and driver jars on first use and compiles gripd from the
+sources in the repository - nothing to install.
 
 Engines: PostgreSQL, MySQL/MariaDB, SQL Server, Azure SQL, Trino, MongoDB,
 SQLite and DuckDB.
@@ -39,9 +40,10 @@ SQLite and DuckDB.
 - Neovim 0.12 or newer.
 - kvstore.nvim (https://github.com/areiass36/kvstore.nvim): every secret is
   read from it and from nowhere else. Store one with `:KVStore <key>`.
-- Optional: telescope.nvim (a richer explorer; without it the same tree walks
-  through |vim.ui.select|), nvim-cmp (a completion source), jq (pretty
-  printing of Mongo documents).
+- Optional: nvim-cmp (a completion source), jq (pretty printing of Mongo
+  documents). A schema explorer is yours to build - see |neogrip-tree| and the
+  worked example in doc/explorer-recipe.md - so whichever picker or tree
+  plugin you already use is the one that draws it.
 
 ==============================================================================
 3. SETUP                                        *neogrip-setup* *neogrip.setup()*
@@ -109,7 +111,6 @@ project default, the last one used. `:NGripWhich` explains the answer.
 :NGripWhich            Which connection applies here, and why.
 :NGripConnections      List the configured connections.
 :NGripReload           Re-read the connection files.
-:NGripExplore          Walk the schema: databases, schemas, tables, columns.
 :NGripIntrospect[!] [catalog]
                        Sweep the whole database into the on-disk catalog;
                        ! cancels a running sweep.
@@ -152,7 +153,70 @@ go when the grid shows another one, and after |neogrip-options|
 `cursor_idle_seconds` of nothing asking for a page.
 
 ==============================================================================
-7. LANGUAGE SERVICES                            *neogrip-lsp*
+7. CATALOG TREE                                 *neogrip-tree*
+
+The plugin draws no explorer (ADR-0037). It answers the catalog as data and
+you draw it: `require("neogrip.tree")`.
+
+Six levels, a closed set:
+
+  server -> instance -> namespace -> set -> object -> attribute
+  (conn)    (database)  (schema)    (table) (row)     (column)
+
+Which of them a connection has differs by engine, and the plugin keeps that
+knowledge: SQLite has no schemas, MySQL has databases but no schemas, Trino
+calls a database a catalog, and a connection that names its database starts
+below the level that chooses one.
+
+                                                *neogrip.tree.shape()*
+shape(connection)
+        The walk this connection has, already truncated, as
+        `{ levels = { { level, label, on_demand?, reconnects? } }, sweepable,
+        cacheable_until }`. `label` is what to put in a header - "Collections"
+        on MongoDB, "Catalogs" on Trino - so one renderer serves every engine
+        without naming one. `object` is marked `on_demand`: rows are data,
+        they cost a query and are never cached.
+
+                                                *neogrip.tree.children()*
+children(node, opts, callback)
+        The children of `node`, at whatever level comes next. `node` of nil
+        answers the configured connections, so one recursive function walks
+        from there to a column. Returns a handle with `:cancel()` - abandon it
+        when a node collapses; for rows that also closes the cursor on the
+        server. `opts.objects = true` reaches the rows instead of the columns,
+        with `limit`, `hash` and `from` to page and `on_page` to receive the
+        continuation.
+
+        A node is `{ id, level, kind, name, ref, expandable, source, facts }`
+        and carries nothing formatted: no icons, no padding, no "12 columns".
+        `kind` for a set is `table`, `view` or `collection` and nothing else.
+        `source` is `"cache"` or `"server"`. `ref` is the whole path, always,
+        and it names a connection by id - register an ephemeral one with
+        `require("neogrip.connections").register()` first.
+
+The rest are tools, not UI. None of them opens a buffer:
+
+  qualified_name(ref)            the name as SQL, quoted for this engine
+  statement(ref, kind, cb)       select|insert|update|delete, as text
+  details(ref, cb)               keys, indexes and references for one set
+  ddl(ref, cb)                   the server's own definition, or nil
+  counts(ref, cb)                approximate row counts for a namespace
+  find(ref, pattern, cb)         sets whose name matches, flat
+  sweep(ref, opts, cb)           sweep the instance, or one namespace of it
+  swept(ref)                     when it was swept and what it holds, or nil
+  forget(ref)                    drop what is cached; the client decides when
+
+`require("neogrip.render").details(connection, namespace, set, details)` turns
+a details record into lines of SQL, if you want the definition the plugin used
+to draw. `require("neogrip.icons")` is a table you may read or ignore.
+
+Nothing watches the database: after a migration, the client calls `sweep` or
+`forget` itself.
+
+doc/explorer-recipe.md is a working explorer in about a hundred lines.
+
+==============================================================================
+8. LANGUAGE SERVICES                            *neogrip-lsp*
 
 An in-process LSP server per connection answers from the catalog that
 `:NGripIntrospect` swept: hover (K), document and workspace symbols (gO),
@@ -166,7 +230,7 @@ Saving a `.sql` buffer validates the statement on the server (nothing runs);
 see |neogrip-options| `validate_on_save`.
 
 ==============================================================================
-8. STATUSLINE                                   *neogrip-statusline*
+9. STATUSLINE                                   *neogrip-statusline*
 
 `require("neogrip.statusline").component()` renders `replica [RO][PROD][TX]`
 for the current buffer: read-only, production - the one effect
@@ -174,7 +238,7 @@ for the current buffer: read-only, production - the one effect
 returns the same facts as a table; `is_production(bufnr)` is the single flag.
 
 ==============================================================================
-9. OPTIONS                                      *neogrip-options*
+10. OPTIONS                                     *neogrip-options*
 
 Defaults, overridable through `setup(opts)` (each is documented where it
 lives, `lua/neogrip/config.lua`): >lua
@@ -196,7 +260,7 @@ lives, `lua/neogrip/config.lua`): >lua
     })
 <
 ==============================================================================
-10. HIGHLIGHTS                                  *neogrip-highlights*
+11. HIGHLIGHTS                                  *neogrip-highlights*
 
 Every group is defined with `default = true`, so your own |nvim_set_hl()|
 wins. The grid's groups are prefixed `NGripGrid`: Header, HeaderSorted, Rule,
@@ -204,7 +268,7 @@ Separator, Stripe, Ellipsis, Cell, Null, Number, Boolean, Temporal, Uuid,
 Json, Binary, Footer, Connection, Production, Count, Elapsed, Slow.
 
 ==============================================================================
-11. LIMITATIONS                                 *neogrip-limitations*
+12. LIMITATIONS                                 *neogrip-limitations*
 
 - No confirmations for dangerous statements: `readonly: true` refuses writes
   in layers, `production: true` is a visible signal, and the strongest

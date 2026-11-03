@@ -261,7 +261,7 @@ function M.follow_fk(bufnr)
 		table.concat(predicates, " AND ")
 	)
 
-	-- The same cap the explorer's SELECT gets: a key usually points at one row,
+	-- The same cap a generated SELECT gets: a key usually points at one row,
 	-- but nothing says the other side of it is unique.
 	local limit = connection.limit or require("neogrip.config").get().limit
 	local text

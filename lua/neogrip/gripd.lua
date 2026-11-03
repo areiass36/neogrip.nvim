@@ -171,8 +171,8 @@ function M.stop(gripd)
 end
 
 -- One process per configured connection (ADR-0003), keyed by id. Each entry
--- remembers the url it connected to, because the explorer can re-point a
--- connection at another database and the process must be replaced, not reused.
+-- remembers the url it connected to, because choosing another database
+-- re-points the connection and the process must be replaced, not reused.
 local processes = {}
 
 --- JDK present, gripd compiled, and this driver's jar installed.

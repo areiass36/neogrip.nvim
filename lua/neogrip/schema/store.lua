@@ -101,8 +101,8 @@ function M.load(connection, catalog)
 	local cached = loaded[key]
 	if cached ~= nil then
 		-- false is "looked, nothing there": no snapshot is the normal state
-		-- before the first introspect, and it must not send the explorer back
-		-- to the filesystem on every keystroke to rediscover that.
+		-- before the first introspect, and it must not send a caller back to
+		-- the filesystem on every keystroke to rediscover that.
 		return cached or nil
 	end
 

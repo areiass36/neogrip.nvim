@@ -1,13 +1,13 @@
 -- A table or a schema as a document you can :edit.
 --
--- The explorer used to name its definition buffer itself and write the lines
--- straight into it. The name looked like a URI but was not one: nothing could
--- be pointed at it, so a jump from a table name in a query, or a buffer
--- recovered from a session, had nowhere to land.
+-- The explorer this plugin used to ship named its definition buffer itself
+-- and wrote the lines straight into it. The name looked like a URI but was
+-- not one: nothing could be pointed at it, so a jump from a table name in a
+-- query, or a buffer recovered from a session, had nowhere to land.
 --
 -- Here the name is the document. db://table/<conn>/<catalog>/<schema>/<table>
 -- and db://schema/<conn>/<catalog>/<schema> are read by a BufReadCmd, so
--- :edit of one fills it whoever asked and whenever -- the explorer's <CR>, a
+-- :edit of one fills it whoever asked and whenever -- a client's keymap, a
 -- go-to-definition, or :bufdo after a restart all end up in the one buffer.
 --
 -- Every segment is percent-encoded and the shape is fixed, with catalogs and
@@ -29,9 +29,8 @@ local ENCODING = "rfc2396"
 local LISTED = 40
 
 -- Lines the caller already has in hand, waiting for the BufReadCmd that is
--- about to run. The explorer fetches a table's details before opening it, and
--- a document that went and fetched them again would pay for the same answer
--- twice.
+-- about to run. A client that already fetched a set's details before opening
+-- it would otherwise pay for the same answer twice.
 local pending = {}
 
 -- Whether the reader is registered. M.setup is what registers it, but nothing
@@ -124,8 +123,8 @@ function M.parse(uri)
 	}
 end
 
--- What the explorer draws beside a table of each kind. The same mapping rather
--- than one of its own: a view has to look like a view in both places.
+-- What a document draws beside a set of each kind. A client's tree decorates
+-- its own nodes (ADR-0037); this is for the lines written here.
 local KIND_ICON = {
 	table = icons.table,
 	temp = icons.table,
@@ -308,22 +307,17 @@ local function dress(bufnr, parsed)
 	-- user mapped.
 end
 
---- The definition, as the renderer in db/explorer/detail.lua writes it.
+--- The definition, as the renderer in neogrip/render.lua writes it.
 ---
---- Required here rather than at the top of the file: that module names this one
---- to open what it has rendered, and one of the two has to be the late one.
+--- Required here rather than at the top of the file: the renderer is optional
+--- and this module is not, so naming it late keeps the dependency one-way.
 local function definition(parsed, details)
-	local context = {
-		connection = parsed.connection,
-		catalog = parsed.catalog,
-		schema = parsed.schema,
-	}
 	local ok, lines =
-		pcall(require("neogrip.explorer.detail").render, parsed.connection, context, parsed.table, details)
+		pcall(require("neogrip.render").details, parsed.connection, parsed.schema, parsed.table, details)
 	if ok and type(lines) == "table" then
-		return lines, context
+		return lines
 	end
-	return { comment(lines) }, context
+	return { comment(lines) }
 end
 
 --- Fill `bufnr` with the document `uri` names.
@@ -369,13 +363,13 @@ function M.render(uri, bufnr, on_done)
 				comment(err or "the server reported nothing about this table"),
 			})
 		end
-		local lines, context = definition(parsed, details)
+		local lines = definition(parsed, details)
 		finish(lines)
 
 		-- The server's own DDL is a second round trip, and the definition reads
 		-- perfectly without it, so it is appended when it lands rather than
 		-- holding the buffer up for it.
-		M.native_ddl(parsed.connection, context, parsed.table, function(ddl)
+		M.native_ddl(parsed.connection, parsed, parsed.table, function(ddl)
 			-- A copy, because the details may be the per-question cache's own
 			-- table and this field has no business being written back to it.
 			local whole = vim.tbl_extend("force", {}, details, { native_ddl = ddl })
@@ -433,8 +427,8 @@ end
 --- @return integer|nil bufnr, integer|nil winid
 function M.open(uri, lines)
 	-- :edit is the only way into a document, so opening one has to know the
-	-- reader is there: db/init.lua registers it at startup, but the explorer
-	-- can be loaded and used before that has happened.
+	-- reader is there: db/init.lua registers it at startup, but a caller can
+	-- be loaded and used before that has happened.
 	if not reading then
 		M.setup()
 	end

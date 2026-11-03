@@ -65,16 +65,21 @@ function M.shape(connection)
 		levels[#levels + 1] = entry
 	end
 
-	if driver == "sqlite" or driver == "duckdb" then
-		-- Nothing above the tables: the file is the database.
+	if driver == "sqlite" then
+		-- One file and no schemas at all: getSchemas answers nothing there, so
+		-- the sets hang off the connection itself.
 		add("set")
 		add("object", { on_demand = true })
 		add("attribute")
-		return {
-			levels = levels,
-			sweepable = true,
-			cacheable_until = "attribute",
-		}
+		return { levels = levels, sweepable = true, cacheable_until = "attribute" }
+	elseif driver == "duckdb" then
+		-- A file too, but it does have schemas - main, information_schema,
+		-- pg_catalog - and the sweep keys its snapshot by them, so a tree that
+		-- skipped the level would ask the server for what it already had. It
+		-- has attached catalogs as well, and they are deliberately not a level:
+		-- the catalog argument is not what filters DuckDB's metadata, which is
+		-- why schema.catalog_of answers nothing for it.
+		add("namespace")
 	elseif driver == "mysql" or driver == "mariadb" or driver == "mongodb" then
 		-- A connection that names its database starts below that level:
 		-- there is nothing left to choose.
@@ -158,6 +163,12 @@ end
 
 -- --- refs and the engines' two qualifiers ------------------------------
 
+--- The connection a ref names, out of the registry.
+---
+--- A ref carries an id and not a connection object, because it has to survive
+--- being a node id, a client's cache key and a round trip through a config
+--- file. A connection the registry has never seen - an ephemeral one a caller
+--- built itself - has to be registered before the tree can answer for it.
 --- @return table|nil connection
 local function server_of(ref)
 	return ref and ref.server and connections.get(ref.server) or nil
