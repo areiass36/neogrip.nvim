@@ -43,3 +43,4 @@ in the author's Neovim configuration; where the two disagreed, the record states
 | 0032 | [The Java tree is a lib root and an app root with one dependency direction](0032-lib-and-app-source-roots.md) | Accepted |
 | 0033 | [JSON and CSV are a record-writer library, not part of the protocol](0033-data-formats-are-a-record-writer-library.md) | Accepted |
 | 0034 | [The Java program is gripd, and the handshake names it (protocol 3)](0034-the-program-is-gripd.md) | Accepted |
+| 0035 | [The application ring is collapsed: two rings and a contract](0035-two-rings-and-a-contract.md) | Accepted |
