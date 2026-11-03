@@ -7,7 +7,7 @@ M.defaults = {
 	-- Rows fetched per page. One extra row is always requested to learn whether
 	-- another page exists without paying for a count(*) (ADR-0014).
 	limit = 200,
-	-- An open result is a cursor on the sidecar (ADR-0031), so paging forward
+	-- An open result is a cursor on gripd (ADR-0031), so paging forward
 	-- costs nothing. One that has seen no page for this long is closed, because
 	-- it holds rows in memory on both sides. Zero keeps them until the result is
 	-- replaced or the process ends.
@@ -60,7 +60,7 @@ M.defaults = {
 	-- Validate the statement under the cursor on save. The server parses it
 	-- and never runs it, so this is safe for every kind of statement.
 	validate_on_save = true,
-	-- Stop a connection's sidecar after this long with nothing to do. Zero
+	-- Stop a connection's gripd after this long with nothing to do. Zero
 	-- keeps it alive for the whole session.
 	idle_timeout_seconds = 1800,
 	-- Roll back - never commit - a transaction that has seen no statement for

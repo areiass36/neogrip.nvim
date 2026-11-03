@@ -1,13 +1,13 @@
 -- What :NGripDoctor shows.
 --
 -- The self test matters more than a version string: it runs "select 1 as a,
--- 2 as b" through the whole path - JDK, driver jar, sidecar, connection - and
+-- 2 as b" through the whole path - JDK, driver jar, gripd, connection - and
 -- checks the column names, so a broken link shows up on a new machine instead
 -- of inside a real query.
 local connections = require("neogrip.connections")
 local jdbc = require("neogrip.bootstrap.jdbc")
 local jdk = require("neogrip.bootstrap.jdk")
-local sidecar = require("neogrip.sidecar")
+local gripd = require("neogrip.gripd")
 local runner = require("neogrip.runner")
 
 local M = {}
@@ -25,7 +25,7 @@ function M.report()
 	local java = jdk.java()
 	row(java ~= nil, "JDK (Temurin)", java or (jdk.dir .. " (downloads on first use)"))
 
-	row(sidecar.compiled(), "sidecar", sidecar.compiled() and sidecar.classes_dir or "builds on first use")
+	row(gripd.compiled(), "gripd", gripd.compiled() and gripd.classes_dir or "builds on first use")
 
 	local drivers = jdbc.drivers()
 	table.sort(drivers)
@@ -44,7 +44,7 @@ function M.report()
 	local kvstore_ok = pcall(require, "kvstore")
 	row(kvstore_ok, "kvstore.nvim", kvstore_ok and "available" or "missing: it holds every secret")
 
-	local live = sidecar.active()
+	local live = gripd.active()
 	row(true, "connected now", #live > 0 and table.concat(live, ", ") or "none")
 
 	local list = connections.all()
@@ -114,14 +114,14 @@ function M.self_test(connection, callback)
 			return callback(false, tostring(err.message))
 		end
 		if connection.driver == "mongodb" then
-			local info = sidecar.info(connection.id) or {}
+			local info = gripd.info(connection.id) or {}
 			return callback(true, tostring(info.product or "connected"))
 		end
 		local columns = result and result.columns or {}
 		if #columns ~= 2 or columns[1] ~= "a" or columns[2] ~= "b" then
 			return callback(false, "unexpected shape: " .. vim.inspect(columns))
 		end
-		local info = sidecar.info(connection.id) or {}
+		local info = gripd.info(connection.id) or {}
 		callback(true, ("%s · %d ms"):format(info.product or "ok", result.elapsed_ms or 0))
 	end)
 end

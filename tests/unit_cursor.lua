@@ -6,7 +6,7 @@ local check = support.check
 local execute = require("neogrip.execute")
 local grid = require("neogrip.grid")
 local runner = require("neogrip.runner")
-local sidecar = require("neogrip.sidecar")
+local gripd = require("neogrip.gripd")
 
 support.describe("cursor: the client names the result")
 
@@ -21,21 +21,21 @@ local sent = {}
 local answers = {}
 
 local saved = {
-	request = sidecar.request,
-	is_connected = sidecar.is_connected,
-	is_connected_to = sidecar.is_connected_to,
+	request = gripd.request,
+	is_connected = gripd.is_connected,
+	is_connected_to = gripd.is_connected_to,
 }
-sidecar.is_connected = function()
+gripd.is_connected = function()
 	return true
 end
-sidecar.is_connected_to = function()
+gripd.is_connected_to = function()
 	return true
 end
-sidecar.request = function(_, method, params, callback)
+gripd.request = function(_, method, params, callback)
 	sent[#sent + 1] = { method = method, params = params }
 	local answer = table.remove(answers, 1)
 	if answer then
-		-- The sidecar echoes the name of the result in every batch, so the
+		-- Gripd echoes the name of the result in every batch, so the
 		-- fake does too unless a case is deliberately breaking that.
 		if answer.hash == nil and params and params.hash then
 			answer.hash = params.hash
@@ -99,9 +99,9 @@ runner.release(connection, "abc123abc123")
 check("goes out as a cancel naming it", sent[1] and sent[1].method, "cancel")
 check("with the hash", sent[1] and sent[1].params.hash, "abc123abc123")
 
-sidecar.request = saved.request
-sidecar.is_connected = saved.is_connected
-sidecar.is_connected_to = saved.is_connected_to
+gripd.request = saved.request
+gripd.is_connected = saved.is_connected
+gripd.is_connected_to = saved.is_connected_to
 
 support.describe("grid: pages are kept, so going back is a redraw")
 

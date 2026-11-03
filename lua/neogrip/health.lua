@@ -24,11 +24,11 @@ function M.check()
 		health.info("no JDK yet; it downloads on first connect (about 190 MB, once)")
 	end
 
-	local sidecar = require("neogrip.sidecar")
-	if sidecar.compiled() then
-		health.ok("sidecar compiled: " .. sidecar.classes_dir)
+	local gripd = require("neogrip.gripd")
+	if gripd.compiled() then
+		health.ok("gripd compiled: " .. gripd.classes_dir)
 	else
-		health.info("sidecar not compiled yet; it builds on first connect")
+		health.info("gripd not compiled yet; it builds on first connect")
 	end
 
 	local count = #require("neogrip.connections").all()

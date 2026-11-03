@@ -1,4 +1,4 @@
-# The neogrip sidecar
+# gripd
 
 A standalone JSON-RPC program that speaks JDBC to databases. Neovim is its first client, not its owner:
 anything that can pipe NDJSON JSON-RPC 2.0 over stdio can run it. The wire contract lives in

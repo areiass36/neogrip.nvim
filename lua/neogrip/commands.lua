@@ -91,9 +91,9 @@ function M.setup()
 	end, { desc = "Cancel the running query" })
 
 	command("NGripDisconnect", function(args)
-		local sidecar = require("neogrip.sidecar")
+		local gripd = require("neogrip.gripd")
 		if args.bang then
-			sidecar.disconnect_all()
+			gripd.disconnect_all()
 			return neogrip.notify("disconnected from every database")
 		end
 		local id = args.args
@@ -104,16 +104,16 @@ function M.setup()
 			end
 			id = connection.id
 		end
-		if not sidecar.is_connected(id) then
+		if not gripd.is_connected(id) then
 			return neogrip.notify(("%s is not connected"):format(id))
 		end
-		sidecar.disconnect(id)
+		gripd.disconnect(id)
 		neogrip.notify(("disconnected from %s"):format(id))
 	end, {
 		nargs = "?",
 		bang = true,
 		complete = connection_names,
-		desc = "Stop a connection's sidecar (! stops every one)",
+		desc = "Stop a connection's gripd (! stops every one)",
 	})
 
 	command("NGripNewQuery", function()
@@ -157,7 +157,7 @@ function M.setup()
 			end
 			-- The same cancel the runner uses: it reaches the sweep's own
 			-- threads as well as a running statement.
-			require("neogrip.sidecar").request(connection, "cancel", {}, function() end)
+			require("neogrip.gripd").request(connection, "cancel", {}, function() end)
 			return neogrip.notify("cancelling the introspect")
 		end
 
@@ -234,7 +234,7 @@ function M.setup()
 
 	command("NGripDoctor", function()
 		require("neogrip.doctor").show()
-	end, { desc = "Check the sidecar, drivers and connections" })
+	end, { desc = "Check gripd, drivers and connections" })
 end
 
 --- Write a starter project file, but only once .gitignore covers it: the file

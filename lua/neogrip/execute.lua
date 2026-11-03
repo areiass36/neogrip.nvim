@@ -46,7 +46,7 @@ local function start_progress(connection, handle)
 end
 
 --- The one mechanical refusal: a write against a connection that says it is
---- read-only never runs. The sidecar refuses as well, because the Lua
+--- read-only never runs. Gripd refuses as well, because the Lua
 --- classifier can be wrong about an exotic statement.
 --- @return boolean refused
 local function refused(connection, sql)
@@ -120,7 +120,7 @@ local function execute_statement(p)
 			result.order_by = p.order_by
 			result.descending = p.descending
 			-- The grid is about to hold a different result, and the one it held
-			-- is not coming back: the sidecar can let that cursor go now rather
+			-- is not coming back: gripd can let that cursor go now rather
 			-- than wait for its idle sweep (ADR-0031).
 			local previous_buf = grid.current_buf()
 			local previous = previous_buf and grid.state(previous_buf)
@@ -281,7 +281,7 @@ end
 
 --- Move a page. Backwards is always a redraw and forwards usually is too: a
 --- page already fetched never left the editor, and the one after it is the next
---- batch of the cursor the sidecar still holds (ADR-0031). Nothing re-runs the
+--- batch of the cursor gripd still holds (ADR-0031). Nothing re-runs the
 --- statement, so no page boundary can show a changed world.
 function M.page(state, delta)
 	if not state then

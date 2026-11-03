@@ -4,7 +4,7 @@
 -- living forever.
 local support = require("tests.support")
 local check, note = support.check, support.note
-local sidecar = require("neogrip.sidecar")
+local gripd = require("neogrip.gripd")
 
 if not support.has_jdk() then
 	support.describe("live/cursor")
@@ -157,7 +157,7 @@ support.describe("live/cursor: lifetime")
 
 local open = support.run(pg, sql, { limit = 10 })
 local cancelled = support.sync(function(done)
-	sidecar.request(pg, "cancel", { hash = open.hash }, function(result, err)
+	gripd.request(pg, "cancel", { hash = open.hash }, function(result, err)
 		done(result, err)
 	end)
 end)

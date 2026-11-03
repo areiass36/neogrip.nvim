@@ -45,23 +45,23 @@ check(
 support.describe("execute: timeout_ms = 0 runs without arming the watchdog")
 
 -- With a zero timeout the runner must not schedule the stopped-process
--- watchdog; otherwise 0 would still kill the query at ~10s. A mock sidecar
+-- watchdog; otherwise 0 would still kill the query at ~10s. A mock gripd
 -- that never answers lets us prove nothing fires.
 local runner = require("neogrip.runner")
 local config = require("neogrip.config")
-local sidecar = require("neogrip.sidecar")
+local gripd = require("neogrip.gripd")
 
 config.setup({ timeout_ms = 0 })
-local saved_connected_to = sidecar.is_connected_to
-local saved_is_connected = sidecar.is_connected
-local saved_request = sidecar.request
-sidecar.is_connected_to = function()
+local saved_connected_to = gripd.is_connected_to
+local saved_is_connected = gripd.is_connected
+local saved_request = gripd.request
+gripd.is_connected_to = function()
 	return true
 end
-sidecar.is_connected = function()
+gripd.is_connected = function()
 	return true
 end
-sidecar.request = function() end -- never calls back: the query "hangs"
+gripd.request = function() end -- never calls back: the query "hangs"
 
 local fired = nil
 runner.run({
@@ -78,9 +78,9 @@ vim.wait(11000, function()
 end, 100)
 support.check("a zero timeout never trips the watchdog", fired, nil)
 
-sidecar.is_connected_to = saved_connected_to
-sidecar.is_connected = saved_is_connected
-sidecar.request = saved_request
+gripd.is_connected_to = saved_connected_to
+gripd.is_connected = saved_is_connected
+gripd.request = saved_request
 config.setup({})
 
 support.describe("execute: a visual selection of several statements runs them in sequence")

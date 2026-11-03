@@ -4,7 +4,7 @@
 -- user's toolchain - a version manager with no version selected, a JRE without
 -- javac, a JDK 8 from years ago - so a Temurin JDK is downloaded into the
 -- plugin's data directory and that one is used, always. A JDK rather than a
--- JRE because the sidecar is compiled on first use (ADR-0004).
+-- JRE because gripd is compiled on first use (ADR-0004).
 --
 -- Releases are pinned to exact artifacts with their SHA-256, taken from the
 -- Adoptium API on 2026-10-29, because "latest" cannot be checksummed
@@ -47,7 +47,7 @@ local RELEASES = {
 
 local M = {}
 
--- The Java language level the sidecar is written to and, more importantly,
+-- The Java language level gripd is written to and, more importantly,
 -- compiled against: the pinned runtime above is what has to load the classes,
 -- and a javac from a newer JDK would otherwise emit bytecode it cannot read
 -- (ADR-0005; virtual threads are what put the floor at 21, ADR-0028).
@@ -94,7 +94,7 @@ function M.java()
 	return find_executable("java")
 end
 
---- @return string|nil path to javac, needed to build the sidecar
+--- @return string|nil path to javac, needed to build gripd
 function M.javac()
 	return find_executable("javac")
 end
@@ -117,7 +117,7 @@ function M.ensure(on_done)
 		return on_done(false)
 	end
 
-	neogrip.notify("downloading a JDK for the sidecar (about 190 MB, once)")
+	neogrip.notify("downloading a JDK for gripd (about 190 MB, once)")
 	-- The archive has a single jdk-<version> directory at its root.
 	download.archive("temurin jdk", release.url, release.sha256, M.dir, 1, function(ok)
 		if ok and not M.installed() then

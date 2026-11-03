@@ -5,11 +5,11 @@
 -- The pieces, in the order setup() wires them (growing as phases land):
 --
 --   config       the defaults and the user's setup(opts) table
---   rpc          the JSON-RPC client the sidecar is spoken through
+--   rpc          the JSON-RPC client gripd is spoken through
 --   bootstrap    the pinned JDK and driver downloads
 --   connections  the two config levels (global, project) and resolution
 --   secrets      every secret, from kvstore.nvim at connect time
---   sidecar      one Java process per connection
+--   gripd      one Java process per connection
 --   runner       statements queued per connection, cancelled on the server
 --   grid         the result buffer; actions are the user's to map
 --   commands     the :NGrip* commands
@@ -17,7 +17,7 @@ local M = {}
 
 M.state_dir = vim.fn.stdpath("state") .. "/neogrip"
 
--- Downloaded artifacts (JDK, driver jars) and compiled sidecar classes live
+-- Downloaded artifacts (JDK, driver jars) and compiled gripd classes live
 -- here, apart from state, so wiping one never costs the other.
 M.data_dir = vim.fn.stdpath("data") .. "/neogrip"
 

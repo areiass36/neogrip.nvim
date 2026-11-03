@@ -13,7 +13,7 @@
 -- reach.
 local config = require("neogrip.config")
 local neogrip = require("neogrip")
-local sidecar = require("neogrip.sidecar")
+local gripd = require("neogrip.gripd")
 local runner = require("neogrip.runner")
 local store = require("neogrip.schema.store")
 
@@ -143,7 +143,7 @@ end
 --- re-pointed at another database or catalog counts as not connected.
 --- @param callback fun(err: string|nil)
 local function connected(connection, callback)
-	if sidecar.is_connected_to(connection) then
+	if gripd.is_connected_to(connection) then
 		return callback(nil)
 	end
 	runner.run({
@@ -153,14 +153,14 @@ local function connected(connection, callback)
 		limit = 1,
 		background = true,
 	}, function(_, err)
-		if err and not sidecar.is_connected(connection.id) then
+		if err and not gripd.is_connected(connection.id) then
 			return callback(err.message)
 		end
 		callback(nil)
 	end)
 end
 
---- Ask the sidecar a catalog question.
+--- Ask gripd a catalog question.
 ---
 --- `whole` keeps the entire answer instead of just its rows: the details
 --- method reports a primary key, indexes and foreign keys alongside the
@@ -174,7 +174,7 @@ local function ask(connection, method, params, key, callback, whole)
 	end
 
 	local function send()
-		sidecar.request(connection, method, params, function(result, err)
+		gripd.request(connection, method, params, function(result, err)
 			if err then
 				return callback(nil, err.message or "catalog lookup failed")
 			end
@@ -401,7 +401,7 @@ function M.native_ddl(connection, schema, table_name, callback, catalog)
 			return callback(nil, connect_err)
 		end
 		local params = { catalog = catalog, schema = schema, table = table_name }
-		sidecar.request(connection, "catalog/nativeDdl", params, function(result, err)
+		gripd.request(connection, "catalog/nativeDdl", params, function(result, err)
 			if err then
 				return callback(nil, err.message or "the server would not describe the table")
 			end
@@ -462,7 +462,7 @@ function M.introspect(connection, catalog, opts, callback)
 		if connect_err then
 			return finish(nil, connect_err)
 		end
-		sidecar.request(connection, "catalog/introspect", {
+		gripd.request(connection, "catalog/introspect", {
 			catalog = catalog,
 			path = path,
 			parallelism = opts.parallelism or settings.introspect_parallelism,

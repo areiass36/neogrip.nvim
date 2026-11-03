@@ -74,8 +74,8 @@ connections_module.register(readonly)
 -- The Lua classifier is the first layer.
 local _, lua_refused = support.run(readonly, "delete from torture", { mode = "exec" })
 -- The classifier never sees this path (support.run goes straight to the
--- runner), so the sidecar's own keyword check answers.
-check("the sidecar refuses a write on a readonly connection", lua_refused ~= nil, true)
+-- runner), so gripd's own keyword check answers.
+check("gripd refuses a write on a readonly connection", lua_refused ~= nil, true)
 if lua_refused then
 	note("refusal: " .. tostring(lua_refused.message))
 end

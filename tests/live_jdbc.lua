@@ -3,7 +3,7 @@
 local support = require("tests.support")
 local check, note = support.check, support.note
 local neogrip = require("neogrip")
-local sidecar = require("neogrip.sidecar")
+local gripd = require("neogrip.gripd")
 
 if not support.has_jdk() then
 	support.describe("live/jdbc")
@@ -78,8 +78,8 @@ for _, driver in ipairs(order) do
 		end
 
 		-- The process is reused, which is the whole point of the daemon.
-		check("the connection is live", sidecar.is_connected(connection.id), true)
-		local info = sidecar.info(connection.id)
+		check("the connection is live", gripd.is_connected(connection.id), true)
+		local info = gripd.info(connection.id)
 		note(("server: %s"):format(tostring(info and info.product)))
 		local started = vim.uv.now()
 		support.run(

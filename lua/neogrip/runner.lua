@@ -1,6 +1,6 @@
--- Running one statement, through the sidecar that owns the connection.
+-- Running one statement, through gripd that owns the connection.
 --
--- The process is started on first use and kept (lua/neogrip/sidecar.lua), so
+-- The process is started on first use and kept (lua/neogrip/gripd.lua), so
 -- this layer only has to queue requests, apply timeouts and translate the
 -- answer. The heavy lifting - paging without rewriting SQL, converting types,
 -- telling NULL from an empty string - is done on the Java side, where JDBC
@@ -11,7 +11,7 @@
 -- statement run again, and what lets a cancel address one result.
 local neogrip = require("neogrip")
 local errors = require("neogrip.errors")
-local sidecar = require("neogrip.sidecar")
+local gripd = require("neogrip.gripd")
 local config = require("neogrip.config")
 local secrets = require("neogrip.secrets")
 
@@ -21,11 +21,11 @@ local queues = {}
 local running = {}
 local sequence = 0
 -- Whether a connection's session has an explicit transaction open, from the
--- sidecar's own answer to an intercepted BEGIN/COMMIT/ROLLBACK (ADR-0013).
+-- gripd's own answer to an intercepted BEGIN/COMMIT/ROLLBACK (ADR-0013).
 local transactions = {}
 
 --- The name a result is known by, minted here and never interpreted by the
---- sidecar. Random rather than sequential because it is one call either way and
+--- gripd. Random rather than sequential because it is one call either way and
 --- nothing should be tempted to do arithmetic on it; a suite that needs a
 --- predictable one replaces this function.
 function M.hash()
@@ -48,7 +48,7 @@ local function finish(handle, result, err)
 	handle.callback(result, err)
 end
 
---- Turn the sidecar's answer into what the rest of the plugin expects.
+--- Turn gripd's answer into what the rest of the plugin expects.
 local function translate(handle, response)
 	local request = handle.request
 
@@ -56,12 +56,12 @@ local function translate(handle, response)
 		transactions[request.connection.id] = response.transaction == true
 	end
 
-	-- The sidecar echoes the name of the result in every batch. A mismatch
+	-- Gripd echoes the name of the result in every batch. A mismatch
 	-- means rows of one result would land in another result's grid, which
 	-- nothing downstream could notice, so it fails loudly here instead.
 	if handle.hash and type(response.hash) == "string" and response.hash ~= handle.hash then
 		return finish(handle, nil, {
-			message = ("the sidecar answered for result %s, not %s"):format(response.hash, handle.hash),
+			message = ("gripd answered for result %s, not %s"):format(response.hash, handle.hash),
 		})
 	end
 
@@ -86,7 +86,7 @@ local function translate(handle, response)
 	local rows = {}
 	for _, source in ipairs(type(response.rows) == "table" and response.rows or {}) do
 		local row = {}
-		-- JSON null decodes to vim.NIL rather than nil, so the row the sidecar
+		-- JSON null decodes to vim.NIL rather than nil, so the row gripd
 		-- sent has its own length even when its last cells are empty.
 		for index = 1, (columns and #columns or #source) do
 			local value = source[index]
@@ -153,7 +153,7 @@ local function dispatch(handle)
 		}
 	end
 
-	handle.request_id = sidecar.request(connection, method, params, function(result, err)
+	handle.request_id = gripd.request(connection, method, params, function(result, err)
 		if handle.cancelled then
 			return finish(handle, nil, { message = "cancelled", cancelled = true })
 		end
@@ -171,9 +171,9 @@ local function dispatch(handle)
 	if timeout_ms > 0 then
 		handle.timer = vim.defer_fn(function()
 			if not handle.done then
-				neogrip.notify("the sidecar stopped answering; restarting it", vim.log.levels.WARN)
-				sidecar.disconnect(connection.id)
-				finish(handle, nil, { message = "timed out waiting for the sidecar" })
+				neogrip.notify("gripd stopped answering; restarting it", vim.log.levels.WARN)
+				gripd.disconnect(connection.id)
+				finish(handle, nil, { message = "timed out waiting for gripd" })
 			end
 		end, timeout_ms + 10000)
 	end
@@ -225,7 +225,7 @@ function M.run(request, callback)
 	-- A query names the result it is about to open; a continuation is given the
 	-- name of the result it continues. Everything else has no result to name -
 	-- including a background query, which is a sample or a probe that nobody
-	-- will ever page, and naming it would leave the sidecar holding a cursor
+	-- will ever page, and naming it would leave gripd holding a cursor
 	-- for a result no one can ask about.
 	if request.mode == "next" then
 		handle.hash = request.hash
@@ -239,7 +239,7 @@ function M.run(request, callback)
 	local connection = request.connection
 	request.timeout_ms = request.timeout_ms or connection.timeout_ms or config.get().timeout_ms
 
-	if sidecar.is_connected_to(connection) then
+	if gripd.is_connected_to(connection) then
 		enqueue(handle)
 		return handle
 	end
@@ -250,7 +250,7 @@ function M.run(request, callback)
 		end
 		-- Kept only so error messages can be scrubbed of it; never logged.
 		handle.password = auth and auth.password or nil
-		sidecar.connect(connection, auth, function(connected, connect_err)
+		gripd.connect(connection, auth, function(connected, connect_err)
 			if not connected then
 				local err = type(connect_err) == "table"
 						and errors.from_rpc(connect_err, { password = handle.password })
@@ -273,21 +273,21 @@ function M.cancel(handle)
 	end
 	handle.cancelled = true
 	local connection = handle.request.connection
-	if sidecar.is_connected(connection.id) then
-		sidecar.request(connection, "cancel", { hash = handle.hash }, function() end)
+	if gripd.is_connected(connection.id) then
+		gripd.request(connection, "cancel", { hash = handle.hash }, function() end)
 	end
 	finish(handle, nil, { message = "cancelled", cancelled = true })
 	return true
 end
 
 --- Let go of an open result nobody is looking at any more. Fire and forget: the
---- sidecar closes it on its own once idle anyway, so a lost answer costs
+--- gripd closes it on its own once idle anyway, so a lost answer costs
 --- nothing and nothing waits for this.
 function M.release(connection, hash)
-	if not hash or not sidecar.is_connected(connection.id) then
+	if not hash or not gripd.is_connected(connection.id) then
 		return
 	end
-	sidecar.request(connection, "cancel", { hash = hash }, function() end)
+	gripd.request(connection, "cancel", { hash = hash }, function() end)
 end
 
 function M.cancel_all()
@@ -302,10 +302,10 @@ function M.cancel_all()
 end
 
 --- The statusline's [TX] flag: an explicit transaction is open on this
---- connection's session. Dropped with the process, because the sidecar rolls
+--- connection's session. Dropped with the process, because gripd rolls
 --- back on the way out (ADR-0013).
 function M.in_transaction(connection_id)
-	return transactions[connection_id] == true and sidecar.is_connected(connection_id)
+	return transactions[connection_id] == true and gripd.is_connected(connection_id)
 end
 
 --- @return table[] handles running or queued
@@ -322,7 +322,7 @@ function M.setup()
 		group = vim.api.nvim_create_augroup("NeogripRunner", { clear = true }),
 		callback = function()
 			M.cancel_all()
-			sidecar.disconnect_all()
+			gripd.disconnect_all()
 		end,
 	})
 end

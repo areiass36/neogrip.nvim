@@ -68,7 +68,7 @@ jobs:
       - name: Run unit and live suites
         # The JDK comes from setup-java so CI never downloads 190 MB; live
         # suites that need a database server skip on runners without one, and
-        # the DuckDB-backed ones run everywhere - real sidecar coverage on all
+        # the DuckDB-backed ones run everywhere - real gripd coverage on all
         # three platforms, including the Windows EOF-termination path.
         env:
           NEOGRIP_TEST_JDK: ${{ env.JAVA_HOME }}

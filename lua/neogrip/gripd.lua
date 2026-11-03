@@ -1,5 +1,5 @@
--- The Java sidecar's lifecycle: compile it on first use, launch it, shake
--- hands, and stop it by closing its stdin (ADR-0003, ADR-0004).
+-- The lifecycle of gripd, the Java daemon: compile it on first use, launch it,
+-- shake hands, and stop it by closing its stdin (ADR-0003, ADR-0004).
 --
 -- The argv never carries anything database-related; connection parameters and
 -- secrets travel in the connect request (ADR-0009).
@@ -52,7 +52,7 @@ function M.build(on_done)
 	end
 	local files = sources()
 	if #files == 0 then
-		return on_done(false, "no sidecar sources found under " .. M.sources_dir)
+		return on_done(false, "no gripd sources found under " .. M.sources_dir)
 	end
 
 	-- The layout before gripd left these trees behind. Nothing loads them, but
@@ -65,7 +65,7 @@ function M.build(on_done)
 	end
 
 	vim.fn.mkdir(M.classes_dir, "p")
-	-- -parameters keeps parameter names for the sidecar's named binding.
+	-- -parameters keeps parameter names for gripd's named binding.
 	--
 	-- --release pins the class file version to the JDK this plugin downloads
 	-- and runs (ADR-0005), rather than to whichever javac happened to be
@@ -88,7 +88,7 @@ function M.build(on_done)
 		{ text = true },
 		vim.schedule_wrap(function(result)
 			if result.code ~= 0 then
-				return on_done(false, "sidecar compilation failed: " .. (result.stderr or ""))
+				return on_done(false, "gripd compilation failed: " .. (result.stderr or ""))
 			end
 			pcall(vim.fn.writefile, { tostring(protocol.VERSION) }, stamp_file)
 			on_done(true, nil)
@@ -96,7 +96,7 @@ function M.build(on_done)
 	)
 end
 
---- JDK present and sidecar compiled, downloading and building as needed.
+--- JDK present and gripd compiled, downloading and building as needed.
 --- @param on_done fun(ok: boolean, err: string|nil)
 function M.ensure(on_done)
 	jdk.ensure(function(jdk_ok)
@@ -110,9 +110,9 @@ function M.ensure(on_done)
 	end)
 end
 
---- Spawn a sidecar and complete the handshake. opts.jar puts one driver on
+--- Spawn gripd and complete the handshake. opts.jar puts one driver on
 --- the classpath (ADR-0003: each driver loads alone); opts.handlers goes to
---- the rpc client. on_ready(sidecar, err) gets the live client or a message.
+--- the rpc client. on_ready(gripd, err) gets the live client or a message.
 function M.launch(opts, on_ready)
 	opts = opts or {}
 	local java = jdk.java()
@@ -141,31 +141,31 @@ function M.launch(opts, on_ready)
 		"neogrip.gripd.Daemon",
 	}
 
-	local sidecar = client.start(command, opts.handlers)
-	sidecar:request("initialize", {
+	local gripd = client.start(command, opts.handlers)
+	gripd:request("initialize", {
 		protocolVersion = protocol.VERSION,
 		clientInfo = { name = "neogrip.nvim" },
 	}, function(result, err)
 		if err then
-			sidecar:kill()
+			gripd:kill()
 			local reason = err.message or "initialize failed"
 			return on_ready(nil, reason)
 		end
-		on_ready(sidecar, nil, result)
+		on_ready(gripd, nil, result)
 	end)
 end
 
 --- The shutdown contract: notify, close stdin, and give the process 500 ms
 --- before the SIGTERM backstop.
-function M.stop(sidecar)
-	if not sidecar then
+function M.stop(gripd)
+	if not gripd then
 		return
 	end
-	sidecar:notify("shutdown")
-	sidecar:close()
+	gripd:notify("shutdown")
+	gripd:close()
 	vim.defer_fn(function()
-		if not sidecar.exited then
-			sidecar:kill()
+		if not gripd.exited then
+			gripd:kill()
 		end
 	end, 500)
 end
@@ -175,7 +175,7 @@ end
 -- connection at another database and the process must be replaced, not reused.
 local processes = {}
 
---- JDK present, sidecar compiled, and this driver's jar installed.
+--- JDK present, gripd compiled, and this driver's jar installed.
 --- @param on_done fun(jar: string|nil, err: string|nil)
 function M.ensure_driver(driver, on_done)
 	M.ensure(function(ok, err)
@@ -189,7 +189,7 @@ end
 --- @return boolean connected to this exact connection, url included
 function M.is_connected_to(connection)
 	local entry = processes[connection.id]
-	if not entry or entry.sidecar.exited then
+	if not entry or entry.gripd.exited then
 		return false
 	end
 	local url = require("neogrip.dsn").build(connection)
@@ -200,7 +200,7 @@ end
 --- the one a caller about to send statements must use.
 function M.is_connected(id)
 	local entry = processes[id]
-	return entry ~= nil and not entry.sidecar.exited
+	return entry ~= nil and not entry.gripd.exited
 end
 
 --- Open a connection's process and connect it, replacing a process bound to a
@@ -215,7 +215,7 @@ function M.connect(connection, auth, on_done)
 	end
 
 	local existing = processes[connection.id]
-	if existing and not existing.sidecar.exited then
+	if existing and not existing.gripd.exited then
 		if existing.url == url then
 			return on_done(true, nil)
 		end
@@ -255,7 +255,7 @@ function M.connect(connection, auth, on_done)
 					return on_done(false, connect_err)
 				end
 				processes[connection.id] = {
-					sidecar = launched,
+					gripd = launched,
 					url = url,
 					product = result.product,
 					driver = result.driver,
@@ -270,10 +270,10 @@ end
 --- Send a request on a connection's live process.
 function M.request(connection, method, params, callback)
 	local entry = processes[connection.id]
-	if not entry or entry.sidecar.exited then
+	if not entry or entry.gripd.exited then
 		return callback(nil, { code = protocol.ERRORS.client_closed, message = "not connected" })
 	end
-	return entry.sidecar:request(method, params, callback)
+	return entry.gripd:request(method, params, callback)
 end
 
 --- What :NGripDoctor shows about a live connection.
@@ -286,8 +286,8 @@ function M.info(id)
 		product = entry.product,
 		driver = entry.driver,
 		capabilities = entry.capabilities,
-		stderr = entry.sidecar:stderr(),
-		pid = entry.sidecar.process and entry.sidecar.process.pid,
+		stderr = entry.gripd:stderr(),
+		pid = entry.gripd.process and entry.gripd.process.pid,
 	}
 end
 
@@ -295,7 +295,7 @@ end
 function M.active()
 	local ids = {}
 	for id, entry in pairs(processes) do
-		if not entry.sidecar.exited then
+		if not entry.gripd.exited then
 			ids[#ids + 1] = id
 		end
 	end
@@ -307,7 +307,7 @@ function M.disconnect(id)
 	local entry = processes[id]
 	processes[id] = nil
 	if entry then
-		M.stop(entry.sidecar)
+		M.stop(entry.gripd)
 	end
 end
 

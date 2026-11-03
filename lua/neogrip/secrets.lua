@@ -2,7 +2,7 @@
 --
 -- Every secret is read from kvstore.nvim and from nowhere else (ADR-0007):
 -- the connection file stores key names, this module turns them into values at
--- connect time, and the values ride to the sidecar inside the connect request
+-- connect time, and the values ride to gripd inside the connect request
 -- (ADR-0009). Nothing is cached here: kvstore's own vault is the cache, its
 -- read is synchronous, and connects are rare.
 local M = {}

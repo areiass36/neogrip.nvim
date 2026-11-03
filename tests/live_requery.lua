@@ -130,7 +130,7 @@ check("the scratch connection is registered", connections_module.get(view_connec
 local scratch_query = require("neogrip.buffer").new_query(view_connection, "select 1 as a;")
 check("a buffer opened on it resolves to it", resolve.for_buf(scratch_query).id, view_connection.id)
 check("and not to the project's database", resolve.for_buf(scratch_query).driver, "duckdb")
-support.describe("live/requery: the full export streams from the sidecar")
+support.describe("live/requery: the full export streams from gripd")
 vim.api.nvim_set_current_buf(bufnr)
 support.sync(function(done)
 	execute.run({ bufnr = bufnr, on_done = done })
@@ -149,12 +149,12 @@ local exported = support.sync(function(done)
 end, 90000)
 check("the export reports its row count", exported and exported.rows_written, 2)
 check("and the file is in place", vim.fn.filereadable(full), 1)
--- The sidecar's own csv writer, which nothing asserted before: the header
+-- Gripd's own csv writer, which nothing asserted before: the header
 -- check further up is the Lua encoder on a different path, so the quoting
 -- rules and the null marker of the streamed export were only ever covered by
 -- a row count.
 local full_lines = vim.fn.readfile(full)
-check("with the sidecar's own header", full_lines[1], "id,s_comma,s_null,cjk")
+check("with gripd's own header", full_lines[1], "id,s_comma,s_null,cjk")
 check("a comma quoted, a null marked", full_lines[2], '1,"a,b",\\N,日本語')
 local bad_path = ("%s/full.xlsx"):format(export.results_dir())
 local _, refused = support.sync(function(done)

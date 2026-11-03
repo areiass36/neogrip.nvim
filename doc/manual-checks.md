@@ -9,13 +9,13 @@ Automation covers the checksum logic against a local file; the real network path
 
 1. Delete the plugin's data directory (`:echo stdpath("data")` + `/neogrip`).
 2. Open a project with a DuckDB connection and run a statement.
-3. Confirm the JDK download starts, the checksum passes, the sidecar compiles and the statement runs.
+3. Confirm the JDK download starts, the checksum passes, gripd compiles and the statement runs.
 4. Repeat with a PostgreSQL connection to confirm a driver jar download.
 
 ## Secrets never reach a command line
 
 1. Connect to a password-protected database.
-2. Find the sidecar PID with `:NGripDoctor`.
+2. Find gripd PID with `:NGripDoctor`.
 3. Inspect the process command line (`ps -o command -p <pid>` on Unix,
    `Get-CimInstance Win32_Process -Filter "ProcessId=<pid>" | Select CommandLine` on Windows).
 4. Confirm no password, user name or JDBC URL appears in it.
@@ -29,7 +29,7 @@ names `:KVStore <key>`.
 ## Windows child-process termination
 
 1. On Windows, run a long statement and kill the Neovim process from Task Manager (no clean exit).
-2. Confirm the sidecar java.exe disappears within a few seconds (stdin EOF path).
+2. Confirm gripd java.exe disappears within a few seconds (stdin EOF path).
 
 ## Token authentication
 

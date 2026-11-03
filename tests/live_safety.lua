@@ -19,7 +19,7 @@ if not support.reachable(pg) then
 	note("skipped: nothing listening (tests/containers.sh up)")
 else
 	local runner = require("neogrip.runner")
-	local sidecar = require("neogrip.sidecar")
+	local gripd = require("neogrip.gripd")
 	local finished = false
 	runner.run({ connection = pg, sql = "select pg_sleep(3), 1 as a", mode = "query", limit = 1 }, function()
 		finished = true
@@ -29,8 +29,8 @@ else
 		return false
 	end, 100)
 
-	local pid = (sidecar.info(pg.id) or {}).pid
-	check("the sidecar is running", pid ~= nil, true)
+	local pid = (gripd.info(pg.id) or {}).pid
+	check("gripd is running", pid ~= nil, true)
 
 	-- By pid, not by pattern: this must look at exactly the process we
 	-- started, and nothing else that happens to mention it.
@@ -56,7 +56,7 @@ else
 	)
 	check("nor the user name", command_line:find("testuser", 1, true), nil)
 	check("nor the jdbc url", command_line:find("jdbc:", 1, true), nil)
-	check("and it really is the sidecar", command_line:find("neogrip.gripd.Daemon", 1, true) ~= nil, true)
+	check("and it really is gripd", command_line:find("neogrip.gripd.Daemon", 1, true) ~= nil, true)
 
 	support.wait(function()
 		return finished
@@ -146,12 +146,12 @@ else
 end
 
 -- The editor's classifier refuses a write on a read-only connection before it
--- is ever sent, which is why the sidecar's own guard - the second of the three
+-- is ever sent, which is why gripd's own guard - the second of the three
 -- layers in ADR-0016 - is only reached by a request that skips the classifier.
 -- This sends one, on a file database that needs no server.
-support.describe("live/safety: the sidecar refuses a write of its own accord")
+support.describe("live/safety: gripd refuses a write of its own accord")
 do
-	local sidecar = require("neogrip.sidecar")
+	local gripd = require("neogrip.gripd")
 	local protocol = require("neogrip.rpc.protocol")
 	local connections_module = require("neogrip.connections")
 	-- Its own file, written and then released: one DuckDB file takes one
@@ -164,14 +164,14 @@ do
 	connections_module.register(duck)
 
 	support.run(writer, "create table guarded as select 1 as id", { mode = "exec" })
-	sidecar.disconnect(writer.id)
+	gripd.disconnect(writer.id)
 	support.wait(function()
-		return not sidecar.is_connected(writer.id)
+		return not gripd.is_connected(writer.id)
 	end, 10000)
 
 	check("the read-only connection opens", support.scalar(duck, "select count(*) from guarded"), 1)
 	local _, refused = support.sync(function(done)
-		sidecar.request(duck, "exec", { sql = "delete from guarded" }, function(result, err)
+		gripd.request(duck, "exec", { sql = "delete from guarded" }, function(result, err)
 			done(result, err)
 		end)
 	end)

@@ -1,6 +1,6 @@
 # Project Instructions
 
-Rules for every change made in this repository. This is a Neovim plugin written in Lua with a Java sidecar
+Rules for every change made in this repository. This is a Neovim plugin written in Lua with a Java daemon, gripd,
 that turns the editor into a SQL and data-manipulation client, so correctness of the protocol contract,
 secret hygiene and portability rules are strict.
 
@@ -62,7 +62,7 @@ javac --release 21 -parameters -Xlint:all -Werror -d build/classes $(find java -
   never fail, when the server is not there.
 - Tests never use real credentials and never require the real kvstore.nvim: `tests/minimal.lua` preloads
   `tests/fake_kvstore.lua` in its place.
-- Run the live suites with an isolated `XDG_DATA_HOME` (as CI does). The sidecar compiles into the
+- Run the live suites with an isolated `XDG_DATA_HOME` (as CI does). Gripd compiles into the
   plugin's real data directory otherwise, and a run whose `NEOGRIP_TEST_JDK` is newer than the pinned JDK
   then leaves a class cache the pinned runtime cannot load - which surfaces as every statement hanging,
   not as a build error.
@@ -73,7 +73,7 @@ These rules must never be broken, even for convenience, debugging or refactoring
 
 - Every secret comes from kvstore.nvim and from nowhere else. The connection file stores only kvstore key
   names, never values; a literal secret in `.nvim/database.json` is a hard validation error (ADR-0007).
-- A secret reaches the sidecar only inside the `connect` request on the stdio pipe, never in a command-line
+- A secret reaches gripd only inside the `connect` request on the stdio pipe, never in a command-line
   argument, an environment variable or a JDBC URL (ADR-0009).
 - A secret never appears in a log, a notification, an error message, a register or a buffer. Every message
   derived from a driver error passes through the redaction in `dsn.lua` before a user can see it.
@@ -83,7 +83,7 @@ These rules must never be broken, even for convenience, debugging or refactoring
 ## Protocol
 
 - `doc/protocol.md` is the source of truth for the Lua–Java contract: JSON-RPC 2.0, one JSON object per
-  line over stdio (ADR-0002). The sidecar's stdout carries protocol frames and nothing else; logs go to
+  line over stdio (ADR-0002). Gripd's stdout carries protocol frames and nothing else; logs go to
   stderr.
 - A change to the contract bumps the protocol version and is recorded in an ADR before implementation.
 - Bulk data (catalog snapshots, exports) moves through files written with temp-plus-atomic-rename, never
@@ -160,7 +160,7 @@ Commits follow Conventional Commits: `<type>(<scope>): <subject>`.
 - `commands`: the `:NGrip*` commands
 - `connections`: connection files, resolution and secrets
 - `rpc`: the JSON-RPC client and protocol definitions
-- `sidecar`: the Java process lifecycle and the Java sources
+- `gripd`: the Java process lifecycle and the Java sources
 - `runner`: request queueing and execution flow
 - `grid`: the result buffer, its actions, exports and requery
 - `explorer`: the schema explorer and document buffers

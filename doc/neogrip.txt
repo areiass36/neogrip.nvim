@@ -25,9 +25,9 @@ Neogrip turns Neovim into a SQL and data-manipulation client: pick which
 database a file runs against, run the statement under the cursor, read the
 result in a grid, and query that result again with SQL through DuckDB.
 
-A Lua plugin talks JSON-RPC over stdio to a small Java sidecar, which speaks
+A Lua plugin talks JSON-RPC over stdio to gripd, a small Java daemon, which speaks
 JDBC to the databases. The plugin downloads its own pinned, checksum-verified
-JDK and driver jars on first use and compiles the sidecar from the sources in
+JDK and driver jars on first use and compiles gripd from the sources in
 the repository - nothing to install.
 
 Engines: PostgreSQL, MySQL/MariaDB, SQL Server, Azure SQL, Trino, MongoDB,
@@ -121,9 +121,9 @@ project default, the last one used. `:NGripWhich` explains the answer.
 :NGripKeep [file]      Write the page somewhere it will not be cleaned up.
 :NGripNewQuery         A query buffer against this buffer's connection.
 :NGripDisconnect[!] [id]
-                       Stop a connection's sidecar; ! stops every one.
+                       Stop a connection's gripd; ! stops every one.
 :NGripInit             Write a starter .nvim/database.json.
-:NGripDoctor           Check the JDK, sidecar, drivers and connections.
+:NGripDoctor           Check the JDK, gripd, drivers and connections.
 
 ==============================================================================
 6. GRID ACTIONS                                 *neogrip-grid*
@@ -144,7 +144,7 @@ README carries a complete recipe).
 Yanks and exports always read the stored value, never the drawn text: what is
 on screen may be truncated.
 
-A result stays open on the sidecar as a cursor, so `page_next` continues it
+A result stays open on gripd as a cursor, so `page_next` continues it
 instead of running the statement again, and `page_prev` is a redraw of rows
 that never left the editor. Sorting is the exception: the order has to be the
 server's to cover every page, so it opens a new result. An open result is let

@@ -11,10 +11,10 @@ Windows and Linux, with no Java to install.
 
 ## How it works
 
-A Lua plugin in the editor talks JSON-RPC over stdio to a small Java sidecar, which speaks JDBC to the
+A Lua plugin in the editor talks JSON-RPC over stdio to gripd, a small Java daemon, which speaks JDBC to the
 databases. The plugin downloads its own pinned, checksum-verified JDK and driver jars on first use and
-compiles the sidecar from the sources in this repository — nothing to install, nothing on your PATH. The
-sidecar is a standalone program any JSON-RPC client can talk to; see [java/README.md](java/README.md).
+compiles gripd from the sources in this repository — nothing to install, nothing on your PATH. The
+gripd is a standalone program any JSON-RPC client can talk to; see [java/README.md](java/README.md).
 
 Engines: PostgreSQL, MySQL/MariaDB, SQL Server, Azure SQL, Trino, MongoDB, SQLite and DuckDB — DuckDB
 doubling as the engine that lets you re-query any result (or any CSV) with SQL: `:NGripResults` turns the
@@ -56,7 +56,7 @@ With lazy.nvim:
 | `:NGripResults` | Query the current result with SQL (DuckDB views `r1`, `r2`, …, alias `last`) |
 | `:NGripCsv <file>` | Query any CSV file with SQL |
 | `:NGripExport` / `:NGripKeep [file]` | Export the result (CSV/JSON, page or everything) / keep the page as CSV |
-| `:NGripNewQuery` / `:NGripDisconnect[!]` | Open a query buffer / stop the sidecar(s) |
+| `:NGripNewQuery` / `:NGripDisconnect[!]` | Open a query buffer / stop the gripd process(es) |
 | `:NGripInit` / `:NGripDoctor` | Write a starter project file / check the whole path |
 
 ## Keymaps
@@ -113,7 +113,7 @@ A statusline component is available too: `require("neogrip.statusline").componen
   and `production: true` is a visible signal — nothing more. The strongest protection is a database user
   with read-only permissions.
 - It does not store secrets. kvstore.nvim does, and the connection file holds only key names; secrets
-  reach the sidecar inside one request on the pipe, never in a command line or the environment.
+  reach gripd inside one request on the pipe, never in a command line or the environment.
 - It does not renew tokens. An expired bearer token fails the statement; store a fresh value under the
   same kvstore key and `:NGripDisconnect`.
 - It does not yet speak Entra ID interactive, service principal, managed identity or SSH tunnels.

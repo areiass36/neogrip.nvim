@@ -1,4 +1,4 @@
--- The rpc client against the mock sidecar: framing, correlation, errors,
+-- The rpc client against the mock gripd: framing, correlation, errors,
 -- server-initiated traffic and lifecycle. Everything here runs with no JVM and
 -- no network - the mock is another headless nvim.
 local support = require("tests.support")
@@ -7,7 +7,7 @@ local client = require("neogrip.rpc.client")
 
 support.describe("rpc client")
 
-local mock_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h") .. "/mock_sidecar.lua"
+local mock_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h") .. "/mock_gripd.lua"
 local mock_cmd = { vim.v.progpath, "--clean", "-l", mock_path }
 
 local function start(handlers)

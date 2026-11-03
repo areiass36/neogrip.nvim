@@ -1,5 +1,5 @@
--- A fake sidecar speaking the wire protocol, run as:
---   nvim --clean -l tests/mock_sidecar.lua
+-- A fake gripd speaking the wire protocol, run as:
+--   nvim --clean -l tests/mock_gripd.lua
 -- It implements just enough of doc/protocol.md for the rpc client's unit
 -- suite: handshake, correlation, errors, server-initiated traffic, garbage on
 -- stdout and a payload big enough to split across pipe chunks.

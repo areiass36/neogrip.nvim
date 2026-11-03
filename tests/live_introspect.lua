@@ -21,7 +21,7 @@ end
 support.seed_secrets()
 local explorer = require("neogrip.explorer")
 local icons = require("neogrip.icons")
-local sidecar = require("neogrip.sidecar")
+local gripd = require("neogrip.gripd")
 local schema = require("neogrip.schema")
 local store = require("neogrip.schema.store")
 
@@ -209,8 +209,8 @@ for _, engine in ipairs(ENGINES) do
 			check("a table's definition carries only its own columns", named, { "cnpj_raiz", "decisor" })
 
 			-- The point of the whole thing: stop the process and ask again.
-			sidecar.disconnect(connection.id)
-			check("the process can be stopped", sidecar.is_connected(connection.id), false)
+			gripd.disconnect(connection.id)
+			check("the process can be stopped", gripd.is_connected(connection.id), false)
 
 			local offline = nil
 			schema.columns(connection, where, "orders", function(records)
@@ -245,7 +245,7 @@ for _, engine in ipairs(ENGINES) do
 				by_name.big_orders and by_name.big_orders.text:find(icons.branch, 1, true) ~= nil,
 				true
 			)
-			check("none of which reopened the process", sidecar.is_connected(connection.id), false)
+			check("none of which reopened the process", gripd.is_connected(connection.id), false)
 
 			-- Asked again it replaces what it found before, and told to skip the
 			-- definitions it skips them.
@@ -272,9 +272,9 @@ for _, engine in ipairs(ENGINES) do
 		-- The driver holds the file open until its process is really gone, and
 		-- a delete before then fails quietly and leaves the fixture in the
 		-- state directory.
-		sidecar.disconnect(connection.id)
+		gripd.disconnect(connection.id)
 		vim.wait(5000, function()
-			return not sidecar.is_connected(connection.id)
+			return not gripd.is_connected(connection.id)
 		end, 50)
 		vim.wait(250, function()
 			return false
