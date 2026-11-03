@@ -2,11 +2,11 @@ package neogrip.app;
 
 import java.sql.SQLException;
 import neogrip.db.Database;
-import neogrip.db.ReadonlyGuard;
 import neogrip.db.Session;
 import neogrip.db.errors.Cancelled;
 import neogrip.db.errors.DataAccessException;
 import neogrip.db.errors.RequestRefused;
+import neogrip.db.errors.WriteRefused;
 import neogrip.jsonrpc.ExitReason;
 import neogrip.jsonrpc.JsonRpc;
 import neogrip.jsonrpc.RpcException;
@@ -37,7 +37,7 @@ public final class App {
                 // Every error the wire can carry is translated here and
                 // nowhere else: the code that executes statements throws its
                 // own exceptions and never sees an envelope (ADR-0032).
-                .mapException(ReadonlyGuard.Refused.class, e -> RpcException.of(ErrorCodes.READONLY_REFUSED, e))
+                .mapException(WriteRefused.class, e -> RpcException.of(ErrorCodes.READONLY_REFUSED, e))
                 .mapException(DataAccessException.class, SqlErrors::fromFailure)
                 .mapException(SQLException.class, SqlErrors::toRpcException)
                 .mapException(RequestRefused.class, e -> RpcException.of(JsonRpc.INVALID_REQUEST, e))

@@ -28,9 +28,9 @@ import neogrip.db.types.Types.ExportResult;
 public final class Exports {
     private final Connection connection;
     private final Running running;
-    private final ReadonlyGuard guard;
+    private final ReadonlyPolicy guard;
 
-    public Exports(Connection connection, Running running, ReadonlyGuard guard) {
+    public Exports(Connection connection, Running running, ReadonlyPolicy guard) {
         this.connection = connection;
         this.running = running;
         this.guard = guard;

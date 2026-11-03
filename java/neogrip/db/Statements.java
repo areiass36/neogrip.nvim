@@ -12,10 +12,10 @@ import neogrip.db.types.Types.UpdateResult;
 public final class Statements {
     private final Connection connection;
     private final Running running;
-    private final ReadonlyGuard guard;
+    private final ReadonlyPolicy guard;
     private final Cursors cursors;
 
-    public Statements(Connection connection, Running running, ReadonlyGuard guard,
+    public Statements(Connection connection, Running running, ReadonlyPolicy guard,
             Cursors cursors) {
         this.connection = connection;
         this.running = running;

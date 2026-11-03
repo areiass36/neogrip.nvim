@@ -34,7 +34,7 @@ public final class ConnectionScope {
     ConnectionScope(Session session, ExecutionLane lane) {
         this.lane = lane;
         Connection connection = session.connection();
-        ReadonlyGuard guard = new ReadonlyGuard(session.readonly());
+        ReadonlyPolicy guard = new ReadonlyPolicy(session.readonly());
         this.cursors = new Cursors();
         this.statements = new Statements(connection, lane.running(), guard, cursors);
         this.exports = new Exports(connection, lane.running(), guard);

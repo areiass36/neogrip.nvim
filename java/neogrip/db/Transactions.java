@@ -2,15 +2,12 @@ package neogrip.db;
 
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.util.Locale;
 import java.util.Optional;
 import neogrip.db.types.Types.TxState;
 
 /**
- * BEGIN, COMMIT and ROLLBACK are mapped to the JDBC calls rather than passed
- * through as text (ADR-0013): passing them through desynchronises the driver's
- * view of the transaction state. Only the plain spellings are intercepted -
- * BEGIN TRY, savepoints and anything else pass untouched.
+ * The JDBC side of a transaction command: {@link TransactionCommand} says what
+ * a statement is, this makes the call it maps to (ADR-0013).
  */
 public final class Transactions {
     private final Connection connection;
@@ -19,29 +16,26 @@ public final class Transactions {
         this.connection = connection;
     }
 
+    /** @return the resulting state, or empty when this was not a transaction command */
     public Optional<TxState> intercept(String sql) throws SQLException {
-        String text = ReadonlyGuard.stripLeadingComments(sql).stripTrailing();
-        if (text.endsWith(";")) {
-            text = text.substring(0, text.length() - 1).stripTrailing();
-        }
-        String lower = text.toLowerCase(Locale.ROOT);
-        boolean open;
-        if (lower.equals("begin") || lower.equals("begin work") || lower.equals("begin tran")
-                || lower.equals("begin transaction") || lower.equals("start transaction")) {
-            connection.setAutoCommit(false);
-            open = true;
-        } else if (lower.equals("commit") || lower.equals("commit work") || lower.equals("commit tran")
-                || lower.equals("commit transaction")) {
-            connection.commit();
-            connection.setAutoCommit(true);
-            open = false;
-        } else if (lower.equals("rollback") || lower.equals("rollback work") || lower.equals("rollback tran")
-                || lower.equals("rollback transaction")) {
-            connection.rollback();
-            connection.setAutoCommit(true);
-            open = false;
-        } else {
+        TransactionCommand command = TransactionCommand.of(sql);
+        if (command == null) {
             return Optional.empty();
+        }
+        boolean open = false;
+        switch (command) {
+            case BEGIN -> {
+                connection.setAutoCommit(false);
+                open = true;
+            }
+            case COMMIT -> {
+                connection.commit();
+                connection.setAutoCommit(true);
+            }
+            case ROLLBACK -> {
+                connection.rollback();
+                connection.setAutoCommit(true);
+            }
         }
         return Optional.of(new TxState(open));
     }
