@@ -1,27 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  Editor configuration, not a build system (ADR-0004 still holds: javac is the
-  only thing that compiles this project, driven by lua/neogrip/gripd.lua and by
-  the CI).
-
-  A Java language server with no build file to read guesses where the source
-  roots are by scanning for directories that hold .java files, and it guesses
-  wrong here: it picks the deepest package directories, so the two roots this
-  layout actually has (ADR-0032) end up either half-declared or off the build
-  path entirely, and every cross-root import reads as unresolvable. These two
-  files say the roots out loud instead.
--->
 <projectDescription>
 	<name>neogrip.nvim</name>
 	<comment>The gripd sources: java/lib holds the libraries, java/app the program.</comment>
-	<projects/>
+	<projects>
+	</projects>
 	<buildSpec>
 		<buildCommand>
 			<name>org.eclipse.jdt.core.javabuilder</name>
-			<arguments/>
+			<arguments>
+			</arguments>
 		</buildCommand>
 	</buildSpec>
 	<natures>
 		<nature>org.eclipse.jdt.core.javanature</nature>
 	</natures>
+	<filteredResources>
+		<filter>
+			<id>1793728842891</id>
+			<name></name>
+			<type>30</type>
+			<matcher>
+				<id>org.eclipse.core.resources.regexFilterMatcher</id>
+				<arguments>node_modules|\.git|__CREATED_BY_JAVA_LANGUAGE_SERVER__</arguments>
+			</matcher>
+		</filter>
+	</filteredResources>
 </projectDescription>
