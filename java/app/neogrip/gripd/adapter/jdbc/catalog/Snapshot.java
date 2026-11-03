@@ -5,6 +5,7 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import neogrip.gripd.contract.Contracts;
@@ -138,6 +139,7 @@ public final class Snapshot {
             for (String name : MongoFields.collectionNames(connection)) {
                 collections.add(new Contracts.TableWithColumns(name, "collection", null, List.of()));
             }
+            collections.sort(Comparator.comparing(Contracts.TableWithColumns::name, Metadata.BY_NAME));
             return Contracts.Rows.of(collections);
         }
         SchemaBody body = new SchemaBody(schema, schema);
@@ -152,6 +154,13 @@ public final class Snapshot {
                     body.remarks.get(table.getKey()),
                     columns == null ? List.of() : columns));
         }
+        // Ordered by name like every other listing (ADR-0036). This is the one
+        // the editor's table level actually reads - it asks for a whole schema
+        // in one round trip rather than a bare listing - so leaving it in the
+        // driver's order left the tree reshuffling on refresh in exactly the
+        // engines whose catalog tables are not alphabetical by accident.
+        // The columns inside each table keep their declared position.
+        list.sort(Comparator.comparing(Contracts.TableWithColumns::name, Metadata.BY_NAME));
         return Contracts.Rows.of(list);
     }
 
