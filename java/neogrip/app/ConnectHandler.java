@@ -3,6 +3,7 @@ package neogrip.app;
 import java.sql.SQLException;
 import java.util.Map;
 import java.util.Properties;
+import neogrip.db.Session;
 import neogrip.db.types.Types.ConnectResult;
 import neogrip.jsonrpc.RpcException;
 import neogrip.jsonrpc.RpcMethod;

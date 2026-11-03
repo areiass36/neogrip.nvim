@@ -12,7 +12,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
-import neogrip.app.Session;
 import neogrip.db.catalog.Details;
 import neogrip.db.catalog.Introspect;
 import neogrip.db.catalog.Listings;

@@ -1,4 +1,4 @@
-package neogrip.app;
+package neogrip.db;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;

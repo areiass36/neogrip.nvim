@@ -3,6 +3,7 @@ package neogrip.app;
 import java.sql.SQLException;
 import neogrip.db.Database;
 import neogrip.db.ReadonlyGuard;
+import neogrip.db.Session;
 import neogrip.db.errors.Cancelled;
 import neogrip.db.errors.RequestRefused;
 import neogrip.jsonrpc.ExitReason;
