@@ -145,6 +145,41 @@ else
 	check("the connection is still usable", support.scalar(pg, "select 41 + 1"), 42)
 end
 
+-- The editor's classifier refuses a write on a read-only connection before it
+-- is ever sent, which is why the sidecar's own guard - the second of the three
+-- layers in ADR-0016 - is only reached by a request that skips the classifier.
+-- This sends one, on a file database that needs no server.
+support.describe("live/safety: the sidecar refuses a write of its own accord")
+do
+	local sidecar = require("neogrip.sidecar")
+	local protocol = require("neogrip.rpc.protocol")
+	local connections_module = require("neogrip.connections")
+	-- Its own file, written and then released: one DuckDB file takes one
+	-- writer, so the read-only connection cannot share the suite's.
+	local file = vim.fs.normalize(vim.fn.tempname() .. "-readonly.duckdb")
+	local template = vim.deepcopy(support.connections().duckdb)
+	local writer = vim.tbl_extend("force", template, { id = "test-duck-rw-seed", file = file })
+	local duck = vim.tbl_extend("force", template, { id = "test-duck-ro", file = file, readonly = true })
+	connections_module.register(writer)
+	connections_module.register(duck)
+
+	support.run(writer, "create table guarded as select 1 as id", { mode = "exec" })
+	sidecar.disconnect(writer.id)
+	support.wait(function()
+		return not sidecar.is_connected(writer.id)
+	end, 10000)
+
+	check("the read-only connection opens", support.scalar(duck, "select count(*) from guarded"), 1)
+	local _, refused = support.sync(function(done)
+		sidecar.request(duck, "exec", { sql = "delete from guarded" }, function(result, err)
+			done(result, err)
+		end)
+	end)
+	check("the write is refused", refused and refused.code, protocol.ERRORS.readonly_refused)
+	check("and says why", refused and refused.message:find("read%-only") ~= nil, true)
+	check("nothing was deleted", support.scalar(duck, "select count(*) from guarded"), 1)
+end
+
 support.describe("live/safety: a read-only connection refuses a write, with no prompt")
 if not support.reachable(pg) then
 	note("skipped")
