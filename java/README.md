@@ -14,7 +14,7 @@ javac -encoding UTF-8 -parameters -d build/classes $(find java -name '*.java')
 printf '%s\n%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":2}}' \
   '{"jsonrpc":"2.0","id":2,"method":"ping"}' \
-  | java -cp build/classes neogrip.app.App
+  | java -cp build/classes neogrip.gripd.Daemon
 ```
 
 Add a JDBC driver jar to the classpath and a `connect` frame, and every statement and catalog method is
@@ -24,11 +24,15 @@ available. Shutdown is the `shutdown` notification or EOF on stdin.
 
 | Package | What it is |
 | --- | --- |
-| `neogrip.inject` | the dependency container (`java/lib`): classes in, singletons out, constructor-injected by type. |
-| `neogrip.dataformat` | the format library (`java/lib`): one `RecordWriter` per format, with the JSON writer, parser and reflective mapper under `json/` and RFC 4180 quoting under `csv/`. Knows nothing of this program (ADR-0033). |
-| `neogrip.jsonrpc` | the RPC library (`java/lib`): framing, dispatch, named binding, envelopes, the virtual-thread lane. No contract of its own — the version, the handshake and every code beyond the ones JSON-RPC reserves belong to the program (ADR-0032). |
-| `neogrip.app` | the application shell: `App` (lifecycle as configuration), `Protocol` and `ErrorCodes` (this program's contract), `HandshakeHandler`, `SqlErrors` (driver errors to envelopes), `Session` (connection control and metadata), and the handler classes. |
-| `neogrip.db` | the database logic: `Database` (the lifecycle of everything executed, transactions included), statement/export/transaction units, `types/` (the wire's records), and `catalog/` (the DatabaseMetaData units). |
+| `neogrip.dataformat` | `java/lib` - the format library: one `RecordWriter` per format, with the JSON writer, parser and reflective mapper under `json/` and RFC 4180 quoting under `csv/`. Knows nothing of this program (ADR-0033). |
+| `neogrip.jsonrpc` | `java/lib` - the RPC library: framing, dispatch, named binding, envelopes, transports, the virtual-thread lane. No contract of its own (ADR-0032). |
+| `neogrip.inject` | `java/lib` - the dependency container: classes in, singletons out, constructor-injected by type. |
+| `neogrip.gripd` | `java/app` - the program itself: `Daemon` is the composition root and nothing else is constructed by hand. |
+| `neogrip.gripd.domain` | the rules that need nothing open: the read-only policy, which spellings are a transaction command, and the failures this program throws (`domain/error`). No JDBC, no libraries. |
+| `neogrip.gripd.contract` | the records the wire is made of, with their `@JsonName` spellings. Named by the side that produces them and the side that serializes them, which is why they sit beside the rings rather than inside one. |
+| `neogrip.gripd.adapter.jdbc` | everything that speaks to a driver: the session, the execution lane, the connection scope, the statement and cursor units, the idle watchdog, and `catalog/` (the DatabaseMetaData units). |
+| `neogrip.gripd.adapter.export` | a result streamed to a file through the format library (ADR-0010). |
+| `neogrip.gripd.adapter.rpc` | the wire edge: `Protocol`, `ErrorCodes`, `SqlErrors`, the status notifier, and `handler/` - the annotated functions themselves. |
 
 ## The programming model
 
@@ -37,23 +41,23 @@ class-level `@RpcNamespace`. Parameters bind by name from the request's `params`
 typed records serialized by `JsonMapper` (components in declaration order, nulls omitted, and
 `@JsonName("is_pk")` for wire spellings that are not Java ones), or `RpcResult<T>` where the answer is
 polymorphic or empty.
-Errors are exceptions: throw `RpcException`, or let a mapped exception (SQLException, Refused) be
-translated.
+Errors are exceptions and no handler declares one: the JDBC exception is translated where the
+connection is used, and `Daemon` maps each failure to its code in one place.
 
 ```java
 @RpcNamespace("catalog")
-final class CatalogHandlers {
+public final class CatalogHandlers {
     private final Database db;
-    CatalogHandlers(Database db) { this.db = db; }        // constructor-injected by the builder
+    public CatalogHandlers(Database db) { this.db = db; }  // constructor-injected by the builder
 
     @RpcMethod
-    Rows<TableRow> tables(String catalog, String schema, String pattern) throws SQLException {
+    Rows<TableRow> tables(String catalog, String schema, String pattern) {
         return db.tables(catalog, schema, pattern);
     }
 
     @RpcMethod
     IntrospectSummary introspect(String catalog, String path, int parallelism, long budgetMs,
-            boolean details) throws SQLException, IOException {
+            boolean details) {
         return db.introspect(catalog, path, parallelism, budgetMs, details);
     }
 }
@@ -61,14 +65,14 @@ final class CatalogHandlers {
 
 Handlers declare nothing about threading - there is nothing to declare.
 
-`App.main` is pure configuration: classes go into the builder, which instantiates them, resolving each
+`Daemon.main` is pure configuration: classes go into the builder, which instantiates them, resolving each
 constructor parameter by type from the other components and the library's injectables (`Notifier`).
 Components may implement `RpcLifecycle` for per-request and shutdown hooks; shutdown hooks run in reverse
 registration order. Everything that can be wrong — a duplicate wire name, an unsupported signature, a
 missing dependency, a build without `-parameters` — fails at `build()` with a message naming the
 offender.
 
-Adding a method is: declare a record in `neogrip/db/types/`, write an annotated function, done — the
+Adding a method is: declare a record in `gripd/contract/`, write an annotated function, done — the
 dispatch, threading, binding and serialization are the library's.
 
 ## Threading

@@ -31,7 +31,7 @@ function M.compiled()
 	if stamp ~= tostring(protocol.VERSION) then
 		return false
 	end
-	local main_class = vim.uv.fs_stat(M.classes_dir .. "/neogrip/app/App.class")
+	local main_class = vim.uv.fs_stat(M.classes_dir .. "/neogrip/gripd/Daemon.class")
 	if not main_class then
 		return false
 	end
@@ -53,6 +53,15 @@ function M.build(on_done)
 	local files = sources()
 	if #files == 0 then
 		return on_done(false, "no sidecar sources found under " .. M.sources_dir)
+	end
+
+	-- The layout before gripd left these trees behind. Nothing loads them, but
+	-- a stale class cache is how a JDK mismatch once turned into every
+	-- statement hanging instead of an error, so they go. Best-effort: on
+	-- Windows a live process can hold a class file open, and the build has to
+	-- proceed either way.
+	for _, stale in ipairs({ "neogrip/app", "neogrip/db", "neogrip/rpc" }) do
+		pcall(vim.fn.delete, M.classes_dir .. "/" .. stale, "rf")
 	end
 
 	vim.fn.mkdir(M.classes_dir, "p")
@@ -129,7 +138,7 @@ function M.launch(opts, on_ready)
 		"-Djava.util.Arrays.useLegacyMergeSort=true",
 		"-cp",
 		classpath,
-		"neogrip.app.App",
+		"neogrip.gripd.Daemon",
 	}
 
 	local sidecar = client.start(command, opts.handlers)

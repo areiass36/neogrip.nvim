@@ -1,0 +1,54 @@
+package neogrip.gripd.adapter.rpc.handler;
+
+import neogrip.gripd.adapter.jdbc.Database;
+import neogrip.gripd.contract.Contracts.ExportResult;
+import neogrip.gripd.contract.Contracts.UpdateResult;
+import neogrip.jsonrpc.RpcMethod;
+import neogrip.jsonrpc.RpcResult;
+
+/** The statements, on the worker lane: one at a time on the shared connection. */
+public final class StatementHandlers {
+    private final Database db;
+
+    public StatementHandlers(Database db) {
+        this.db = db;
+    }
+
+    /**
+     * Open a result, or continue one (ADR-0031): no `sql` is what makes this a
+     * continuation of the result the client named `hash`.
+     */
+    @RpcMethod
+    RpcResult<?> query(String hash, String sql, int limit, int timeoutSeconds) {
+        if (sql == null) {
+            return RpcResult.of(db.next(hash, limit));
+        }
+        // A plain BEGIN/COMMIT/ROLLBACK is a transaction command, not a query
+        // (ADR-0013); everything else answers with a batch or an update count.
+        var intercepted = db.intercept(sql);
+        if (intercepted.isPresent()) {
+            return RpcResult.of(intercepted.get());
+        }
+        return RpcResult.of(db.query(hash, sql, limit, timeoutSeconds));
+    }
+
+    @RpcMethod
+    RpcResult<?> exec(String sql, int timeoutSeconds) {
+        var intercepted = db.intercept(sql);
+        if (intercepted.isPresent()) {
+            return RpcResult.of(intercepted.get());
+        }
+        return RpcResult.of(db.exec(sql, timeoutSeconds));
+    }
+
+    @RpcMethod
+    RpcResult<UpdateResult> validate(String sql) {
+        db.validate(sql);
+        return RpcResult.empty();
+    }
+
+    @RpcMethod
+    ExportResult export(String sql, String path, String format, String nullMarker, int timeoutSeconds) {
+        return db.export(sql, path, format, nullMarker, timeoutSeconds);
+    }
+}

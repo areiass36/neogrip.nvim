@@ -67,7 +67,7 @@ local function raw_sidecar(handlers)
 		jdk.java(),
 		"-cp",
 		sidecar.classes_dir,
-		"neogrip.app.App",
+		"neogrip.gripd.Daemon",
 	}, handlers)
 end
 
