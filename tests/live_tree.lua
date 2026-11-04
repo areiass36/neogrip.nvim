@@ -89,8 +89,8 @@ for _, engine in ipairs(ENGINES) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
-		-- A file database has no container to seed it.
-		support.ensure_file_fixture(connection)
+		-- Some databases arrive without a fixture of their own.
+		support.ensure_fixture(connection)
 		if engine.fixture then
 			-- DuckDB's file is a fresh temp path per process, so the fixture
 			-- is made here rather than by the containers.
@@ -320,7 +320,7 @@ for _, engine in ipairs(PAGED) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
-		support.ensure_file_fixture(connection)
+		support.ensure_fixture(connection)
 		if engine.fixture then
 			for letter in ("abcdefg"):gmatch(".") do
 				support.run(
@@ -441,7 +441,7 @@ do
 		if not support.reachable(connection) then
 			note(("%s: skipped"):format(target.driver))
 		else
-			support.ensure_file_fixture(connection)
+			support.ensure_fixture(connection)
 			if target.prepare then
 				support.run(connection, target.prepare, { mode = "exec" })
 			end

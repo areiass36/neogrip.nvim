@@ -174,8 +174,7 @@ end
 
 local seeded = {}
 
---- The standard torture fixture in a file database, written by the driver
---- that reads it.
+--- The standard torture fixture in a database that arrives without one.
 ---
 --- The same reason DuckDB's fixture is made this way: a file database has no
 --- container, so tests/containers.sh cannot reach it. SQLite used to be seeded
@@ -183,26 +182,54 @@ local seeded = {}
 --- stock Windows box and wrote to a different path than the JVM resolved
 --- anyway. Memoized, and the stale file is dropped first, so a run starts from
 --- a known fixture rather than from whatever an earlier run left behind.
-function M.ensure_file_fixture(connection)
+function M.ensure_fixture(connection)
 	if seeded[connection.id] then
 		return true
 	end
 	seeded[connection.id] = true
+	local statements = nil
 	if connection.driver == "sqlite" then
 		vim.fn.delete(connection.file)
 		-- One statement per call: a single string of three would be split by
 		-- the sequence rule of ADR-0030 and the failure would read as a
 		-- parse error.
-		for _, sql in ipairs({
+		statements = {
 			"create table torture(id integer primary key, s_null text, s_empty text, "
 				.. "s_comma text, cjk text)",
 			"insert into torture values (1,null,'','a,b','日本語')",
 			"insert into torture values (2,null,'','x','中文')",
-		}) do
-			local _, err = M.run(connection, sql, { mode = "exec", timeout = 90000 })
-			if err then
-				return false, err.message
-			end
+		}
+	elseif connection.driver == "trino" then
+		-- Trino has a container but nothing in it to write to: tpch is generated
+		-- and read-only, and the memory catalog starts empty and dies with the
+		-- process. So it is seeded here like the file databases are, and named in
+		-- full because the connection deliberately pins no catalog - that is what
+		-- gives the tree an instance level to walk into.
+		statements = {
+			"drop table if exists memory.default.torture",
+			"create table memory.default.torture as select * from (values "
+				.. "(1, cast(null as varchar), '', 'a,b', '日本語'), "
+				.. "(2, cast(null as varchar), '', 'x', '中文')"
+				.. ") as t(id, s_null, s_empty, s_comma, cjk)",
+		}
+	elseif connection.driver == "duckdb" then
+		-- A DuckDB file is a fresh temp path per process, so a suite run on its
+		-- own finds nothing in it. The suites that want a particular shape
+		-- replace this one straight after; what this guarantees is only that
+		-- `torture` exists, which is what the suites that merely name it need -
+		-- live_diagnostics asked for a column of it and got "Table with name
+		-- torture does not exist" whenever it ran without live_jdbc ahead of it.
+		statements = {
+			"create table if not exists torture(id integer, s_null varchar, s_empty varchar, "
+				.. "s_comma varchar, cjk varchar)",
+			"delete from torture",
+			"insert into torture values (1,null,'','a,b','日本語'),(2,null,'','x','中文')",
+		}
+	end
+	for _, sql in ipairs(statements or {}) do
+		local _, err = M.run(connection, sql, { mode = "exec", timeout = 90000 })
+		if err then
+			return false, err.message
 		end
 	end
 	return true
