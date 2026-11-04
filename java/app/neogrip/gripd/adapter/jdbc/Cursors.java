@@ -14,17 +14,19 @@ import neogrip.gripd.contract.Contracts.QueryPage;
  * on it, which is what lets the client name a result before the first response
  * has come back and address it for cancellation.
  *
- * Insertion-ordered, so the oldest result is the one evicted when a client
- * opens more than this will keep. A client that forgets to close is the reason
- * the cap exists at all: an open ResultSet holds memory on both sides.
+ * There is no cap on how many are kept (ADR-0041). The cap that used to be
+ * here closed the oldest result when a fifth was opened, which under a grid
+ * that is read by scrolling turns an eviction the reader did not cause into a
+ * visible failure. What reclaims a result now is the client closing it, the
+ * idle sweep, a cancel, or shutdown - and nothing else, so a client that
+ * forgets to close holds one open Statement and ResultSet per result until the
+ * sweep reaches it.
+ *
+ * Still insertion-ordered, for a different reason than before: not so the
+ * oldest can be evicted, but so shutdown closes results in the order they were
+ * opened, which makes a log readable.
  */
 final class Cursors {
-    /**
-     * Live results per connection. One grid holds one result, so a second is
-     * already unusual and a fifth is a client that stopped closing.
-     */
-    static final int MAX_LIVE = 4;
-
     private final Map<String, Cursor> live = new LinkedHashMap<>();
 
     /**
@@ -61,10 +63,6 @@ final class Cursors {
             // Refused, not overwritten, and not closed here either: the cursor
             // being offered still belongs to the caller, which closes it.
             throw new RequestRefused("a result is already open under " + describe(hash));
-        }
-        while (live.size() >= MAX_LIVE) {
-            String oldest = live.keySet().iterator().next();
-            live.remove(oldest).close();
         }
         live.put(hash, cursor);
     }

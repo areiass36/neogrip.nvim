@@ -119,8 +119,9 @@ batch; `done` is true when the result has no more rows, and gripd has then alrea
   `columns` list. When it does, the client replaces its own; a field absent from an earlier document is
   null in that row.
 - `limit: 0` means "everything": no cursor is kept and `done` is true.
-- Lifetime: `cancel {hash}`, `cursorIdleSeconds` of no use, at most four live per connection (oldest
-  closed first), and all of them on shutdown.
+- Lifetime: `cancel {hash}`, `cursorIdleSeconds` of no use, and all of them on shutdown. There is no cap
+  on how many are live per connection (ADR-0041): a client that stops closing holds one open statement
+  each until the sweep reaches them, and nothing evicts on its behalf.
 
 ### Catalog
 

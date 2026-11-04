@@ -227,8 +227,9 @@ end
 --- A handle a client can abandon: a warehouse answers a listing in seconds,
 --- and a node collapsed in the meantime must not deliver into a tree that has
 --- moved on. For rows the cancel reaches the server, which closes the cursor
---- there - gripd keeps four per connection and evicts the oldest, so a client
---- that never closes loses the branch it opened first.
+--- there - nothing evicts one on the client's behalf any more (ADR-0041), so a
+--- client that never closes holds an open statement per expanded node until
+--- the idle sweep reaches it.
 local function new_handle()
 	local state = { cancelled = false, run = nil }
 	return {
@@ -442,10 +443,10 @@ end
 --- The rows of a set, as nodes, through the named cursor of ADR-0031.
 ---
 --- Never cached and never swept: this is the one level that is data. The page
---- says `done` like every other level's does, and closing a node means
---- calling the handle's cancel so gripd stops holding the cursor - it keeps
---- four per connection and evicts the oldest, so a client that expands five
---- tables without closing any loses the first.
+--- says `done` like every other level's does, and closing a node means calling
+--- the handle's cancel so gripd stops holding the cursor. Nothing evicts one
+--- for you (ADR-0041): a client that expands tables and never collapses them
+--- holds an open statement for each until the idle sweep reaches it.
 local function objects(handle, connection, ref, opts, callback)
 	M.statement(ref, "select", function(text, statement_err)
 		if statement_err then

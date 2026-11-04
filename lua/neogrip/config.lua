@@ -21,11 +21,18 @@ M.defaults = {
 	-- than they are worth. page_next still loads beyond it - the cap is on the
 	-- automatic path, not on the result. Zero removes it.
 	auto_load_max_rows = 20000,
-	-- An open result is a cursor on gripd (ADR-0031), so paging forward
-	-- costs nothing. One that has seen no page for this long is closed, because
-	-- it holds rows in memory on both sides. Zero keeps them until the result is
-	-- replaced or the process ends.
-	cursor_idle_seconds = 300,
+	-- An open result is a cursor on gripd (ADR-0031), so reading forward costs
+	-- nothing. One that has seen no batch for this long is closed, because it
+	-- holds an open statement on both sides. An hour, not the five minutes it
+	-- was, because a result is read by scrolling now and a reader can be away
+	-- from the keyboard a long time without having abandoned it (ADR-0041).
+	-- Since that record also removed the cap on how many results stay open,
+	-- this sweep and the close that happens when the grid shows another result
+	-- are the only automatic reclamation left; zero disables the sweep, which
+	-- then means a cursor lives until its result is replaced or the process
+	-- ends. It travels inside `connect`, so changing it does not reach a
+	-- connection that is already open.
+	cursor_idle_seconds = 3600,
 	-- Statement timeout, enforced on the server. Zero means no timeout: the
 	-- query runs as long as it takes and :NGripCancel stops it by hand.
 	timeout_ms = 30000,

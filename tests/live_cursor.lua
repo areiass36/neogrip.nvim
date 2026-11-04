@@ -188,16 +188,25 @@ check("a name already in use is refused", duplicate ~= nil, true)
 local survivor = support.next_batch(pg, held.hash, 10)
 check("and the result that holds it is untouched", survivor ~= nil and #survivor.rows, 10)
 
--- Four live results per connection: a fifth closes the oldest, which is the
--- only protection against a client that stops closing them.
+-- No cap on live results any more (ADR-0041). Ten at once, and the first is
+-- still answering: what reclaims one is a cancel, the idle sweep, the client
+-- replacing it, or shutdown - nothing evicts on the client's behalf.
 local hashes = {}
-for index = 1, 5 do
+for index = 1, 10 do
 	local extra = support.run(pg, sql, { limit = 1 })
 	hashes[index] = extra and extra.hash
 end
-local _, evicted = support.next_batch(pg, hashes[1], 1)
-check("the oldest result is closed when a fifth is opened", evicted ~= nil, true)
-local newest = support.next_batch(pg, hashes[5], 1)
-check("and the newest is still open", newest ~= nil and #newest.rows, 1)
+local oldest, oldest_err = support.next_batch(pg, hashes[1], 1)
+check("the first of ten results is still open", oldest_err, nil)
+check("and still answering", oldest ~= nil and #oldest.rows, 1)
+local newest = support.next_batch(pg, hashes[10], 1)
+check("so is the tenth", newest ~= nil and #newest.rows, 1)
+
+-- Closed by hand, because eviction used to do it for this suite: ten cursors
+-- left open with an hour-long idle window would outlive the whole run.
+local runner_module = require("neogrip.runner")
+for _, hash in ipairs(hashes) do
+	runner_module.release(pg, hash)
+end
 
 support.run(pg, "drop table if exists window_probe", { mode = "exec" })

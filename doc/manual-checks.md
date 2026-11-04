@@ -60,9 +60,9 @@ longer compiles.
    level answers and is labelled the way `tree.shape()` says.
 3. Expand a table's rows, page once more, then collapse it. Confirm the rows arrive, that the second page
    continues the first, and that `:NGripDoctor` shows no cursor left open afterwards.
-4. Expand five tables' rows without collapsing any, and confirm the first branch is the one that dies -
-   gripd keeps four results per connection and evicts the oldest (ADR-0031). This is the limit a client
-   author has to know about and the only place it is visible.
+4. Expand five tables' rows without collapsing any, and confirm all five still answer: nothing evicts an
+   open result any more (ADR-0041). Then collapse them and confirm with `:NGripDoctor` that no cursor is
+   left open — the reclamation is the client's job now, and an hour of idle sweep is the only backstop.
 5. Ask for a long level with `limit` and walk it to the end. Confirm no set is missing or repeated, and
    that the last page reports `done`.
 6. Re-introspect one namespace after an `alter table`, and confirm only that namespace changed: the other

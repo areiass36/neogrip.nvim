@@ -226,8 +226,9 @@ local handle = tree.children(set_node, {
 handle.cancel()
 ```
 Continue with `{ objects = true, hash = next_page.hash, from = next_page.from }`.
-gripd keeps four open results per connection and evicts the oldest, so a tree
-that expands five tables without closing any loses the first.
+Nothing closes an open result on your behalf, so a tree that expands tables and
+never collapses them holds an open statement for each until gripd's idle sweep
+reaches it — an hour by default.
 
 **Refresh.** Nothing watches the database. After a migration, call
 `tree.sweep(namespace_ref, ...)` to re-read one schema, or `tree.forget(ref)`
