@@ -20,6 +20,9 @@ parsed = errors.from_rpc({
 	data = { state = "42S22", vendorCode = 1054 },
 })
 check("a vendor code", parsed.code, 1054)
+-- The envelope's code travels separately: a refusal and a failed statement are
+-- different answers, and only the envelope can tell them apart.
+check("and the envelope's code beside it", parsed.rpc_code, -32010)
 check("with no position", parsed.position, nil)
 check("the token is found", parsed.token, "nosuchcol")
 

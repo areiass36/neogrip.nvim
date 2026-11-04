@@ -56,6 +56,13 @@ function M.from_rpc(err, context)
 		message = vim.trim(first_line),
 		state = data.state ~= "null" and data.state or nil,
 		code = data.vendorCode ~= 0 and data.vendorCode or nil,
+		-- The envelope's own code, kept alongside the driver's because they
+		-- answer different questions and `code` was already the driver's. A
+		-- caller that has to tell a refusal from a failed statement needs this
+		-- one: a continuation whose result is gone answers -32600, and that
+		-- code is what doc/protocol.md pins as the contract - the message is a
+		-- Java string literal with its own opposite three words away.
+		rpc_code = err.code,
 		position = data.position,
 		line = data.line,
 		cancelled = err.code == protocol.ERRORS.cancelled or nil,
