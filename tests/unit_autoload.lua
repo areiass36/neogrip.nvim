@@ -166,6 +166,52 @@ local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 check("and the footer says it is paused", lines[#lines]:find("paused", 1, true) ~= nil, true)
 check("while still promising more", lines[#lines]:find("more", 1, true) ~= nil, true)
 
+support.describe("autoload: a result the server no longer has")
+
+-- Evicted, swept for being idle, or cancelled: the continuation comes back
+-- -32600 and nothing is re-run (ADR-0040). The rows already loaded stay
+-- usable, the reader is told once, and the asking stops.
+config.setup({ auto_load_rows = 10 })
+bufnr = fresh({ rows = 200 })
+answer = function()
+	return nil, { rpc_code = -32600, message = "no result is open under aaaabbbbcccc" }
+end
+trigger(bufnr, line_of(200))
+check("the expired result is asked once", #requests, 1)
+support.wait(function()
+	return #notices > 0
+end, 1000)
+check("and reported once", #notices, 1)
+check("saying what to do about it", notices[1]:find("run the statement again", 1, true) ~= nil, true)
+local state = grid.state(bufnr)
+check("the result is marked expired", state.expired, true)
+check("the asking is latched off", state.auto.exhausted, true)
+check("and the rows loaded are untouched", #state.rows, 200)
+lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+check("the footer says so", lines[#lines]:find("expired", 1, true) ~= nil, true)
+check("and stops promising more", lines[#lines]:find("(more)", 1, true), nil)
+
+-- The part that matters: scrolling on a dead result must not retry, and must
+-- not say anything again either.
+grid.maybe_load_more(bufnr, line_of(200))
+grid.maybe_load_more(bufnr, line_of(199))
+settle()
+check("a later motion does not ask again", #requests, 1)
+check("nor repeat itself", #notices, 1)
+
+-- But the key does get an answer, because someone pressed it.
+local execute = require("neogrip.execute")
+notices = {}
+execute.page(grid.state(bufnr), 1)
+support.wait(function()
+	return #notices > 0
+end, 1000)
+check("asking by hand says it again", #notices, 1)
+check("and names the reason", notices[1]:find("expired", 1, true) ~= nil, true)
+answer = function()
+	return { rows = { { 0 } }, done = false }
+end
+
 support.describe("autoload: the threshold is held below the batch")
 
 -- A threshold as large as the batch re-arms the instant a batch lands, so

@@ -8,6 +8,7 @@ local classify = require("neogrip.sql.classify")
 local config = require("neogrip.config")
 local neogrip = require("neogrip")
 local diagnostics = require("neogrip.diagnostics")
+local protocol = require("neogrip.rpc.protocol")
 local grid = require("neogrip.grid")
 local resolve = require("neogrip.resolve")
 local runner = require("neogrip.runner")
@@ -321,6 +322,13 @@ function M.load_more(state, opts)
 	if auto.loading then
 		return false
 	end
+	-- Said again on the manual path and stayed quiet about on the automatic
+	-- one, which is the whole difference between the two: a reader who presses
+	-- the key is owed an answer, and one who is scrolling is not owed it on
+	-- every motion.
+	if state.expired then
+		return refuse("the result expired; run the statement again for more rows", vim.log.levels.ERROR)
+	end
 	if auto.exhausted or result.done ~= false or not result.hash then
 		return refuse("no further rows")
 	end
@@ -342,6 +350,26 @@ function M.load_more(state, opts)
 		if err then
 			if err.cancelled then
 				return refuse("cancelled")
+			end
+			-- The result is gone from the server: evicted, swept for being
+			-- idle, or cancelled. Matched on the code because the message is a
+			-- Java string literal with its own opposite three words away, and
+			-- doc/protocol.md pins the code. The code is a general refusal
+			-- there, but the registry's is the only one reachable from a
+			-- continuation, which is why this lives here and not in errors.lua.
+			if err.rpc_code == protocol.ERRORS.invalid_request then
+				state.expired = true
+				auto.exhausted = true
+				grid.refresh(bufnr)
+				-- Said even when quiet: nothing is re-run (ADR-0040), so the
+				-- reader has to be told why the rows stopped coming. Once,
+				-- which the latch above gives for free.
+				neogrip.notify(
+					"the result expired; the rows loaded are still here - "
+						.. "run the statement again for more",
+					vim.log.levels.ERROR
+				)
+				return
 			end
 			return refuse(err.message, vim.log.levels.ERROR)
 		end
