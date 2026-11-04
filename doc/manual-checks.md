@@ -47,6 +47,27 @@ Entra ID interactive login opens a browser and cannot run in CI.
 2. Confirm the status notifications appear, the browser opens, and the connection completes after MFA.
 3. Confirm the documented limitation: the flow fails with a clear message in a headless session.
 
+## Scrolling a result (every release, after any change under `grid`)
+
+The grid loads the next batch when the cursor comes within `auto_load_rows` of the last row (ADR-0040),
+and the trigger hangs off `CursorMoved`. **Neovim does not emit `CursorMoved` under `--headless -l`** -
+measured: neither `nvim_win_set_cursor` nor `nvim_feedkeys` produces it there - so the suite fires the
+event itself and proves everything except that the editor delivers it. That last link is this check, and
+nothing automated can replace it.
+
+1. Run a statement answering thousands of rows (`select generate_series(1, 5000) as n`).
+2. Hold `j` from the first row. Confirm the rows keep coming with no key pressed for them, that the
+   footer's count grows, and that the cursor is never thrown back to the top.
+3. Keep going with `<C-d>` to the end. Confirm the footer stops saying `(more)`.
+4. Watch the table while it loads: it must not shift sideways. The column widths are measured over the
+   first `width_sample` rows and the row gutter has a four-digit floor, which is what keeps it still - a
+   value wider than anything in the first thousand rows is the case that moves it.
+5. Scroll a result on a connection where the statement is slow, and confirm the footer says
+   `(more, loading...)` while a batch is on its way.
+6. Set `auto_load_rows = 0` and confirm nothing loads by itself and `]p` still works.
+7. Leave a result untouched for longer than `cursor_idle_seconds`, then scroll. Confirm the footer says
+   `(expired)`, the rows already loaded are still there, and nothing was re-run.
+
 ## The explorer recipe (every release, after any change under `tree`)
 
 The plugin defines no explorer (ADR-0037), so what used to be a feature to click through is now a
