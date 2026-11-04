@@ -1,6 +1,7 @@
 -- Writing a result out as CSV or JSON.
 --
--- The page in the grid is written from memory. "Everything" re-runs the
+-- The rows the grid has loaded are written from memory - every one of them, as
+-- far down as the reader scrolled (ADR-0040). "Everything" re-runs the
 -- statement without a LIMIT and streams the client's output straight to a file
 -- descriptor, so a result far larger than memory can still be exported.
 local csv = require("neogrip.codec.csv")
@@ -8,6 +9,12 @@ local neogrip = require("neogrip")
 local value_module = require("neogrip.value")
 
 local M = {}
+
+-- Named, because the picker offers them and the handler compares against them:
+-- changing one spelling and not the other would send every choice to the
+-- everything branch, which re-runs the statement with no limit.
+local CSV_LOADED = "CSV (loaded rows)"
+local JSON_LOADED = "JSON (loaded rows)"
 
 local NULL_MARKER = "\\N"
 
@@ -40,6 +47,9 @@ function M.safe_columns(columns)
 	return out
 end
 
+--- Every row the grid has loaded, which is as far as the reader scrolled. The
+--- name is kept for the callers it already has; "page" has not been a unit here
+--- since ADR-0040.
 --- @return string path
 function M.page_to_csv(state, path)
 	local columns = M.safe_columns(state.columns)
@@ -81,7 +91,9 @@ function M.pick(bufnr)
 	end
 
 	vim.ui.select(
-		{ "CSV (this page)", "JSON (this page)", "CSV (everything)" },
+		-- The two labels are compared below, so they are written once here and
+		-- matched against these same constants rather than retyped.
+		{ CSV_LOADED, JSON_LOADED, "CSV (everything)" },
 		{ prompt = "Export" },
 		function(choice)
 			if not choice then
@@ -96,10 +108,10 @@ function M.pick(bufnr)
 						return
 					end
 					path = vim.fn.expand(path)
-					if choice == "CSV (this page)" then
+					if choice == CSV_LOADED then
 						M.page_to_csv(state, path)
 						neogrip.notify(("%d rows written to %s"):format(#state.rows, path))
-					elseif choice == "JSON (this page)" then
+					elseif choice == JSON_LOADED then
 						M.page_to_json(state, path)
 						neogrip.notify(("%d rows written to %s"):format(#state.rows, path))
 					else

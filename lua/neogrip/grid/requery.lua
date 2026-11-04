@@ -90,7 +90,8 @@ function M.query_csv(csv_path, callback)
 	end)
 end
 
---- Write the grid's page to CSV, register it, and open a query buffer on it.
+--- Write the rows the grid has loaded to CSV, register it, and open a query
+--- buffer on it.
 function M.materialise(bufnr)
 	local grid = require("neogrip.grid")
 	local state = grid.state(bufnr)

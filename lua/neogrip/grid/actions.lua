@@ -325,7 +325,7 @@ function M.export(bufnr)
 	require("neogrip.grid.export").pick(bufnr or vim.api.nvim_get_current_buf())
 end
 
---- Write this page to CSV and open a DuckDB query buffer on it.
+--- Write the rows loaded so far to CSV and open a DuckDB query buffer on it.
 function M.materialise(bufnr)
 	require("neogrip.grid.requery").materialise(bufnr or vim.api.nvim_get_current_buf())
 end
