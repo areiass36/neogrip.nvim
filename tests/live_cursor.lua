@@ -14,7 +14,7 @@ end
 support.seed_secrets()
 
 local connections = support.connections()
-local order = { "postgres", "mysql", "mssql", "sqlite", "duckdb", "mongodb" }
+local order = { "postgres", "mysql", "mariadb", "mssql", "sqlite", "duckdb", "mongodb", "trino" }
 
 for _, driver in ipairs(order) do
 	local connection = connections[driver]
@@ -23,8 +23,8 @@ for _, driver in ipairs(order) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
-		-- A file database has no container to seed it (tests/containers.sh).
-		support.ensure_file_fixture(connection)
+		-- Some databases arrive without a fixture of their own.
+		support.ensure_fixture(connection)
 		if driver == "duckdb" then
 			-- The file has to be written by the driver that reads it, so the
 			-- fixture is created here rather than by tests/containers.sh.
@@ -35,7 +35,9 @@ for _, driver in ipairs(order) do
 			)
 		end
 
-		local sql = driver == "mongodb" and "db.orders.find({})" or "select * from torture order by id"
+		local probe = driver == "trino" and "memory.default.torture" or "torture"
+		local sql = driver == "mongodb" and "db.orders.find({})"
+			or ("select * from %s order by id"):format(probe)
 		local first, first_err = support.run(connection, sql, { limit = 1, timeout = 90000 })
 		if first_err then
 			support.fail("opening a result", first_err.message)

@@ -25,21 +25,27 @@ check("so is ddl", diagnostics.checkable("create table z(a int)"), true)
 check("a transaction command is not", diagnostics.checkable("begin"), false)
 check("nor a session one", diagnostics.checkable("set search_path to x"), false)
 
-for _, driver in ipairs({ "postgres", "mysql", "mssql", "sqlite", "duckdb" }) do
+for _, driver in ipairs({ "postgres", "mysql", "mariadb", "mssql", "sqlite", "duckdb", "trino" }) do
 	local connection = connections[driver]
 	support.describe("live/diagnostics: " .. driver)
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
-		-- A file database has no container to seed it (tests/containers.sh).
-		support.ensure_file_fixture(connection)
+		-- Some databases arrive without a fixture of their own.
+		support.ensure_fixture(connection)
 		local connections_module = require("neogrip.connections")
 		local saved_get = connections_module.get
 		connections_module.get = function(id)
 			return id == connection.id and connection or saved_get(id)
 		end
 
-		local table_name = driver == "mssql" and "dbo.torture" or "torture"
+		local table_name = "torture"
+		if driver == "mssql" then
+			table_name = "dbo.torture"
+		elseif driver == "trino" then
+			-- Named in full: the connection pins no catalog on purpose.
+			table_name = "memory.default.torture"
+		end
 		local bufnr = vim.api.nvim_create_buf(false, true)
 		vim.bo[bufnr].filetype = "sql"
 		vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {

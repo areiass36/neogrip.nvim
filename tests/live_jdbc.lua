@@ -13,7 +13,7 @@ end
 support.seed_secrets()
 
 local connections = support.connections()
-local order = { "postgres", "mysql", "mssql", "sqlite", "duckdb", "mongodb" }
+local order = { "postgres", "mysql", "mariadb", "mssql", "sqlite", "duckdb", "mongodb", "trino" }
 
 for _, driver in ipairs(order) do
 	local connection = connections[driver]
@@ -22,8 +22,8 @@ for _, driver in ipairs(order) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
-		-- A file database has no container to seed it (tests/containers.sh).
-		support.ensure_file_fixture(connection)
+		-- Some databases arrive without a fixture of their own.
+		support.ensure_fixture(connection)
 		if driver == "duckdb" then
 			-- The file has to be created by the same driver that reads it:
 			-- DuckDB refuses a file written by another version.
@@ -35,7 +35,9 @@ for _, driver in ipairs(order) do
 			)
 		end
 
-		local sql = driver == "mongodb" and "db.orders.find({})" or "select * from torture order by id"
+		local probe = driver == "trino" and "memory.default.torture" or "torture"
+		local sql = driver == "mongodb" and "db.orders.find({})"
+			or ("select * from %s order by id"):format(probe)
 		local result, run_err = support.run(connection, sql, { limit = 10, timeout = 90000 })
 		if run_err then
 			support.fail("query", run_err.message)
@@ -73,7 +75,7 @@ for _, driver in ipairs(order) do
 				check("and a NULL bytea is still NULL", result.rows[2][9] == neogrip.NULL, true)
 			end
 
-			if driver == "mysql" or driver == "mssql" then
+			if driver == "mysql" or driver == "mariadb" or driver == "mssql" then
 				check("decimal keeps its scale", by_name.n, "8.90")
 				check("bit becomes a boolean", by_name.flag, true)
 			end
