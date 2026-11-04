@@ -279,10 +279,97 @@ local function rerun(state, changes)
 	}, changes))
 end
 
---- Move a page. Backwards is always a redraw and forwards usually is too: a
---- page already fetched never left the editor, and the one after it is the next
---- batch of the cursor gripd still holds (ADR-0031). Nothing re-runs the
---- statement, so no page boundary can show a changed world.
+--- Which batch the cursor is sitting in, 1-based.
+local function current_batch(state)
+	local batches = state.batches or {}
+	for index, batch in ipairs(batches) do
+		if state.row >= batch.first and state.row <= batch.last then
+			return index
+		end
+	end
+	return math.max(#batches, 1)
+end
+
+--- Fetch the next batch of the open result and append it (ADR-0040).
+---
+--- The one fetch path: `]p` and the cursor nearing the last row both arrive
+--- here, so the guards that stop a motion-driven trigger from queueing one
+--- request per motion live in a single place rather than at each caller.
+---
+--- `loading` is what the queue cannot do for us: the runner serializes per
+--- connection, but `result.done` is only true once an answer lands, so without
+--- this every motion would pass the same check and enqueue again.
+--- @param opts table|nil { quiet, track, on_done = fun(appended: integer) }
+--- @return boolean asked whether a request actually went out
+function M.load_more(state, opts)
+	opts = opts or {}
+	local bufnr = state and (state.bufnr or grid.current_buf())
+	if not bufnr then
+		return false
+	end
+	state.auto = state.auto or {}
+	local auto = state.auto
+	local result = state.result
+
+	local function refuse(message, level)
+		if not opts.quiet then
+			neogrip.notify(message, level)
+		end
+		return false
+	end
+
+	if auto.loading then
+		return false
+	end
+	if auto.exhausted or result.done ~= false or not result.hash then
+		return refuse("no further rows")
+	end
+
+	auto.loading = true
+	local handle = runner.run({
+		connection = result.connection,
+		hash = result.hash,
+		mode = "next",
+		limit = result.limit or config.get().limit,
+	}, function(batch, err)
+		auto.loading = false
+		if opts.track then
+			in_flight[state.origin_buf or bufnr] = nil
+		end
+		if err then
+			if err.cancelled then
+				return refuse("cancelled")
+			end
+			return refuse(err.message, vim.log.levels.ERROR)
+		end
+		local appended = grid.add_page(bufnr, batch)
+		-- A batch that claims there is more and brings nothing would be asked
+		-- for again on the next motion, forever. No server does that today;
+		-- the latch is what keeps it a bug rather than a loop.
+		if appended == 0 and batch.done == false then
+			auto.exhausted = true
+		end
+		if batch.done ~= false then
+			auto.exhausted = true
+		end
+		if opts.on_done then
+			opts.on_done(appended)
+		end
+	end)
+	-- Only the manual path is cancellable. `in_flight` is keyed by the query
+	-- buffer and read by M.cancel, so tracking an automatic continuation would
+	-- let :NGripCancel in the SQL file send `cancel {hash}` and destroy the
+	-- cursor the reader is scrolling through.
+	if opts.track then
+		in_flight[state.origin_buf or bufnr] = handle
+	end
+	return true
+end
+
+--- Move a batch. Backwards is a cursor jump and forwards usually is too: the
+--- rows are all on screen already (ADR-0040), and past the last batch it is
+--- the next batch of the cursor gripd still holds (ADR-0031). Nothing re-runs
+--- the statement, so no boundary can show a changed world.
 function M.page(state, delta)
 	if not state then
 		return
@@ -292,38 +379,26 @@ function M.page(state, delta)
 		return
 	end
 
-	local target = (state.page or 1) + delta
+	local target = current_batch(state) + delta
 	if target < 1 then
 		return neogrip.notify("already on the first page")
 	end
-	if state.pages[target] then
+	if (state.batches or {})[target] then
 		return grid.goto_page(bufnr, target)
 	end
 	if delta < 0 then
 		return neogrip.notify("already on the first page")
 	end
 
-	local result = state.result
-	if result.done ~= false or not result.hash then
-		return neogrip.notify("no further rows")
-	end
-
-	local handle = runner.run({
-		connection = result.connection,
-		hash = result.hash,
-		mode = "next",
-		limit = result.limit or config.get().limit,
-	}, function(batch, err)
-		in_flight[state.origin_buf or bufnr] = nil
-		if err then
-			if err.cancelled then
-				return neogrip.notify("cancelled")
+	M.load_more(state, {
+		track = true,
+		on_done = function(appended)
+			-- Asked for by hand, so the cursor goes to what arrived.
+			if appended > 0 then
+				grid.goto_page(bufnr, #state.batches)
 			end
-			return neogrip.notify(err.message, vim.log.levels.ERROR)
-		end
-		grid.add_page(bufnr, batch)
-	end)
-	in_flight[state.origin_buf or bufnr] = handle
+		end,
+	})
 end
 
 function M.sort(state, column, descending)

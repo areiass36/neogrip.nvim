@@ -102,33 +102,36 @@ check("a full page", #state.rows, 10)
 check("first row", state.rows[1][1], 1)
 check("and the result stays open", state.result.done, false)
 local page_lines = vim.api.nvim_buf_get_lines(page_buf, 0, -1, false)
-check("the footer says which rows", page_lines[#page_lines]:find("1%-10") ~= nil, true)
+check("the footer counts the rows it holds", page_lines[#page_lines]:find("10 rows", 1, true) ~= nil, true)
 
-local before_rows = vim.deepcopy(state.rows)
 execute.page(state, 1)
 support.wait(function()
 	local current = grid.state(grid.current_buf())
-	return current and current.rows[1] and current.rows[1][1] ~= before_rows[1][1]
+	return current and #current.rows == 20
 end, 20000)
 state = grid.state(grid.current_buf())
-check("the next page starts where the last ended", state.rows[1][1], 11)
+-- Accumulation, against a real server: row one is still here, and the batch
+-- landed after it rather than replacing it (ADR-0040).
+check("the first row is still the first row", state.rows[1][1], 1)
+check("and the batch continues from where the last ended", state.rows[11][1], 11)
 check("and still has more", state.result.done, false)
-check("without running the statement again", #state.pages, 2)
+check("without running the statement again", #state.batches, 2)
 
 execute.page(state, 1)
 support.wait(function()
 	local current = grid.state(grid.current_buf())
-	return current and current.rows[1] and current.rows[1][1] == 21
+	return current and #current.rows == 25
 end, 20000)
 state = grid.state(grid.current_buf())
-check("the last page is short", #state.rows, 5)
-check("and says so", state.result.done, true)
+check("the last batch is short", #state.batches, 3)
+check("and the rows are all of them", #state.rows, 25)
+check("and it says so", state.result.done, true)
 
--- Going back is a redraw of rows that never left the editor, so it is
--- synchronous: there is nothing to wait for (ADR-0031).
+-- Going back is a cursor jump: the rows never left the editor, so there is
+-- nothing to wait for (ADR-0031, ADR-0040).
 execute.page(grid.state(grid.current_buf()), -1)
-check("and going back works", grid.state(grid.current_buf()).rows[1][1], 11)
-check("with no fourth request for three pages", #grid.state(grid.current_buf()).pages, 3)
+check("and going back moves to where that batch began", grid.state(grid.current_buf()).row, 11)
+check("with nothing fetched or dropped", #grid.state(grid.current_buf()).rows, 25)
 
 support.describe("live/flow: sorting is done by the server")
 state = grid.state(grid.current_buf())
@@ -139,7 +142,7 @@ support.wait(function()
 end, 20000)
 state = grid.state(grid.current_buf())
 check("descending starts at the highest row of the whole table", state.rows[1][1], 25)
--- A sort is a different result, so the pages of the old one go with it.
-check("not just of the page", state.page, 1)
-check("and the old pages are gone", #state.pages, 1)
+-- A sort is a different result, so the rows of the old one go with it.
+check("not just of what was loaded", #state.batches, 1)
+check("and the old rows are gone", #state.rows, 10)
 support.run(pg, "drop table if exists paging", { mode = "exec" })

@@ -28,9 +28,10 @@ local states = {}
 --- @class neogrip.GridState
 --- @field result table
 --- @field columns string[]
---- @field rows any[][] the page on screen
---- @field pages any[][][] every page fetched so far, in order
---- @field page integer which of them is on screen, 1-based
+--- @field rows any[][] every row loaded, in order (ADR-0040)
+--- @field batches { first: integer, last: integer }[] where each batch landed
+--- @field auto table { loading, exhausted } - the fetch guards for this result
+--- @field expired boolean|nil the server no longer has this result open
 --- @field spans table
 --- @field kinds table what each cell holds, keyed the same way as spans
 --- @field layout neogrip.Layout
@@ -40,16 +41,6 @@ local states = {}
 
 function M.state(bufnr)
 	return states[bufnr or vim.api.nvim_get_current_buf()]
-end
-
---- How many rows came before the page on screen. The pages are kept, so this
---- is a sum rather than a number the server has to be told (ADR-0031).
-local function page_offset(state)
-	local offset = 0
-	for index = 1, (state.page or 1) - 1 do
-		offset = offset + #(state.pages[index] or {})
-	end
-	return offset
 end
 
 --- The footer, and the byte span of each part so they can be told apart: which
@@ -63,8 +54,9 @@ end
 local function footer(state)
 	local result = state.result
 	local connection = result.connection or {}
-	local offset = page_offset(state)
-	local range = ("%d-%d"):format(offset + 1, offset + #state.rows)
+	-- A count, not a range: rows accumulate, so the first one on screen is
+	-- always row one and the only interesting number is how many are here.
+	local range = ("%d rows"):format(#state.rows)
 	if #state.rows == 0 then
 		range = "no rows"
 	end
@@ -78,16 +70,30 @@ local function footer(state)
 			range = ("%d row%s affected"):format(affected, affected == 1 and "" or "s")
 		end
 	end
-	-- More rows exist when the result is still open, and also when a page that
-	-- was already fetched sits ahead of the one on screen.
-	local more = result.done == false or (state.page or 1) < #(state.pages or {})
+	-- `done` stays false on a result whose cursor the server has dropped, which
+	-- is true of the cursor and a lie about the rows - so the footer asks both.
+	local more = result.done == false and not state.expired
+	local auto = state.auto or {}
+	local cap = require("neogrip.config").get().auto_load_max_rows
+	local suffix = ""
+	if state.expired then
+		suffix = " (expired)"
+	elseif more and auto.loading then
+		suffix = " (more, loading...)"
+	elseif more and cap and cap > 0 and #state.rows >= cap then
+		-- Paused, not stopped: page_next still loads past the cap. No key is
+		-- named here because the plugin maps none (ADR-0017).
+		suffix = " (more, paused)"
+	elseif more then
+		suffix = " (more)"
+	end
 	local elapsed = result.elapsed_ms or 0
 	local parts = {
 		{
 			("%s [%s]"):format(connection.name or "?", connection.driver or "?"),
 			connection.production and "NGripGridProduction" or "NGripGridConnection",
 		},
-		{ range .. (more and " (more)" or ""), "NGripGridCount" },
+		{ range .. suffix, "NGripGridCount" },
 		{ ("%d ms"):format(elapsed), elapsed >= SLOW_MS and "NGripGridSlow" or "NGripGridElapsed" },
 	}
 	if state.has_binary then
@@ -114,6 +120,22 @@ local function render(bufnr)
 	end
 
 	local computed = layout.compute(state.columns, state.rows, {})
+	-- Whether every line already drawn just moved sideways. A batch that widens
+	-- a column shifts every byte span on every row before it, and the cursor's
+	-- byte column then points at a different cell than it did - so the caller
+	-- has to put the cursor back on the cell rather than leave it on the byte.
+	local moved = false
+	local previous = state.layout and state.layout.widths or nil
+	if previous == nil or #previous ~= #computed.widths then
+		moved = true
+	else
+		for index, width in ipairs(computed.widths) do
+			if previous[index] ~= width then
+				moved = true
+				break
+			end
+		end
+	end
 	local lines, spans, kinds = layout.render(computed, state.columns, state.rows, {})
 	state.layout = computed
 	state.spans = spans
@@ -160,6 +182,7 @@ local function render(bufnr)
 	})
 
 	M.highlight_cell(bufnr)
+	return moved
 end
 
 --- Underline the cell the cursor is in, so "which column am I on" is visible
@@ -295,8 +318,8 @@ function M.show(result, context)
 		bufnr = bufnr,
 		columns = result.columns or {},
 		rows = result.rows or {},
-		pages = { result.rows or {} },
-		page = 1,
+		batches = { { first = 1, last = #(result.rows or {}) } },
+		auto = {},
 		documents = result.documents,
 		row = 1,
 		column = 1,
@@ -335,8 +358,8 @@ function M.close(bufnr)
 end
 
 --- Replace the whole result in place, for a re-run: a different sort, or the
---- same statement asked again. The pages already fetched belong to the result
---- that is being replaced, so they go with it.
+--- same statement asked again. The rows already fetched belong to the result
+--- that is being replaced, so they go with it, and so do its fetch guards.
 function M.set_result(bufnr, result)
 	local state = states[bufnr]
 	if not state then
@@ -345,8 +368,9 @@ function M.set_result(bufnr, result)
 	state.result = result
 	state.columns = result.columns or {}
 	state.rows = result.rows or {}
-	state.pages = { result.rows or {} }
-	state.page = 1
+	state.batches = { { first = 1, last = #(result.rows or {}) } }
+	state.auto = {}
+	state.expired = nil
 	state.documents = result.documents
 	state.row = 1
 	state.column = math.min(state.column, math.max(#state.columns, 1))
@@ -357,15 +381,38 @@ function M.set_result(bufnr, result)
 	end
 end
 
---- Keep a batch continued from the open cursor and show it (ADR-0031). The
---- shape only arrives again when a document result grew its own columns, which
---- is the one case where a later batch can widen the table.
+--- Append a batch continued from the open cursor (ADR-0040, ADR-0031).
+---
+--- The rows accumulate: this never replaces what is on screen, and it never
+--- moves the cursor, because the batch it is appending is usually one the
+--- reader did not ask for by hand. The shape only arrives again when a document
+--- result grew its own columns, which is the one case where a later batch can
+--- widen the table.
+--- @return integer appended how many rows the batch brought
 function M.add_page(bufnr, batch)
 	local state = states[bufnr]
 	if not state then
-		return
+		return 0
 	end
-	state.pages[#state.pages + 1] = batch.rows or {}
+	local rows = batch.rows or {}
+	local first = #state.rows + 1
+	for _, row in ipairs(rows) do
+		state.rows[#state.rows + 1] = row
+	end
+	-- A batch that brought nothing is not a place in the result, so it is not
+	-- recorded as one; the caller decides whether that means the end.
+	if #rows > 0 then
+		state.batches[#state.batches + 1] = { first = first, last = #state.rows }
+	end
+	-- Kept index-aligned with state.rows even though the runner does not carry
+	-- documents yet (ADR-0040): the day it does, accumulation is already right,
+	-- and a batch that brings none leaves holes that show_document reads as "no
+	-- document behind this row", which is what they are.
+	if state.documents and batch.documents then
+		for index, document in ipairs(batch.documents) do
+			state.documents[first + index - 1] = document
+		end
+	end
 	if batch.columns and #batch.columns > #state.columns then
 		state.columns = batch.columns
 		state.result.column_types = batch.column_types
@@ -374,24 +421,34 @@ function M.add_page(bufnr, batch)
 	end
 	state.result.done = batch.done
 	state.result.elapsed_ms = batch.elapsed_ms
-	M.goto_page(bufnr, #state.pages)
+	local moved = render(bufnr)
+	-- The cursor stays on the row it was on. When the table moved sideways its
+	-- byte column now addresses another cell, so it is put back on the cell it
+	-- was in rather than left where the bytes fell.
+	if moved then
+		local winid = find_window(bufnr)
+		if winid then
+			M.focus_cell(bufnr, winid)
+		end
+	end
+	return #rows
 end
 
---- Show a page that was already fetched. Going back is this and nothing more:
---- the rows never left the editor.
+--- Jump to where a batch began. Nothing is fetched and nothing is redrawn: the
+--- rows are all on screen already, so this moves the cursor and no more.
 function M.goto_page(bufnr, index)
 	local state = states[bufnr]
-	if not state or not state.pages[index] then
+	local batch = state and state.batches and state.batches[index]
+	if not batch then
 		return
 	end
-	state.page = index
-	state.rows = state.pages[index]
-	state.row = 1
+	state.row = math.min(batch.first, math.max(#state.rows, 1))
 	state.column = math.min(state.column, math.max(#state.columns, 1))
-	render(bufnr)
 	local winid = find_window(bufnr)
 	if winid then
 		M.focus_cell(bufnr, winid)
+	else
+		M.highlight_cell(bufnr)
 	end
 end
 

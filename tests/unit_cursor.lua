@@ -103,7 +103,7 @@ gripd.request = saved.request
 gripd.is_connected = saved.is_connected
 gripd.is_connected_to = saved.is_connected_to
 
-support.describe("grid: pages are kept, so going back is a redraw")
+support.describe("grid: rows accumulate, so a batch never replaces what is there")
 
 local function footer_of(bufnr)
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -120,21 +120,36 @@ local bufnr = grid.show({
 	elapsed_ms = 3,
 }, { focus = false })
 
-check("the first batch is the first page", #grid.state(bufnr).pages, 1)
-check("the footer counts from one", footer_of(bufnr):find("1%-2") ~= nil, true)
+local state = grid.state(bufnr)
+check("the first batch is the first stretch of rows", #state.batches, 1)
+check("recorded by where it landed", state.batches[1], { first = 1, last = 2 })
+check("the footer counts the rows it holds", footer_of(bufnr):find("2 rows", 1, true) ~= nil, true)
 check("and says there is more", footer_of(bufnr):find("(more)", 1, true) ~= nil, true)
 
+-- The regression this whole change is about: a batch arriving must not move
+-- the reader. goto_page used to reset the row to 1 and re-focus the cell.
+state.row = 2
 grid.add_page(bufnr, { rows = { { 3 }, { 4 } }, done = true, elapsed_ms = 1 })
-local state = grid.state(bufnr)
-check("a continued batch becomes the next page", #state.pages, 2)
-check("which is the one on screen", state.rows, { { 3 }, { 4 } })
-check("the footer counts past the pages before it", footer_of(bufnr):find("3%-4") ~= nil, true)
+check("a batch arriving leaves the cursor where it was", grid.state(bufnr).row, 2)
+
+check("the rows accumulate", state.rows, { { 1 }, { 2 }, { 3 }, { 4 } })
+check("and the batch is recorded after the first", #state.batches, 2)
+check("by where it landed", state.batches[2], { first = 3, last = 4 })
+check("the footer counts all of them", footer_of(bufnr):find("4 rows", 1, true) ~= nil, true)
 check("and stops promising more", footer_of(bufnr):find("(more)", 1, true), nil)
 
+-- Header, rule, four rows, a blank and the footer: both batches are drawn, not
+-- just the one that arrived last.
+local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+check("every row is on screen", #lines, 8)
+check("the first batch included", lines[3]:find("1", 1, true) ~= nil, true)
+check("and the second", lines[6]:find("4", 1, true) ~= nil, true)
+
+grid.goto_page(bufnr, 2)
+check("jumping to a batch moves the cursor to where it began", grid.state(bufnr).row, 3)
+check("and nothing is fetched or dropped", #grid.state(bufnr).rows, 4)
 grid.goto_page(bufnr, 1)
-check("going back shows the rows already fetched", grid.state(bufnr).rows, { { 1 }, { 2 } })
-check("the footer counts from one again", footer_of(bufnr):find("1%-2") ~= nil, true)
-check("and a page ahead is more rows", footer_of(bufnr):find("(more)", 1, true) ~= nil, true)
+check("jumping back is the same thing in reverse", grid.state(bufnr).row, 1)
 
 support.describe("grid: a document result that grows its columns widens the table")
 
@@ -146,8 +161,15 @@ grid.add_page(bufnr, {
 })
 check("the longer column list wins", grid.state(bufnr).columns, { "n", "extra" })
 check("and is drawn", vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1]:find("extra") ~= nil, true)
+-- The rows from before the widening were a separate page once; a careless
+-- append would have dropped them when the shape changed.
+check(
+	"the rows from before it are still there",
+	vim.api.nvim_buf_get_lines(bufnr, 2, 3, false)[1]:find("1", 1, true) ~= nil,
+	true
+)
 
-support.describe("execute: paging asks the server only for a page it does not have")
+support.describe("execute: paging asks the server only for a batch it does not have")
 
 local notices = {}
 local saved_notify = vim.notify
@@ -174,16 +196,16 @@ end
 
 grid.goto_page(bufnr, 1)
 execute.page(grid.state(bufnr), 1)
-check("a page already fetched costs no request", #requests, 0)
-check("and is simply shown", grid.state(bufnr).page, 2)
+check("a batch already fetched costs no request", #requests, 0)
+check("and is simply jumped to", grid.state(bufnr).row, 3)
 
 execute.page(grid.state(bufnr), -1)
 notices = {}
 execute.page(grid.state(bufnr), -1)
-check("the first page has nothing before it", last_notice(), "[neogrip] already on the first page")
+check("the first batch has nothing before it", last_notice(), "[neogrip] already on the first page")
 
 -- A finished result has nothing to continue, and must not be asked.
-grid.goto_page(bufnr, #grid.state(bufnr).pages)
+grid.goto_page(bufnr, #grid.state(bufnr).batches)
 notices, requests = {}, {}
 execute.page(grid.state(bufnr), 1)
 check("a finished result is not asked for more", #requests, 0)
@@ -192,11 +214,16 @@ check("the grid says so", last_notice(), "[neogrip] no further rows")
 -- An open one is, as a continuation of the same cursor.
 grid.state(bufnr).result.done = false
 notices, requests = {}, {}
+local before = #grid.state(bufnr).rows
 execute.page(grid.state(bufnr), 1)
 check("an open result is continued", #requests, 1)
 check("by name", requests[1] and requests[1].hash, "aaaabbbbcccc")
 check("as a continuation", requests[1] and requests[1].mode, "next")
-check("and the batch lands as a new page", grid.state(bufnr).rows, { { 6 } })
+check("and the batch is appended", #grid.state(bufnr).rows, before + 1)
+check("at the end", grid.state(bufnr).rows[before + 1], { 6 })
+-- Asked for by hand, so this one does move the cursor to what arrived.
+check("the cursor follows what it asked for", grid.state(bufnr).row, before + 1)
+check("and a finished batch latches the fetching off", grid.state(bufnr).auto.exhausted, true)
 
 runner.run = saved_run
 vim.notify = saved_notify
