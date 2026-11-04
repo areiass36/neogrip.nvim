@@ -143,14 +143,26 @@ function M.groups()
 	return vim.tbl_keys(SPEC)
 end
 
+--- `grid.from` paints only the rows from that index on, and clears only from
+--- there down - which also takes the old footer's marks with it, because the
+--- footer moves when rows are appended. The stripe parity is the absolute row
+--- number, so a tail stripes correctly on its own; that holds only because rows
+--- accumulate and never shift (ADR-0040).
+---
 --- @param grid { lines: string[], spans: table, kinds: table, rows: integer,
---- sorted_column: integer|nil, footer: { line: integer, segments: table }|nil }
+--- sorted_column: integer|nil, footer: { line: integer, segments: table }|nil,
+--- from: integer|nil }
 function M.paint(bufnr, namespace, grid)
 	if not vim.api.nvim_buf_is_valid(bufnr) then
 		return
 	end
 	M.setup()
-	vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+	local first_row = math.max(grid.from or 1, 1)
+	if first_row == 1 then
+		vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+	else
+		vim.api.nvim_buf_clear_namespace(bufnr, namespace, first_row + RULE_LINE - 2, -1)
+	end
 
 	local lines = grid.lines
 	local striped = config.get().stripe_rows
@@ -177,15 +189,17 @@ function M.paint(bufnr, namespace, grid)
 		mark(line, previous, #(lines[line] or ""), "NGripGridSeparator")
 	end
 
-	local header_spans = grid.spans[HEADER_LINE] or {}
-	for index, span in ipairs(header_spans) do
-		local sorted = grid.sorted_column == index
-		mark(HEADER_LINE, span[1], span[2], sorted and "NGripGridHeaderSorted" or "NGripGridHeader")
+	if first_row == 1 then
+		local header_spans = grid.spans[HEADER_LINE] or {}
+		for index, span in ipairs(header_spans) do
+			local sorted = grid.sorted_column == index
+			mark(HEADER_LINE, span[1], span[2], sorted and "NGripGridHeaderSorted" or "NGripGridHeader")
+		end
+		furniture(HEADER_LINE, header_spans)
+		mark(RULE_LINE, 0, #(lines[RULE_LINE] or ""), "NGripGridRule")
 	end
-	furniture(HEADER_LINE, header_spans)
-	mark(RULE_LINE, 0, #(lines[RULE_LINE] or ""), "NGripGridRule")
 
-	for row = 1, grid.rows do
+	for row = first_row, grid.rows do
 		local line = row + RULE_LINE
 		local line_spans = grid.spans[line] or {}
 		local kinds = grid.kinds[line] or {}

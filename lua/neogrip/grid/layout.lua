@@ -115,6 +115,13 @@ end
 --- different number of bytes, so a single span would miss by a few bytes on
 --- every row that is not pure ASCII.
 ---
+--- `opts.from` renders only the rows from that index on, and leaves the header
+--- and the rule alone. Everything comes back keyed by its absolute line, so a
+--- caller holding the lines it drew before can splice the answer straight in -
+--- which is the whole reason this is worth having: a result read by scrolling
+--- re-renders on every batch, and at ten thousand rows that was 425 ms of
+--- rendering per batch (measured, eight columns) for two hundred new rows.
+---
 --- @return string[] lines
 --- @return table spans spans[line][column] = { start_byte, end_byte } 0-based, end exclusive
 --- @return table kinds kinds[line][column] = what the cell holds, for colouring
@@ -138,15 +145,19 @@ function M.render(layout, columns, rows, opts)
 		return " " .. table.concat(parts, SEPARATOR) .. " "
 	end
 
-	local header_parts, separator_parts = {}, {}
-	for index, column in ipairs(columns) do
-		header_parts[index] = pad(M.truncate(tostring(column), widths[index]), widths[index])
-		separator_parts[index] = string.rep("─", widths[index])
+	local from = math.max(opts.from or 1, 1)
+	if from == 1 then
+		local header_parts, separator_parts = {}, {}
+		for index, column in ipairs(columns) do
+			header_parts[index] = pad(M.truncate(tostring(column), widths[index]), widths[index])
+			separator_parts[index] = string.rep("─", widths[index])
+		end
+		lines[1] = compose(header_parts, 1)
+		lines[2] = "─" .. table.concat(separator_parts, "─┼─") .. "─"
 	end
-	lines[1] = compose(header_parts, 1)
-	lines[2] = "─" .. table.concat(separator_parts, "─┼─") .. "─"
 
-	for row_index, row in ipairs(rows) do
+	for row_index = from, #rows do
+		local row = rows[row_index]
 		local parts, row_kinds = {}, {}
 		for index = 1, #columns do
 			local raw = row[index]
