@@ -169,6 +169,50 @@ end)
 Engines that keep no cheap estimate — SQLite, DuckDB, Trino, MongoDB — answer
 nothing rather than counting rows, so show no number there.
 
+**Walking into a database.** `shape()` marks the `instance` level with
+`reconnects = true` where using another database means opening a new connection
+to it — PostgreSQL and SQL Server cannot select across databases. The plugin
+does not do that for you; register a connection with that `database` and walk
+from its server node:
+
+```lua
+for _, entry in ipairs(tree.shape(connection).levels) do
+  if entry.level == "instance" and entry.reconnects then
+    -- picking a child here means re-registering the connection with
+    -- database = node.name, then expanding the new server node
+  end
+end
+```
+Trino leaves the flag off: one session queries across catalogs, so picking one
+only changes the names `tree.qualified_name` writes — it returns all three parts
+there, and nothing has to be reopened.
+
+**A level too long to draw at once.** Pass `limit` and a tree asks the server
+for one page of that level instead of the whole cached schema. The page says
+whether there is more, and what is left in it is exactly the opts of the next
+call:
+
+```lua
+local function page(node, after, acc)
+  tree.children(node, {
+    limit = 200,
+    after = after,
+    on_page = function(continuation) node._page = continuation end,
+  }, function(nodes)
+    vim.list_extend(acc, nodes)
+    if not node._page.done then
+      return page(node, node._page.after, acc)
+    end
+    draw(acc)
+  end)
+end
+```
+This works the same on instances, namespaces and sets, and the rows above are
+the same shape with `hash` and `from` in place of `after`. Without `limit` the
+answer comes from the catalog cache in one round trip and the server caps it
+silently, which is the right trade for an ordinary schema — page when the
+catalog is big enough that a missing set would matter.
+
 **Rows under a table.** Rows are data: they cost a query and are never cached,
 so they are behind a flag.
 

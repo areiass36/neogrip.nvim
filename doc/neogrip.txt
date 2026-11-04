@@ -177,6 +177,17 @@ shape(connection)
         without naming one. `object` is marked `on_demand`: rows are data,
         they cost a query and are never cached.
 
+        `reconnects` on the `instance` level means the connection has to be
+        reopened pointed at that instance before anything in it can be
+        queried: PostgreSQL and SQL Server bind a connection to one database
+        and cannot select across them, so walking into another one is a new
+        connection, not a longer name. Nothing here does that for you - the
+        client draws the explorer, so the flag is how it learns it has to.
+        Trino is the exception and says so by leaving the flag off: one
+        session queries across catalogs, which is the reason the engine
+        exists, so there the chosen catalog lands in the name instead
+        (ADR-0039) and `qualified_name` writes all three parts.
+
                                                 *neogrip.tree.children()*
 children(node, opts, callback)
         The children of `node`, at whatever level comes next. `node` of nil
@@ -186,6 +197,21 @@ children(node, opts, callback)
         server. `opts.objects = true` reaches the rows instead of the columns,
         with `limit`, `hash` and `from` to page and `on_page` to receive the
         continuation.
+
+        Every level pages the same way. `opts.limit` or `opts.after` on a
+        server, instance or namespace node asks the server for one page of
+        instances, namespaces or sets, ordered by name, and `on_page` then
+        receives `{ done, after }` - `done = false` means there is more.
+        Whatever is left in that page is exactly the opts of the next call, so
+        one `vim.tbl_extend("force", opts, page)` continues any level, rows
+        included. Paging keeps no state on the server: the page carries the
+        last name it sent and the next call resumes from it.
+
+        Without `limit` or `after` the answer is the other one: a whole schema
+        in one round trip, kept in the catalog cache, and capped by the server
+        without saying so. That is the cheaper question and the one a tree
+        wants for the hundreds of sets a person actually browses; page only
+        when the catalog is big enough that being exact matters.
 
         A node is `{ id, level, kind, name, ref, expandable, source, facts }`
         and carries nothing formatted: no icons, no padding, no "12 columns".
@@ -197,6 +223,7 @@ children(node, opts, callback)
 The rest are tools, not UI. None of them opens a buffer:
 
   qualified_name(ref)            the name as SQL, quoted for this engine
+                                 (with the catalog, where a query names one)
   statement(ref, kind, cb)       select|insert|update|delete, as text
   details(ref, cb)               keys, indexes and references for one set
   ddl(ref, cb)                   the server's own definition, or nil

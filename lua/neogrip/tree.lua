@@ -26,6 +26,18 @@ local M = {}
 --- The level a node sits at. A closed set: adding one is a contract change.
 M.LEVELS = { "server", "instance", "namespace", "set", "object", "attribute" }
 
+--- Does using another instance mean reopening the connection?
+---
+--- Yes everywhere a connection is bound to one database, which is everywhere
+--- but Trino: there one session queries across catalogs, so the choice lands
+--- in the name instead (ADR-0039). Nothing in the plugin acts on this - the
+--- client draws the explorer (ADR-0037), so this is what tells it to
+--- reconnect.
+--- @return boolean|nil
+local function reconnects_for(connection)
+	return connection.driver ~= "trino" or nil
+end
+
 --- @param driver string
 local function labels_for(driver)
 	return {
@@ -84,11 +96,11 @@ function M.shape(connection)
 		-- A connection that names its database starts below that level:
 		-- there is nothing left to choose.
 		if connection.database == nil or connection.database == "" then
-			add("instance", { reconnects = true })
+			add("instance", { reconnects = reconnects_for(connection) })
 		end
 	else
 		if not schema.catalog_of(connection) then
-			add("instance", { reconnects = true })
+			add("instance", { reconnects = reconnects_for(connection) })
 		end
 		add("namespace")
 	end
@@ -272,7 +284,7 @@ local function instances(handle, connection, ref, callback)
 				kind,
 				record.name,
 				extend(ref, "instance", record.name),
-				{ source = "server", facts = { reconnects = true } }
+				{ source = "server", facts = { reconnects = reconnects_for(connection) } }
 			)
 		end
 		deliver(handle, callback, nodes, nil)
@@ -295,6 +307,79 @@ local function namespaces(handle, connection, ref, callback)
 				extend(ref, "namespace", record.name),
 				{ source = known and "cache" or "server" }
 			)
+		end
+		deliver(handle, callback, nodes, nil)
+	end)
+end
+
+--- One page of a listing, straight from the server (ADR-0038).
+---
+--- Asked for explicitly, because the cached path is a different question: it
+--- asks for a whole schema in one round trip and keeps the answer, which is
+--- what a tree wants for the hundreds of sets a person actually browses. A
+--- caller that has to be exact on a catalog with thousands of them pages
+--- instead, and learns from `done` that there is more - the cheap path cannot
+--- say that, because the server caps what it sends and a cap is not a page.
+---
+--- All three container listings page, because all three can be long: a
+--- warehouse has catalogs the way a database has tables.
+local function paged(handle, connection, ref, level, pattern, opts, callback)
+	local catalog, namespace = qualifiers(connection, ref)
+	local method = ({
+		instance = "catalog/catalogs",
+		namespace = "catalog/schemas",
+		set = "catalog/tables",
+	})[level]
+	local params = { after = opts.after, limit = opts.limit }
+	if level ~= "instance" then
+		params.catalog = catalog
+	end
+	if level == "set" then
+		params.schema = namespace
+		params.pattern = pattern
+	end
+	gripd.request(connection, method, params, function(result, err)
+		if err then
+			return deliver(handle, callback, nil, err)
+		end
+		local nodes = {}
+		local last = nil
+		for _, record in ipairs((result or {}).rows or {}) do
+			local built
+			if level == "set" then
+				built = node("set", record.kind or "table", record.name, extend(ref, "set", record.name), {
+					source = "server",
+					facts = { remarks = record.remarks },
+				})
+			elseif level == "instance" then
+				built = node(
+					"instance",
+					connection.driver == "trino" and "catalog" or "database",
+					record.name,
+					extend(ref, "instance", record.name),
+					{ source = "server", facts = { reconnects = reconnects_for(connection) } }
+				)
+			else
+				built = node(
+					"namespace",
+					"schema",
+					record.name,
+					extend(ref, "namespace", record.name),
+					{ source = "server" }
+				)
+			end
+			nodes[#nodes + 1] = built
+			last = record.name
+		end
+		-- The continuation before the nodes, and in the same shape the rows
+		-- use: every page says `done`, and what is left in it is exactly the
+		-- opts of the next call, so a client continues with one
+		-- `vim.tbl_extend("force", opts, page)` at any level.
+		if not handle._state.cancelled and opts.on_page then
+			opts.on_page({
+				done = not (result and result.truncated == true),
+				after = last,
+			})
 		end
 		deliver(handle, callback, nodes, nil)
 	end)
@@ -356,8 +441,8 @@ end
 
 --- The rows of a set, as nodes, through the named cursor of ADR-0031.
 ---
---- Never cached and never swept: this is the one level that is data. The
---- result carries `continue` when there are more, and closing a node means
+--- Never cached and never swept: this is the one level that is data. The page
+--- says `done` like every other level's does, and closing a node means
 --- calling the handle's cancel so gripd stops holding the cursor - it keeps
 --- four per connection and evicts the oldest, so a client that expands five
 --- tables without closing any loses the first.
@@ -414,8 +499,14 @@ end
 --- walks from there down to a column without knowing that the top level comes
 --- from a different place than the rest.
 ---
+--- `limit` or `after` on a container level asks the server for one page by
+--- name and reports `{ done, after }` through `on_page`, which is how a client
+--- walks a catalog with more sets than the server sends at once. Without
+--- either, the answer is the cached whole-schema one: cheaper, kept, and capped
+--- by the server without saying so.
+---
 --- @param from table|nil the node to expand, or nil for the servers
---- @param opts table|nil { objects = true, limit, hash, from, on_page, pattern }
+--- @param opts table|nil { objects, limit, after, hash, from, on_page, pattern }
 --- @param callback fun(nodes: table[]|nil, err: table|string|nil)
 --- @return table handle with :cancel()
 function M.children(from, opts, callback)
@@ -441,12 +532,25 @@ function M.children(from, opts, callback)
 		return handle
 	end
 
+	local paging = opts.after ~= nil or opts.limit ~= nil
 	if level == "instance" then
-		instances(handle, connection, from.ref, callback)
+		if paging then
+			paged(handle, connection, from.ref, "instance", nil, opts, callback)
+		else
+			instances(handle, connection, from.ref, callback)
+		end
 	elseif level == "namespace" then
-		namespaces(handle, connection, from.ref, callback)
+		if paging then
+			paged(handle, connection, from.ref, "namespace", nil, opts, callback)
+		else
+			namespaces(handle, connection, from.ref, callback)
+		end
 	elseif level == "set" then
-		sets(handle, connection, from.ref, opts.pattern, callback)
+		if paging then
+			paged(handle, connection, from.ref, "set", opts.pattern, opts, callback)
+		else
+			sets(handle, connection, from.ref, opts.pattern, callback)
+		end
 	elseif level == "attribute" then
 		attributes(handle, connection, from.ref, callback)
 	elseif level == "object" then
@@ -472,8 +576,8 @@ function M.qualified_name(ref)
 	if not connection or not ref.set then
 		return nil
 	end
-	local _, namespace = qualifiers(connection, ref)
-	return schema.qualify(connection, namespace, ref.set)
+	local catalog, namespace = qualifiers(connection, ref)
+	return schema.qualify(connection, namespace, ref.set, catalog)
 end
 
 --- A statement to start from, as text. Opens nothing.
@@ -489,7 +593,10 @@ function M.statement(ref, kind, callback)
 		if err then
 			return callback(nil, err)
 		end
-		callback(require("neogrip.sql.statement").for_set(connection, namespace, ref.set, kind, columns), nil)
+		callback(
+			require("neogrip.sql.statement").for_set(connection, namespace, ref.set, kind, columns, catalog),
+			nil
+		)
 	end, catalog)
 end
 
