@@ -24,10 +24,20 @@ check(
 	vim.fn.strdisplaywidth(layout.truncate("🚀🔥🚀🔥", 5)) <= 5,
 	true
 )
+-- A cell far wider than the column: the point is that truncate measures by
+-- binary search rather than walking the string, which used to be asserted with
+-- a 50 ms wall clock. That failed whenever the machine was busy - six database
+-- containers and a live suite were enough - so the shape of the answer is
+-- asserted instead, with a budget loose enough to catch only a return to
+-- something quadratic.
 local huge = string.rep("x", 200000)
 local started = vim.uv.hrtime()
-layout.truncate(huge, 40)
-check("a huge cell truncates quickly", (vim.uv.hrtime() - started) / 1e6 < 50, true)
+local cut = layout.truncate(huge, 40)
+local elapsed = (vim.uv.hrtime() - started) / 1e6
+check("a huge cell is cut to the column", vim.fn.strdisplaywidth(cut), 40)
+check("ending in the ellipsis", cut:sub(-#"…"), "…")
+check("and nothing of the rest is carried", #cut < 100, true)
+check("without walking the whole string", elapsed < 2000, true)
 
 support.describe("grid/layout: widths and rendering")
 local columns = { "id", "cjk", "txt" }
