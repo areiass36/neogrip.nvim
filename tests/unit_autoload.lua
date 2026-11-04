@@ -225,6 +225,33 @@ grid.maybe_load_more(bufnr, line_of(1))
 settle()
 check("but the next batch puts it out of reach again", #requests, 1)
 
+support.describe("autoload: the footer says a batch is on its way")
+
+-- The synchronous fake above answers before anything can look, so this one
+-- holds the callback until the footer has been read.
+local held_callback = nil
+local saved_sync_run = runner.run
+runner.run = function(request, callback)
+	requests[#requests + 1] = request
+	held_callback = callback
+	return { done = false }
+end
+config.setup({ auto_load_rows = 10 })
+bufnr = fresh({ rows = 200 })
+trigger(bufnr, line_of(200))
+check("the request is out", #requests, 1)
+check("and the state says so", grid.state(bufnr).auto.loading, true)
+lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+check("the footer says a batch is on its way", lines[#lines]:find("loading", 1, true) ~= nil, true)
+check("while still promising more", lines[#lines]:find("more", 1, true) ~= nil, true)
+
+held_callback({ rows = { { 201 } }, done = true, elapsed_ms = 1 })
+lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+check("and stops saying it once the batch lands", lines[#lines]:find("loading", 1, true), nil)
+check("the batch was appended", #grid.state(bufnr).rows, 201)
+check("and the loading flag is down", grid.state(bufnr).auto.loading, false)
+runner.run = saved_sync_run
+
 support.describe("autoload: closing the grid hands the result back")
 
 -- Nothing evicts an open result any more (ADR-0041), so the client has to.
