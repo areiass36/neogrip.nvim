@@ -97,6 +97,16 @@ function M.connections()
 			auth = vim.tbl_extend("force", password, { user = "root" }),
 			options = {},
 		},
+		mariadb = {
+			id = "test-maria",
+			name = "test mariadb",
+			driver = "mariadb",
+			host = "127.0.0.1",
+			port = 13307,
+			database = "testdb",
+			auth = vim.tbl_extend("force", password, { user = "root" }),
+			options = {},
+		},
 		mssql = {
 			id = "test-ms",
 			name = "test mssql",
@@ -112,7 +122,12 @@ function M.connections()
 			id = "test-lite",
 			name = "test sqlite",
 			driver = "sqlite",
-			file = "/tmp/neogrip-test.sqlite",
+			-- A temp path from nvim itself, not a hardcoded /tmp: on Windows
+			-- nvim resolves "/tmp/x" against the drive of the current
+			-- directory, so the file the suite read was never the file the
+			-- shell wrote, and whether the fixture was there at all depended
+			-- on where the runner happened to be started from.
+			file = temp_dir .. "/neogrip-test.sqlite",
 			auth = { type = "none" },
 			options = {},
 		},
@@ -123,6 +138,21 @@ function M.connections()
 			file = temp_dir .. "/neogrip-test.duckdb",
 			auth = { type = "none" },
 			options = {},
+		},
+		trino = {
+			id = "test-trino",
+			name = "test trino",
+			driver = "trino",
+			host = "127.0.0.1",
+			port = 18080,
+			-- No catalog on purpose: Trino is the only fixture with an
+			-- instance level to walk into, which is what exercises the catalog
+			-- travelling in every ref. The user is an option rather than an
+			-- auth, because the driver refuses a password without TLS and a
+			-- plain-HTTP coordinator trusts whatever name it is given - for
+			-- Trino an option lands in the URL and nowhere else (ADR-0012).
+			auth = { type = "none" },
+			options = { user = "testuser" },
 		},
 		mongodb = {
 			id = "test-mongo",
@@ -142,15 +172,50 @@ function M.has_jdk()
 	return require("neogrip.bootstrap.jdk").javac() ~= nil
 end
 
---- Is this server answering? The live tests skip rather than fail when the
---- containers are not up, so the unit tests still run anywhere. A DuckDB file
---- is created by the driver itself, so it only needs a JVM.
-function M.reachable(connection)
-	if connection.driver == "duckdb" then
-		return M.has_jdk()
+local seeded = {}
+
+--- The standard torture fixture in a file database, written by the driver
+--- that reads it.
+---
+--- The same reason DuckDB's fixture is made this way: a file database has no
+--- container, so tests/containers.sh cannot reach it. SQLite used to be seeded
+--- by the sqlite3 CLI, which assumed an executable that is not there on a
+--- stock Windows box and wrote to a different path than the JVM resolved
+--- anyway. Memoized, and the stale file is dropped first, so a run starts from
+--- a known fixture rather than from whatever an earlier run left behind.
+function M.ensure_file_fixture(connection)
+	if seeded[connection.id] then
+		return true
 	end
+	seeded[connection.id] = true
+	if connection.driver == "sqlite" then
+		vim.fn.delete(connection.file)
+		-- One statement per call: a single string of three would be split by
+		-- the sequence rule of ADR-0030 and the failure would read as a
+		-- parse error.
+		for _, sql in ipairs({
+			"create table torture(id integer primary key, s_null text, s_empty text, "
+				.. "s_comma text, cjk text)",
+			"insert into torture values (1,null,'','a,b','日本語')",
+			"insert into torture values (2,null,'','x','中文')",
+		}) do
+			local _, err = M.run(connection, sql, { mode = "exec", timeout = 90000 })
+			if err then
+				return false, err.message
+			end
+		end
+	end
+	return true
+end
+
+--- Is this server answering? The live tests skip rather than fail when the
+--- containers are not up, so the unit tests still run anywhere. A file
+--- database is created by the driver itself, so it only needs a JVM - asking
+--- whether the file is already there would skip the very first run and make
+--- the suite depend on an artifact of the last one.
+function M.reachable(connection)
 	if connection.file then
-		return vim.fn.filereadable(connection.file) == 1
+		return M.has_jdk()
 	end
 	local socket = vim.uv.new_tcp()
 	local connected = false
@@ -158,7 +223,11 @@ function M.reachable(connection)
 		connected = err == nil
 		socket:close()
 	end)
-	vim.wait(2000, function()
+	-- Trino's coordinator binds its HTTP port well before it will plan a
+	-- query, and the handshake itself is slower than a database socket, so it
+	-- gets longer here. The real gate is tests/containers.sh, which does not
+	-- return until Trino answers `select 1`.
+	vim.wait(connection.driver == "trino" and 5000 or 2000, function()
 		return socket:is_closing()
 	end, 20)
 	return connected

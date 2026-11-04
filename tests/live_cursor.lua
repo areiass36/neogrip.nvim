@@ -23,6 +23,8 @@ for _, driver in ipairs(order) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
+		-- A file database has no container to seed it (tests/containers.sh).
+		support.ensure_file_fixture(connection)
 		if driver == "duckdb" then
 			-- The file has to be written by the driver that reads it, so the
 			-- fixture is created here rather than by tests/containers.sh.

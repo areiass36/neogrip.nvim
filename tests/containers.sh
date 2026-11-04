@@ -58,6 +58,15 @@ seed_mysql() {
     insert into torture values (1,null,'','a,b',8.90,true,'日本語'),(2,null,'','x',-0.01,false,'中文');"
 }
 
+seed_maria() {
+    # MariaDB's own client, not mysql: the image dropped the mysql symlink in 11.
+    docker exec nvdb-maria mariadb --default-character-set=utf8mb4 -uroot -p"$PW" testdb -e "
+    create table if not exists torture(id int primary key, s_null text, s_empty text,
+      s_comma text, n decimal(10,2), flag boolean, cjk text);
+    truncate torture;
+    insert into torture values (1,null,'','a,b',8.90,true,'日本語'),(2,null,'','x',-0.01,false,'中文');"
+}
+
 seed_mongo() {
     docker exec nvdb-mongo mongosh --quiet -u root -p "$PW" --authenticationDatabase admin shop --eval '
     db.orders.drop();
@@ -88,41 +97,55 @@ seed_mssql() {
     insert into dbo.torture values (1,null,'','a,b',8.90,1,N'日本語'),(2,null,'','x',-0.01,0,N'中文');"
 }
 
+seed_trino() {
+    # Nothing to seed: tpch is a generated, read-only catalog. Readiness is a
+    # query answered, because Trino accepts connections for most of a minute
+    # before the coordinator will plan anything, and the JDBC driver reports
+    # that as a server error rather than as a refused connection.
+    docker exec nvdb-trino trino --execute 'select 1'
+}
+
 up() {
     docker run -d --name nvdb-pg -p 15432:5432 \
         -e POSTGRES_USER=testuser -e POSTGRES_PASSWORD="$PW" -e POSTGRES_DB=testdb postgres:17 >/dev/null
     docker run -d --name nvdb-my -p 13306:3306 \
         -e MYSQL_ROOT_PASSWORD="$PW" -e MYSQL_DATABASE=testdb mysql:9 >/dev/null
+    docker run -d --name nvdb-maria -p 13307:3306 \
+        -e MARIADB_ROOT_PASSWORD="$PW" -e MARIADB_DATABASE=testdb mariadb:11 >/dev/null
     docker run -d --name nvdb-mongo -p 17017:27017 \
         -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD="$PW" mongo:7 >/dev/null
     # The SQL Server image is amd64 only and runs emulated on Apple silicon,
     # which is why it gets the longest wait.
     docker run -d --name nvdb-ms -p 11433:1433 \
         -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD="$MSSQL_PW" mcr.microsoft.com/mssql/server:2022-latest >/dev/null
+    # Pinned to the version of the JDBC driver in bootstrap/jdbc.lua. Trino is
+    # the only fixture with more than one instance to walk into (system and
+    # tpch), which is what exercises the catalog travelling in every ref.
+    docker run -d --name nvdb-trino -p 18080:8080 trinodb/trino:484 >/dev/null
 
     printf 'seeding postgres'
     retry postgres seed_postgres
     printf 'seeding mysql'
     retry mysql seed_mysql
+    printf 'seeding mariadb'
+    retry mariadb seed_maria
     printf 'seeding mongo'
     retry mongo seed_mongo
     printf 'seeding sqlserver'
     retry sqlserver seed_mssql
+    printf 'waiting for trino'
+    retry trino seed_trino
 
-    rm -f /tmp/neogrip-test.sqlite /tmp/neogrip-test.duckdb
-    sqlite3 /tmp/neogrip-test.sqlite "create table torture(id integer primary key, s_null text,
-      s_empty text, s_comma text, cjk text);
-      insert into torture values (1,null,'','a,b','日本語'),(2,null,'','x','中文');"
-    # No duckdb file is seeded here: a DuckDB file can only be opened by the
-    # version that wrote it, so the tests create it through the same JDBC
-    # driver they then read it with.
-    echo "sqlite ready"
+    # Neither file database is seeded here. A DuckDB file can only be opened
+    # by the version that wrote it, and SQLite used to be seeded by the sqlite3
+    # CLI - an executable a stock Windows box does not have, writing to a path
+    # the JVM resolves differently than the shell does. Both are now created by
+    # the driver that reads them, in tests/support.lua.
     echo "all servers up and seeded"
 }
 
 down() {
-    docker rm -f nvdb-pg nvdb-my nvdb-mongo nvdb-ms >/dev/null 2>&1 || true
-    rm -f /tmp/neogrip-test.sqlite /tmp/neogrip-test.duckdb
+    docker rm -f nvdb-pg nvdb-my nvdb-maria nvdb-mongo nvdb-ms nvdb-trino >/dev/null 2>&1 || true
     echo "servers removed"
 }
 

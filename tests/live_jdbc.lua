@@ -22,6 +22,8 @@ for _, driver in ipairs(order) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
+		-- A file database has no container to seed it (tests/containers.sh).
+		support.ensure_file_fixture(connection)
 		if driver == "duckdb" then
 			-- The file has to be created by the same driver that reads it:
 			-- DuckDB refuses a file written by another version.

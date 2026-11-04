@@ -31,6 +31,8 @@ for _, driver in ipairs({ "postgres", "mysql", "mssql", "sqlite", "duckdb" }) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
+		-- A file database has no container to seed it (tests/containers.sh).
+		support.ensure_file_fixture(connection)
 		local connections_module = require("neogrip.connections")
 		local saved_get = connections_module.get
 		connections_module.get = function(id)
