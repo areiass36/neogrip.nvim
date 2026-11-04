@@ -34,8 +34,8 @@ for _, target in ipairs(targets) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
-		-- A file database has no container to seed it (tests/containers.sh).
-		support.ensure_file_fixture(connection)
+		-- Some databases arrive without a fixture of their own.
+		support.ensure_fixture(connection)
 		local databases, databases_err = support.sync(function(done)
 			schema.databases(connection, function(records, err)
 				done(records, err)
@@ -74,6 +74,27 @@ for _, target in ipairs(targets) do
 			schema.invalidate(connection)
 		end
 
+		-- The collapse of ADR-0036 is only a decision where an engine has a
+		-- type that is neither plainly a table nor plainly a view, and nothing
+		-- else in this suite produces one: every other fixture is a table, a
+		-- view or a collection, so the "nothing outside the three" check below
+		-- passed without ever being tested. PostgreSQL has both cases.
+		if target.driver == "postgres" then
+			support.run(
+				connection,
+				("create materialized view if not exists torture_mv as select id from %s"):format(
+					target.table_name
+				),
+				{ mode = "exec" }
+			)
+			support.run(
+				connection,
+				"create table if not exists torture_part (id int) partition by range (id)",
+				{ mode = "exec" }
+			)
+			schema.invalidate(connection)
+		end
+
 		local tables, tables_err = support.sync(function(done)
 			schema.tables(connection, target.schema_name, nil, function(records, err)
 				done(records, err)
@@ -91,6 +112,12 @@ for _, target in ipairs(targets) do
 				end
 				if record.name == "torture_v" then
 					check("and a view is a view", record.kind, "view")
+				end
+				if record.name == "torture_mv" then
+					check("a materialized view collapses to a view", record.kind, "view")
+				end
+				if record.name == "torture_part" then
+					check("and a partitioned table to a table", record.kind, "table")
 				end
 			end
 			check(("%s is listed"):format(target.table_name), found, true)
