@@ -131,6 +131,11 @@ batch; `done` is true when the result has no more rows, and gripd has then alrea
   size (500 when absent), `after` is the last name the client received, and the answer carries
   `truncated: true` when a page was cut. Paging is stateless on the server — the ordering is what makes
   resuming exact. `catalog/columns` is not paged: columns have a declared position and keep it.
+- A driver that reports its databases as **catalogs** — MySQL and MariaDB, where `catalog/schemas` answers
+  nothing at all — has the `schema` of a `catalog/tables` request read as its catalog when the request
+  carries no catalog. The client keeps one namespace slot per engine and puts the database in it; MySQL's
+  own `getTables` ignores a schema argument, which surfaced as a listing of the `sys` views instead of the
+  two tables in the database asked for.
 - A listed table's `kind` is one of exactly three (ADR-0036): `table`, `view` or `collection`. A
   materialized view is a `view`; everything else selectable - foreign, partitioned, temporary, system, an
   alias, a sequence, a type no driver here has reported before - is a `table`. The engine's own

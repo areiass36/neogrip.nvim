@@ -91,6 +91,30 @@ public final class Listings {
         return rows;
     }
 
+    /**
+     * Where this driver wants a database name.
+     *
+     * MySQL and MariaDB report their databases as catalogs: getSchemas answers
+     * nothing at all there, and getTables with the database in the schema
+     * argument silently ignores it. Measured against MySQL 9: asking for schema
+     * "testdb" answered the sys views instead of the two tables in it - fifty
+     * pages of them before the walk gave up - while asking for catalog "testdb"
+     * answered exactly the two. MariaDB's driver accepts either, which is why
+     * the fault is invisible on half the fixtures.
+     *
+     * The editor has one namespace slot per engine and puts the database in it
+     * (schema.catalog_of answers nothing for these drivers), so the swap
+     * belongs here, next to the metadata call it is about.
+     */
+    private static boolean databaseIsCatalog(DatabaseMetaData meta) throws SQLException {
+        String product = meta.getDatabaseProductName();
+        if (product == null) {
+            return false;
+        }
+        String name = product.toLowerCase(java.util.Locale.ROOT);
+        return name.contains("mysql") || name.contains("mariadb");
+    }
+
     public Contracts.Rows<Contracts.TableRow> tables(
             String catalog, String schema, String pattern, String after, int limit) throws SQLException {
         if (MongoFields.isMongo(connection)) {
@@ -106,6 +130,12 @@ public final class Listings {
         }
         DatabaseMetaData meta = connection.getMetaData();
         String namePattern = pattern == null || pattern.isEmpty() ? "%" : "%" + pattern + "%";
+        String inCatalog = catalog;
+        String inSchema = schema;
+        if (Metadata.orNull(catalog) == null && Metadata.orNull(schema) != null && databaseIsCatalog(meta)) {
+            inCatalog = schema;
+            inSchema = null;
+        }
 
         List<Contracts.TableRow> list = new ArrayList<>();
         // Asking for a list of types does not work across drivers: DuckDB
@@ -113,7 +143,11 @@ public final class Listings {
         // does not recognise silently returns nothing. So everything is
         // requested and the system objects are dropped here.
         try (ResultSet rows =
-                meta.getTables(Metadata.orNull(catalog), Metadata.orNull(Metadata.literal(meta, schema)), namePattern, null)) {
+                meta.getTables(
+                        Metadata.orNull(inCatalog),
+                        Metadata.orNull(Metadata.literal(meta, inSchema)),
+                        namePattern,
+                        null)) {
             while (rows.next()) {
                 String tableType = rows.getString("TABLE_TYPE");
                 if (Metadata.isSystem(tableType)) {
