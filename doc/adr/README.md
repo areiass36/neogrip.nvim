@@ -48,3 +48,5 @@ in the author's Neovim configuration; where the two disagreed, the record states
 | 0037 | [The plugin does not define an explorer](0037-no-built-in-explorer.md) | Accepted |
 | 0038 | [Protocol 4: the catalog answers a client-built tree](0038-protocol-4-catalog-for-a-client-tree.md) | Accepted |
 | 0039 | [The catalog is part of the name on Trino, not part of the connection](0039-the-catalog-is-part-of-a-trino-name.md) | Accepted |
+| 0040 | [The grid accumulates rows and loads the next batch as the cursor nears the end](0040-the-grid-accumulates-rows.md) | Accepted |
+| 0041 | [An open result lives an hour, and there is no cap on how many](0041-an-open-result-lives-an-hour.md) | Accepted |
