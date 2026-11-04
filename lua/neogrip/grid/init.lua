@@ -566,7 +566,12 @@ function M.row_number_for(bufnr, lnum)
 	if row < 1 or row > #state.rows then
 		return ""
 	end
-	local width = #tostring(#state.rows)
+	-- Four digits minimum, so the table does not shift sideways while it is
+	-- being read: the width came straight from the row count, which re-widthed
+	-- the whole gutter at row 100 and again at 1000, and rows accumulate now
+	-- (ADR-0040), so that is twice in one scroll instead of once per result. A
+	-- result worth scrolling reaches four digits anyway.
+	local width = math.max(4, #tostring(#state.rows))
 	return ("%" .. width .. "d "):format(row)
 end
 

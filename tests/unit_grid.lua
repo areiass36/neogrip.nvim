@@ -192,7 +192,20 @@ grid.show({
 local gb = grid.current_buf()
 check("header line has no number", grid.row_number_for(gb, 1), "")
 check("rule line has no number", grid.row_number_for(gb, 2), "")
-check("first data row is 1", grid.row_number_for(gb, 3), "1 ")
-check("third data row is 3", grid.row_number_for(gb, 5), "3 ")
+check("first data row is 1", grid.row_number_for(gb, 3), "   1 ")
+check("third data row is 3", grid.row_number_for(gb, 5), "   3 ")
 check("past the data is blank", grid.row_number_for(gb, 6), "")
+
+-- The gutter width must not change while the result is being read: it used to
+-- come straight from the row count, so crossing row 100 moved every line of
+-- the table one cell to the right (ADR-0040).
+local wide = {}
+for index = 1, 99 do
+	wide[index] = { index }
+end
+grid.add_page(gb, { rows = wide, done = false })
+local at_99 = grid.row_number_for(gb, 3)
+grid.add_page(gb, { rows = { { 100 } }, done = true })
+check("the gutter is the same width at 100 rows as at 99", grid.row_number_for(gb, 3), at_99)
+check("and it is the floor until four digits are needed", at_99, "   1 ")
 grid.close(gb)
