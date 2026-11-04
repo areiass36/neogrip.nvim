@@ -225,6 +225,21 @@ grid.maybe_load_more(bufnr, line_of(1))
 settle()
 check("but the next batch puts it out of reach again", #requests, 1)
 
+support.describe("autoload: closing the grid hands the result back")
+
+-- Nothing evicts an open result any more (ADR-0041), so the client has to.
+local released = {}
+local saved_release = runner.release
+runner.release = function(conn, hash)
+	released[#released + 1] = { id = conn.id, hash = hash }
+end
+bufnr = fresh({ rows = 10 })
+released = {}
+grid.close(bufnr)
+check("the open result is released by name", released[1] and released[1].hash, "aaaabbbbcccc")
+check("on the connection that holds it", released[1] and released[1].id, "auto")
+runner.release = saved_release
+
 config.setup({})
 local last = grid.current_buf()
 if last then

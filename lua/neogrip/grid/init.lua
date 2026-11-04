@@ -510,6 +510,14 @@ end
 function M.close(bufnr)
 	bufnr = bufnr or M.current_buf()
 	if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+		local state = states[bufnr]
+		-- Hand the result back. Nothing evicts an open one any more (ADR-0041),
+		-- so a closed grid would otherwise hold a statement on the server until
+		-- the idle sweep reached it an hour later.
+		local result = state and state.result
+		if result and result.hash and result.connection then
+			require("neogrip.runner").release(result.connection, result.hash)
+		end
 		states[bufnr] = nil
 		pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
 	end
