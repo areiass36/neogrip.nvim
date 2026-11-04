@@ -9,6 +9,10 @@ if not support.has_jdk() then
 	return
 end
 support.seed_secrets()
+-- last_row moves the window cursor, which fires the auto-load trigger
+-- (ADR-0040), and this suite asserts on #state.rows right after it. Pinned off
+-- so the count cannot change between the two reads.
+require("neogrip.config").setup({ auto_load_rows = 0 })
 local duck = support.connections().duckdb
 local connections_module = require("neogrip.connections")
 connections_module.register(duck)
