@@ -520,3 +520,41 @@ check("mysql too", instance_level({ driver = "mysql" }).reconnects, true)
 check("and sql server too", instance_level({ driver = "mssql" }).reconnects, true)
 -- Trino is why the flag is not simply implied by the level existing.
 check("trino does not", instance_level({ driver = "trino" }).reconnects, nil)
+
+support.describe("tree: collapsing a row listing hands its cursor back")
+
+-- runner.cancel declines once a request has answered, so a node collapsed
+-- after its page arrived used to leave the cursor open - harmless only while
+-- the fifth expansion evicted it. Nothing does now (ADR-0041).
+local runner_module = require("neogrip.runner")
+local released = {}
+local saved_release = runner_module.release
+local saved_run = runner_module.run
+local saved_statement = tree.statement
+runner_module.release = function(conn, hash)
+	released[#released + 1] = { id = conn.id, hash = hash }
+end
+runner_module.run = function(request, callback)
+	local minted = request.hash or "deadbeefcafe"
+	callback({ columns = { "n" }, rows = { { 1 } }, hash = minted, done = false }, nil)
+	-- Already answered, which is what makes cancel decline.
+	return { done = true, hash = minted, request = request }
+end
+tree.statement = function(_, _, callback)
+	callback("select 1", nil)
+end
+
+connections.register({ id = "u-rows", driver = "postgres", database = "app" })
+local rows_handle = tree.children(
+	{ level = "set", ref = { server = "u-rows", namespace = "public", set = "t" } },
+	{ objects = true, limit = 1 },
+	function() end
+)
+released = {}
+rows_handle.cancel()
+check("the finished listing's cursor is handed back", released[1] and released[1].hash, "deadbeefcafe")
+check("on its own connection", released[1] and released[1].id, "u-rows")
+
+tree.statement = saved_statement
+runner_module.run = saved_run
+runner_module.release = saved_release

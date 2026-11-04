@@ -236,7 +236,14 @@ local function new_handle()
 		cancel = function()
 			state.cancelled = true
 			if state.run then
-				runner.cancel(state.run)
+				-- cancel declines once the request has answered, and until the
+				-- cap went (ADR-0041) that was harmless because the fifth
+				-- expansion closed this one. Now nothing does, so a listing
+				-- that already arrived has to be handed back by name or it is
+				-- held until the idle sweep an hour later.
+				if not runner.cancel(state.run) and state.run.hash then
+					runner.release(state.run.request.connection, state.run.hash)
+				end
 			end
 			return true
 		end,
