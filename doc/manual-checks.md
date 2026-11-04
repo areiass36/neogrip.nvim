@@ -47,6 +47,29 @@ Entra ID interactive login opens a browser and cannot run in CI.
 2. Confirm the status notifications appear, the browser opens, and the connection completes after MFA.
 3. Confirm the documented limitation: the flow fails with a clear message in a headless session.
 
+## The explorer recipe (every release, after any change under `tree`)
+
+The plugin defines no explorer (ADR-0037), so what used to be a feature to click through is now a
+document to follow. Nothing automated can tell whether `doc/explorer-recipe.md` still describes the API
+it is pasted next to: the suite drives `tree` directly and would stay green against a recipe that no
+longer compiles.
+
+1. In a scratch Neovim config, load the plugin and paste `doc/explorer-recipe.md`'s recipe into a
+   `lua/` file. Confirm it loads with no error.
+2. Walk a PostgreSQL connection from the server down to a column, one level at a time, and confirm every
+   level answers and is labelled the way `tree.shape()` says.
+3. Expand a table's rows, page once more, then collapse it. Confirm the rows arrive, that the second page
+   continues the first, and that `:NGripDoctor` shows no cursor left open afterwards.
+4. Expand five tables' rows without collapsing any, and confirm the first branch is the one that dies -
+   gripd keeps four results per connection and evicts the oldest (ADR-0031). This is the limit a client
+   author has to know about and the only place it is visible.
+5. Ask for a long level with `limit` and walk it to the end. Confirm no set is missing or repeated, and
+   that the last page reports `done`.
+6. Re-introspect one namespace after an `alter table`, and confirm only that namespace changed: the other
+   namespaces keep their swept timestamps and their columns.
+7. Confirm no icon, no padding and no counted string appears in any node the recipe did not format
+   itself.
+
 ## Results
 
 | Date | Check | OS | Result |
