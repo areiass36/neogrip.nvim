@@ -1,0 +1,189 @@
+-- The grid asking for the next batch on its own (ADR-0040): when it asks, when
+-- it must not, and that it asks exactly once however often the cursor moves.
+--
+-- Driven through grid.maybe_load_more(bufnr, line) with the line given rather
+-- than read from a window, which is why that function takes one: the whole
+-- suite runs with no window and no server.
+local support = require("tests.support")
+local check, note = support.check, support.note
+local config = require("neogrip.config")
+local grid = require("neogrip.grid")
+local runner = require("neogrip.runner")
+
+local connection = { id = "auto", name = "auto", driver = "duckdb" }
+
+local requests = {}
+local answer = function()
+	return { rows = { { 0 } }, done = false }
+end
+local saved_run = runner.run
+runner.run = function(request, callback)
+	requests[#requests + 1] = request
+	callback(answer(request))
+	return { done = true }
+end
+
+local notices = {}
+local saved_notify = vim.notify
+vim.notify = function(text)
+	notices[#notices + 1] = text
+end
+
+--- A grid holding `rows` rows of an open result.
+local function fresh(opts)
+	opts = opts or {}
+	local existing = grid.current_buf()
+	if existing then
+		grid.close(existing)
+	end
+	local rows = {}
+	for index = 1, (opts.rows or 200) do
+		rows[index] = { index }
+	end
+	local done = false
+	if opts.done ~= nil then
+		done = opts.done
+	end
+	-- Spelled out rather than `opts.no_hash and nil or "..."`, which in Lua
+	-- always yields the fallback: nil is false, so the or branch wins.
+	local hash = "aaaabbbbcccc"
+	if opts.no_hash then
+		hash = nil
+	end
+	grid.buf = vim.api.nvim_create_buf(false, true)
+	grid.show({
+		columns = { "n" },
+		rows = rows,
+		done = done,
+		hash = hash,
+		limit = opts.limit or 200,
+		connection = connection,
+	}, { focus = false })
+	requests, notices = {}, {}
+	return grid.current_buf()
+end
+
+--- The line the cursor would be on for a given data row.
+local function line_of(row)
+	return row + 2
+end
+
+--- Let the debounce run out, so "nothing was asked" is a fact and not a race.
+local function settle()
+	vim.wait(300, function()
+		return false
+	end, 20)
+end
+
+--- Arm the trigger and wait for the request it should produce.
+local function trigger(bufnr, line)
+	local before = #requests
+	grid.maybe_load_more(bufnr, line)
+	support.wait(function()
+		return #requests > before
+	end, 1000)
+end
+
+support.describe("autoload: when the grid asks for more on its own")
+
+config.setup({ auto_load_rows = 0 })
+local bufnr = fresh({ rows = 200 })
+grid.maybe_load_more(bufnr, line_of(200))
+settle()
+check("a threshold of zero turns it off", #requests, 0)
+
+config.setup({ auto_load_rows = 10 })
+bufnr = fresh({ rows = 200 })
+grid.maybe_load_more(bufnr, line_of(1))
+settle()
+check("a cursor far from the end asks for nothing", #requests, 0)
+
+trigger(bufnr, line_of(195))
+check("a cursor inside the threshold asks once", #requests, 1)
+check("as a continuation", requests[1].mode, "next")
+check("of the result it is reading", requests[1].hash, "aaaabbbbcccc")
+check("a batch at a time", requests[1].limit, 200)
+
+-- CursorMoved fires once per `j`, so this is the held-key case.
+bufnr = fresh({ rows = 200 })
+for row = 191, 200 do
+	grid.maybe_load_more(bufnr, line_of(row))
+end
+support.wait(function()
+	return #requests > 0
+end, 1000)
+settle()
+check("ten motions in a row still ask once", #requests, 1)
+
+-- The blank line and the footer are past the last row, and sync_from_cursor
+-- ignores them. Resting there is the clearest "I am at the bottom" there is.
+bufnr = fresh({ rows = 200 })
+trigger(bufnr, 200 + 3)
+check("the blank line past the rows still asks", #requests, 1)
+
+bufnr = fresh({ rows = 200 })
+trigger(bufnr, 200 + 4)
+check("and so does the footer", #requests, 1)
+
+support.describe("autoload: and when it must not")
+
+bufnr = fresh({ rows = 200, done = true })
+grid.maybe_load_more(bufnr, line_of(200))
+settle()
+check("a finished result is not asked", #requests, 0)
+-- Only page_next speaks; the automatic path is silent or it would say "no
+-- further rows" on every motion at the bottom of every result.
+check("and says nothing about it", #notices, 0)
+
+bufnr = fresh({ rows = 200, no_hash = true })
+grid.maybe_load_more(bufnr, line_of(200))
+settle()
+check("an unnamed result cannot be continued", #requests, 0)
+
+-- A batch that claims there is more and brings nothing would be asked for
+-- again on the next motion, forever. No server does this today; the latch is
+-- what keeps it a bug rather than a loop.
+bufnr = fresh({ rows = 200 })
+answer = function()
+	return { rows = {}, done = false }
+end
+trigger(bufnr, line_of(200))
+check("an empty batch is asked for once", #requests, 1)
+check("and latches the asking off", grid.state(bufnr).auto.exhausted, true)
+grid.maybe_load_more(bufnr, line_of(200))
+settle()
+check("so a later motion asks for nothing", #requests, 1)
+answer = function()
+	return { rows = { { 0 } }, done = false }
+end
+
+config.setup({ auto_load_rows = 10, auto_load_max_rows = 10 })
+bufnr = fresh({ rows = 200 })
+grid.maybe_load_more(bufnr, line_of(200))
+settle()
+check("past the cap it stops asking", #requests, 0)
+local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+check("and the footer says it is paused", lines[#lines]:find("paused", 1, true) ~= nil, true)
+check("while still promising more", lines[#lines]:find("more", 1, true) ~= nil, true)
+
+support.describe("autoload: the threshold is held below the batch")
+
+-- A threshold as large as the batch re-arms the instant a batch lands, so
+-- `auto_load_rows = 500` against `limit = 200` would walk the whole table from
+-- the first row. Clamped, it is one batch of lookahead and no more.
+config.setup({ auto_load_rows = 500 })
+bufnr = fresh({ rows = 200, limit = 200 })
+trigger(bufnr, line_of(1))
+check("the first row is within one batch of the end", #requests, 1)
+grid.maybe_load_more(bufnr, line_of(1))
+settle()
+check("but the next batch puts it out of reach again", #requests, 1)
+
+config.setup({})
+local last = grid.current_buf()
+if last then
+	grid.close(last)
+end
+runner.run = saved_run
+vim.notify = saved_notify
+note("the real runner and notifier are back")

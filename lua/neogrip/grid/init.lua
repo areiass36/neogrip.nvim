@@ -314,18 +314,124 @@ local function find_window(bufnr)
 	return nil
 end
 
---- Plain cursor motions still have to know which cell they landed in. This is
---- an autocommand, not a keymap: the no-keymaps rule (ADR-0017) is about keys.
+-- Long enough that holding `j` asks once rather than once per line, short
+-- enough that the rows are there by the time the eye arrives. The same 120 ms
+-- the dialect module settled on for the same reason.
+local DEBOUNCE_MS = 120
+local pending = {}
+
+--- Ask for the next batch once the cursor has stopped moving.
+---
+--- The debounce is not only politeness: it is what makes the in-flight guard
+--- sufficient rather than merely safe. Without it the first motion fires a
+--- request and the next forty are swallowed by that guard, so the batch lands
+--- relative to where the cursor was instead of where it came to rest.
+local function schedule_load(bufnr)
+	local state = states[bufnr]
+	if not state then
+		return
+	end
+	if pending[bufnr] then
+		pending[bufnr]:stop()
+	end
+	-- The result this was armed for. A grid can be closed, re-run or sorted
+	-- inside the debounce, and the batch of a result nobody is looking at any
+	-- more must not be appended to the one that replaced it.
+	local hash = state.result.hash
+	pending[bufnr] = vim.defer_fn(function()
+		pending[bufnr] = nil
+		local current = states[bufnr]
+		if not vim.api.nvim_buf_is_valid(bufnr) or not current then
+			return
+		end
+		if current.result.hash ~= hash then
+			return
+		end
+		-- Required late: execute requires this module, so a require at the top
+		-- would close the circle.
+		require("neogrip.execute").load_more(current, { quiet = true })
+	end, DEBOUNCE_MS)
+end
+
+--- Load the next batch when the cursor is within `auto_load_rows` of the last
+--- row loaded (ADR-0040).
+---
+--- Takes the line rather than reading the window, so it can be driven with no
+--- window at all, which is what makes it testable (ADR-0023). Separate from
+--- sync_from_cursor because that one returns early past the last row, and
+--- parking on the footer is precisely the case this has to answer.
+--- @param line integer|nil the cursor's buffer line; the window's when absent
+--- @return boolean armed whether a load was scheduled
+function M.maybe_load_more(bufnr, line)
+	local state = states[bufnr]
+	if not state then
+		return false
+	end
+	local settings = require("neogrip.config").get()
+	local threshold = settings.auto_load_rows or 0
+	if threshold <= 0 then
+		return false
+	end
+	local result = state.result
+	local auto = state.auto or {}
+	-- `limit = 0` means everything in one answer and no cursor kept, so a
+	-- finished or unnamed result is checked before the threshold is worked out.
+	if auto.loading or auto.exhausted or result.done ~= false or not result.hash then
+		return false
+	end
+	local cap = settings.auto_load_max_rows
+	if cap and cap > 0 and #state.rows >= cap then
+		return false
+	end
+	local batch = result.limit or settings.limit or 200
+	threshold = math.min(threshold, math.max(1, batch - 1))
+
+	if line == nil then
+		local winid = find_window(bufnr)
+		if not winid then
+			return false
+		end
+		line = vim.api.nvim_win_get_cursor(winid)[1]
+	end
+	-- The blank line and the footer sit past the last row, and resting there is
+	-- "I am at the bottom" rather than nowhere, so they clamp up to it.
+	local row = math.min(math.max(line - 2, 1), math.max(#state.rows, 1))
+	if #state.rows - row > threshold then
+		return false
+	end
+	schedule_load(bufnr)
+	return true
+end
+
+--- Plain cursor motions still have to know which cell they landed in, and are
+--- also what says the reader is near the end. This is an autocommand, not a
+--- keymap: the no-keymaps rule (ADR-0017) is about keys.
+---
+--- Both hang off the one group. A second augroup of the same name created with
+--- clear would delete this one, and the symptom - the cell highlight stops
+--- following the cursor - names nothing that would lead anyone back here.
 local function attach_cursor_sync(bufnr)
 	if vim.b[bufnr].neogrip_grid_attached then
 		return
 	end
 	vim.b[bufnr].neogrip_grid_attached = true
+	local group = vim.api.nvim_create_augroup("NeogripGrid" .. bufnr, { clear = true })
 	vim.api.nvim_create_autocmd("CursorMoved", {
-		group = vim.api.nvim_create_augroup("NeogripGrid" .. bufnr, { clear = true }),
+		group = group,
 		buffer = bufnr,
 		callback = function()
 			M.sync_from_cursor(bufnr)
+			M.maybe_load_more(bufnr)
+		end,
+	})
+	vim.api.nvim_create_autocmd("BufDelete", {
+		group = group,
+		buffer = bufnr,
+		callback = function()
+			if pending[bufnr] then
+				pending[bufnr]:stop()
+				pending[bufnr] = nil
+			end
 		end,
 	})
 end

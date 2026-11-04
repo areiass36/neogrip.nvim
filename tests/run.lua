@@ -15,6 +15,7 @@ local UNIT = {
 	"unit_scratch",
 	"unit_execute",
 	"unit_cursor",
+	"unit_autoload",
 	"unit_identifier",
 	"unit_dialect",
 	"unit_store",

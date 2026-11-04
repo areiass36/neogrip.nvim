@@ -7,6 +7,20 @@ M.defaults = {
 	-- Rows fetched per page. One extra row is always requested to learn whether
 	-- another page exists without paying for a count(*) (ADR-0014).
 	limit = 200,
+	-- Load the next batch once the cursor comes within this many rows of the
+	-- last one loaded, so reading to the bottom of a result keeps going instead
+	-- of stopping at a batch boundary (ADR-0040). The rows accumulate: the grid
+	-- holds row one through row N. Held below `limit` on purpose - a threshold
+	-- as large as the batch re-arms the instant a batch lands, so a larger value
+	-- is clamped to limit - 1, which bounds it to one batch of lookahead. Zero
+	-- turns it off, and page_next is then the only way forward.
+	auto_load_rows = 50,
+	-- Stop loading automatically once this many rows have accumulated. Every
+	-- batch re-measures the widths and writes the lines it added, so the cost is
+	-- flat per batch but the memory is not; past some point the rows cost more
+	-- than they are worth. page_next still loads beyond it - the cap is on the
+	-- automatic path, not on the result. Zero removes it.
+	auto_load_max_rows = 20000,
 	-- An open result is a cursor on gripd (ADR-0031), so paging forward
 	-- costs nothing. One that has seen no page for this long is closed, because
 	-- it holds rows in memory on both sides. Zero keeps them until the result is

@@ -326,6 +326,9 @@ function M.load_more(state, opts)
 	end
 
 	auto.loading = true
+	-- So the footer says so. A render that reuses its lines rewrites the footer
+	-- line and nothing else, so this costs a width measurement.
+	grid.refresh(bufnr)
 	local handle = runner.run({
 		connection = result.connection,
 		hash = result.hash,
