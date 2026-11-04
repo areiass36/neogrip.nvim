@@ -17,13 +17,14 @@ local PLACEHOLDER = ":%s"
 
 --- @param kind string "select" | "insert" | "update" | "delete"
 --- @param columns table[]|nil the set's columns, when they are known
+--- @param catalog string|nil the catalog, where a query names one (ADR-0039)
 --- @return string
-function M.for_set(connection, namespace, set, kind, columns)
+function M.for_set(connection, namespace, set, kind, columns, catalog)
 	if kind == "select" or kind == nil then
-		return schema.select_statement(connection, namespace, set, columns)
+		return schema.select_statement(connection, namespace, set, columns, catalog)
 	end
 
-	local qualified = schema.qualify(connection, namespace, set)
+	local qualified = schema.qualify(connection, namespace, set, catalog)
 	local driver = connection.driver
 	local keys, writable = {}, {}
 	for _, column in ipairs(columns or {}) do
@@ -74,7 +75,7 @@ function M.for_set(connection, namespace, set, kind, columns)
 		lines[#lines + 1] = ("DELETE FROM %s"):format(qualified)
 		lines[#lines + 1] = ("WHERE %s;"):format(conditions())
 	else
-		return schema.select_statement(connection, namespace, set, columns)
+		return schema.select_statement(connection, namespace, set, columns, catalog)
 	end
 
 	return table.concat(lines, "\n")

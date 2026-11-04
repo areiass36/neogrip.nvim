@@ -43,15 +43,43 @@ function M.quote(driver, name)
 	return '"' .. tostring(name):gsub('"', '""') .. '"'
 end
 
+--- Does a query on this engine name the catalog, or does the connection pin it?
+---
+--- A SQL name has at most three parts and they are the tree's
+--- instance.namespace.set (ADR-0039). PostgreSQL cannot query across databases
+--- at all, so walking into another one reopens the connection and two parts are
+--- the whole name; MySQL reports its database as a catalog and has no schema
+--- layer, so the database already travels in the namespace slot. Trino is the
+--- one engine that addresses catalogs in SQL and queries across them in one
+--- session - which is why it exists - so there the catalog is part of the name
+--- and nowhere else.
+local function catalog_in_name(driver)
+	return driver == "trino"
+end
+
 --- schema.table, quoted, for a generated statement.
-function M.qualify(connection, schema, table_name)
+---
+--- `catalog` is optional and last so that the callers which rebuild SQL from a
+--- result rather than from a ref are unchanged; absent, the connection's own
+--- catalog stands in.
+function M.qualify(connection, schema, table_name, catalog)
 	if connection.driver == "mongodb" then
 		return tostring(table_name)
 	end
+	local quoted = M.quote(connection.driver, table_name)
 	if schema and schema ~= "" and connection.driver ~= "sqlite" then
-		return M.quote(connection.driver, schema) .. "." .. M.quote(connection.driver, table_name)
+		quoted = M.quote(connection.driver, schema) .. "." .. quoted
+		if catalog_in_name(connection.driver) then
+			local named = catalog
+			if named == nil or named == "" then
+				named = M.catalog_of(connection)
+			end
+			if named ~= nil and named ~= "" then
+				quoted = M.quote(connection.driver, named) .. "." .. quoted
+			end
+		end
 	end
-	return M.quote(connection.driver, table_name)
+	return quoted
 end
 
 --- The catalog a connection means - and so the key its swept catalog is kept
@@ -522,11 +550,11 @@ end
 ---
 --- No column rewriting: the Java side renders a binary column as hex because
 --- JDBC tells it the column is binary, so "select *" is safe.
-function M.select_statement(connection, schema, table_name, _columns)
+function M.select_statement(connection, schema, table_name, _columns, catalog)
 	if connection.driver == "mongodb" then
 		return ("db.%s.find({})"):format(table_name)
 	end
-	return ("SELECT * FROM %s"):format(M.qualify(connection, schema, table_name))
+	return ("SELECT * FROM %s"):format(M.qualify(connection, schema, table_name, catalog))
 end
 
 --- A few rows for the previewer.
