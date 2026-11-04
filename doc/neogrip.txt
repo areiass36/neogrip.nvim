@@ -118,8 +118,10 @@ project default, the last one used. `:NGripWhich` explains the answer.
 :NGripResults          Query the current result with SQL (DuckDB views
                        r1, r2, ... and the alias `last`).
 :NGripCsv {file}       Query any CSV file with SQL.
-:NGripExport           Export the result: CSV or JSON, page or everything.
-:NGripKeep [file]      Write the page somewhere it will not be cleaned up.
+:NGripExport           Export the result: CSV or JSON, the rows loaded or
+                       everything.
+:NGripKeep [file]      Write the rows loaded somewhere they will not be
+                       cleaned up.
 :NGripNewQuery         A query buffer against this buffer's connection.
 :NGripDisconnect[!] [id]
                        Stop a connection's gripd; ! stops every one.
@@ -136,8 +138,8 @@ README carries a complete recipe).
   next_column  prev_column  down  up          movement, cell by cell
   first_column last_column  first_row last_row
   yank_cell    yank_row     yank_column       the stored value, untruncated
-  sort_asc     sort_desc                      server-side, covers every page
-  page_next    page_prev                      continues the open result
+  sort_asc     sort_desc                      server-side, covers every row
+  page_next    page_prev                      load a batch / jump back one
   follow_fk                                   open the row this key points at
   show_document                               the whole Mongo document
   export       materialise  close
@@ -145,12 +147,25 @@ README carries a complete recipe).
 Yanks and exports always read the stored value, never the drawn text: what is
 on screen may be truncated.
 
-A result stays open on gripd as a cursor, so `page_next` continues it
-instead of running the statement again, and `page_prev` is a redraw of rows
-that never left the editor. Sorting is the exception: the order has to be the
-server's to cover every page, so it opens a new result. An open result is let
-go when the grid shows another one, and after |neogrip-options|
-`cursor_idle_seconds` of nothing asking for a page.
+Rows accumulate: the grid holds row one through the last one loaded, and
+reading to the bottom loads the next batch on its own once the cursor comes
+within |neogrip-options| `auto_load_rows` of the last row. Nothing has to be
+pressed. `auto_load_rows = 0` turns that off, and `auto_load_max_rows` is
+where it stops doing it by itself - past that the footer says
+`(more, paused)` and `page_next` is how you go on.
+
+`page_next` loads a batch and jumps to it; `page_prev` jumps back to where the
+previous batch began. Neither re-runs the statement: the result stays open on
+gripd as a cursor and a batch is the next read from it. Sorting is the
+exception - the order has to be the server's to cover rows nobody has loaded,
+so it opens a new result and starts over.
+
+The footer counts the rows the grid holds, never the rows the result has:
+nothing counts a result (ADR-0031). It says `(more)` while the cursor is open,
+`(more, loading...)` while a batch is on its way, and `(expired)` once the
+server no longer has the result - which happens after |neogrip-options|
+`cursor_idle_seconds` of nothing reading from it, or if it was cancelled. The
+rows already loaded stay usable; nothing is re-run to recover the rest.
 
 ==============================================================================
 7. CATALOG TREE                                 *neogrip-tree*
@@ -271,7 +286,9 @@ Defaults, overridable through `setup(opts)` (each is documented where it
 lives, `lua/neogrip/config.lua`): >lua
     require("neogrip").setup({
       limit = 200,                   -- rows per result page
-      cursor_idle_seconds = 300,     -- an open result nobody pages is closed
+      auto_load_rows = 50,           -- load more this near the end; 0 = off
+      auto_load_max_rows = 20000,    -- stop loading by itself past this
+      cursor_idle_seconds = 3600,    -- an open result nobody reads is closed
       timeout_ms = 30000,            -- server-side statement timeout (0 = none)
       max_column_width = 60,         -- grid truncation; yanks are whole
       null_text = "NULL",
@@ -308,5 +325,14 @@ Json, Binary, Footer, Connection, Production, Count, Elapsed, Slow.
 - MongoDB speaks the wrapper's script dialect, not SQL; collections have
   sampled fields, not columns, and that field sampling is best-effort - the
   third-party wrapper's metadata is unreliable (ADR-0029).
+- A result is never counted (ADR-0031), so the grid can say how many rows it
+  holds and whether more exist, but never how many there are in total.
+- An expired result is a dead end: the rows loaded stay, and the rest needs
+  the statement run again. There is no offset on the wire, so nothing can ask
+  the server to skip what was already read (ADR-0040).
+- Nothing closes an open result on a client's behalf (ADR-0041). The grid and
+  the catalog tree hand theirs back; a client written against
+  |neogrip-tree| has to do the same or gripd holds a statement per result
+  until `cursor_idle_seconds` passes.
 
 vim:tw=78:ts=8:noet:ft=help:norl:

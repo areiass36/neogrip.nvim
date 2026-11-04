@@ -4,7 +4,7 @@ Turn Neovim into a SQL and data-manipulation client: pick which database a file 
 statement under the cursor, read the result in a grid, and query that result again with SQL — on macOS,
 Windows and Linux, with no Java to install.
 
-> **Status: usable, with open tracks.** Run statements, page and sort results, sweep a catalog and walk it
+> **Status: usable, with open tracks.** Run statements, scroll and sort results, sweep a catalog and walk it
 > as data, re-query results and CSVs with SQL, export, validate on save, and work in transactions — all
 > covered by the test suite. Entra ID interactive, service principal, managed identity and SSH tunnels are declared in
 > the connection schema but not implemented yet; see [doc/adr/](doc/adr/README.md) for every decision.
@@ -60,7 +60,7 @@ With lazy.nvim:
 | `:NGripConnections` / `:NGripReload` | List / re-read the connection files |
 | `:NGripResults` | Query the current result with SQL (DuckDB views `r1`, `r2`, …, alias `last`) |
 | `:NGripCsv <file>` | Query any CSV file with SQL |
-| `:NGripExport` / `:NGripKeep [file]` | Export the result (CSV/JSON, page or everything) / keep the page as CSV |
+| `:NGripExport` / `:NGripKeep [file]` | Export the result (CSV/JSON, the rows loaded or everything) / keep them as CSV |
 | `:NGripNewQuery` / `:NGripDisconnect[!]` | Open a query buffer / stop the gripd process(es) |
 | `:NGripInit` / `:NGripDoctor` | Write a starter project file / check the whole path |
 
@@ -99,8 +99,8 @@ vim.api.nvim_create_autocmd("FileType", {
 		map("Y", actions.yank_row, "Yank row as CSV")
 		map("s", actions.sort_asc, "Sort by this column")
 		map("S", actions.sort_desc, "Sort descending")
-		map("]p", actions.page_next, "Next page")
-		map("[p", actions.page_prev, "Previous page")
+		map("]p", actions.page_next, "Load a batch")
+		map("[p", actions.page_prev, "Back a batch")
 		map("gf", actions.follow_fk, "Follow this foreign key")
 		map("<CR>", actions.show_document, "Show the whole document (Mongo)")
 		map("e", actions.export, "Export")
