@@ -14,6 +14,7 @@ local connections = support.connections()
 local targets = {
 	{ driver = "postgres", schema_name = "public", table_name = "torture" },
 	{ driver = "mysql", schema_name = "testdb", table_name = "torture" },
+	{ driver = "mariadb", schema_name = "testdb", table_name = "torture" },
 	{ driver = "mssql", schema_name = "dbo", table_name = "torture" },
 	{ driver = "sqlite", schema_name = nil, table_name = "torture" },
 	{ driver = "duckdb", schema_name = "main", table_name = "torture" },
@@ -33,6 +34,8 @@ for _, target in ipairs(targets) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
+		-- A file database has no container to seed it (tests/containers.sh).
+		support.ensure_file_fixture(connection)
 		local databases, databases_err = support.sync(function(done)
 			schema.databases(connection, function(records, err)
 				done(records, err)
@@ -271,16 +274,26 @@ do
 	local count_targets = {
 		{ driver = "postgres", schema_name = "public", prepare = "analyze torture" },
 		{ driver = "mysql", schema_name = "testdb" },
+		{ driver = "mariadb", schema_name = "testdb" },
 		{ driver = "mssql", schema_name = "dbo" },
 		{ driver = "duckdb", schema_name = "main", empty = true },
 		{ driver = "sqlite", empty = true },
 		{ driver = "mongodb", empty = true },
+		-- A query engine owns no tables and keeps no statistics of its own.
+		{ driver = "trino", empty = true },
 	}
 	for _, target in ipairs(count_targets) do
 		local connection = connections[target.driver]
 		if not support.reachable(connection) then
 			note(("%s: skipped"):format(target.driver))
 		else
+			-- catalog/counts goes straight to the process, and there is no
+			-- process until something has connected. Every other driver here
+			-- was connected by the block above; Trino appears in this list
+			-- only, so it would be asked before it had a connection at all.
+			if not gripd.is_connected(connection.id) then
+				support.run(connection, "select 1", { timeout = 90000 })
+			end
 			if target.prepare then
 				support.run(connection, target.prepare, { mode = "exec" })
 			end

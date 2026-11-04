@@ -27,11 +27,12 @@ end
 
 --- Walk to the deepest level the shape declares, collecting what was seen.
 ---
---- Which namespace to walk into is declared by the caller rather than guessed:
---- SQL Server answers with a dozen schemas that exist for permissions and hold
---- no tables at all, and the first of them sorted is not the one with the
---- fixture in it.
-local function walk(connection, want_set, want_namespace)
+--- Which child to walk into at each level is declared by the caller rather
+--- than guessed: SQL Server answers with a dozen schemas that exist for
+--- permissions and hold no tables at all, and the first of them sorted is not
+--- the one with the fixture in it. Trino needs the same at the instance level,
+--- where `system` sorts before the catalog with any data in it.
+local function walk(connection, wants)
 	local shape = tree.shape(connection)
 	local node = { level = "server", ref = { server = connection.id } }
 	local seen, found = {}, nil
@@ -53,10 +54,7 @@ local function walk(connection, want_set, want_namespace)
 			-- SQL Server answers with a dozen schemas that exist for
 			-- permissions and hold no tables, and db_accessadmin is the first
 			-- of them by name.
-			local wanted = want_set
-			if entry.level == "namespace" and want_namespace then
-				wanted = want_namespace
-			end
+			local wanted = wants[entry.level]
 			node = nodes[1]
 			for _, candidate in ipairs(nodes) do
 				if candidate.name == wanted then
@@ -74,10 +72,14 @@ end
 local ENGINES = {
 	{ driver = "postgres", set = "torture", namespace = "public" },
 	{ driver = "mysql", set = "torture" },
+	{ driver = "mariadb", set = "torture" },
 	{ driver = "mssql", set = "torture", namespace = "dbo" },
 	{ driver = "sqlite", set = "torture" },
 	{ driver = "duckdb", set = "torture", namespace = "main", fixture = true },
 	{ driver = "mongodb", set = "orders" },
+	-- The generated tpch catalog, which is read-only and always there: the
+	-- point of this one is the instance level, not the fixture.
+	{ driver = "trino", instance = "tpch", namespace = "tiny", set = "nation" },
 }
 
 for _, engine in ipairs(ENGINES) do
@@ -87,6 +89,8 @@ for _, engine in ipairs(ENGINES) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
+		-- A file database has no container to seed it.
+		support.ensure_file_fixture(connection)
 		if engine.fixture then
 			-- DuckDB's file is a fresh temp path per process, so the fixture
 			-- is made here rather than by the containers.
@@ -96,7 +100,7 @@ for _, engine in ipairs(ENGINES) do
 		end
 		schema.invalidate(connection)
 
-		local walked, walk_err = walk(connection, engine.set, engine.namespace)
+		local walked, walk_err = walk(connection, engine)
 		check("the walk answers every level it declares", walk_err, nil)
 		if walked then
 			local chain = {}
@@ -193,6 +197,169 @@ do
 	end
 end
 
+--- Walk one level a page at a time, through the keyset of ADR-0038.
+---
+--- Keyset paging has no server state: the page carries the last name it sent
+--- and the next call resumes from it, which is only exact while the server's
+--- order is total and the same on every call. What that buys is asserted here
+--- rather than assumed - every set seen once, none twice, none missed.
+local function page_through(from, limit)
+	local seen, pages, after = {}, 0, nil
+	local done
+	repeat
+		local page = nil
+		local nodes, err = support.sync(function(finish)
+			tree.children(from, {
+				limit = limit,
+				after = after,
+				on_page = function(continuation)
+					page = continuation
+				end,
+			}, function(result, request_err)
+				finish(result, request_err)
+			end)
+		end, 90000)
+		if err then
+			return nil, type(err) == "table" and err.message or tostring(err)
+		end
+		pages = pages + 1
+		if #nodes > limit then
+			return nil, ("a page of %d came back for a limit of %d"):format(#nodes, limit)
+		end
+		for _, child in ipairs(nodes) do
+			seen[child.name] = (seen[child.name] or 0) + 1
+		end
+		after = page and page.after
+		-- No page at all means nothing to continue from, which is done.
+		done = page == nil or page.done == true
+	until done or pages >= 50
+	return { pages = pages, seen = seen, done = done }, nil
+end
+
+-- Every engine, and the level that is worth paging on each. Trino pages its
+-- catalogs because that is the level it has more than one of; everywhere else
+-- the sets are what a person scrolls through.
+local PAGED = {
+	{
+		driver = "postgres",
+		level = "namespace",
+		ref = function(connection)
+			return { server = connection.id, instance = connection.database, namespace = "public" }
+		end,
+		want = "torture",
+	},
+	-- No namespace level at all: the database the connection names is where
+	-- the sets live, so the walk starts at the server.
+	{
+		driver = "mysql",
+		level = "server",
+		ref = function(connection)
+			return { server = connection.id }
+		end,
+		want = "torture",
+	},
+	{
+		driver = "mariadb",
+		level = "server",
+		ref = function(connection)
+			return { server = connection.id }
+		end,
+		want = "torture",
+	},
+	{
+		driver = "mssql",
+		level = "namespace",
+		ref = function(connection)
+			return { server = connection.id, namespace = "dbo" }
+		end,
+		want = "torture",
+	},
+	{
+		driver = "sqlite",
+		level = "server",
+		ref = function(connection)
+			return { server = connection.id }
+		end,
+		want = "torture",
+	},
+	{
+		driver = "duckdb",
+		level = "namespace",
+		ref = function(connection)
+			return { server = connection.id, namespace = "main" }
+		end,
+		-- Seven tables so the page size can stay small and still cut: the
+		-- point is to walk to the end, not to create 600 sets.
+		fixture = true,
+		want = "tree_a",
+	},
+	{
+		driver = "mongodb",
+		level = "server",
+		ref = function(connection)
+			return { server = connection.id }
+		end,
+		want = "orders",
+	},
+	-- The one fixture with more than one instance, and so the only live proof
+	-- that catalog/catalogs pages at all.
+	{
+		driver = "trino",
+		level = "server",
+		ref = function(connection)
+			return { server = connection.id }
+		end,
+		want = "tpch",
+	},
+}
+
+for _, engine in ipairs(PAGED) do
+	local connection = connections[engine.driver]
+	support.describe("live/tree: " .. engine.driver .. " pages a level when asked to")
+	connections_module.register(connection)
+	if not support.reachable(connection) then
+		note("skipped: nothing listening (tests/containers.sh up)")
+	else
+		support.ensure_file_fixture(connection)
+		if engine.fixture then
+			for letter in ("abcdefg"):gmatch(".") do
+				support.run(
+					connection,
+					("create table if not exists tree_%s(id int)"):format(letter),
+					{ mode = "exec" }
+				)
+			end
+		end
+		schema.invalidate(connection)
+
+		-- A page size of one, because what has to be proven is that the walk
+		-- resumes correctly, and one guarantees more than one page on a
+		-- fixture of two sets as surely as on a catalog of thousands.
+		local limit = engine.fixture and 3 or 1
+		local walked, walk_err = page_through({ level = engine.level, ref = engine.ref(connection) }, limit)
+		check("paging the level answers", walk_err, nil)
+		if walked then
+			check("more than one page was needed", walked.pages > 1, true)
+			check("and the last one says it is done", walked.done, true)
+			check(("%s was seen"):format(engine.want), walked.seen[engine.want] ~= nil, true)
+			local twice = {}
+			for name, times in pairs(walked.seen) do
+				if times > 1 then
+					twice[#twice + 1] = name
+				end
+			end
+			-- A name on two pages means the keyset lost its place, which is
+			-- what an unstable or partial server-side order looks like.
+			check("and nothing came back twice", twice, {})
+			local total = 0
+			for _ in pairs(walked.seen) do
+				total = total + 1
+			end
+			note(("%d over %d pages of %d"):format(total, walked.pages, limit))
+		end
+	end
+end
+
 support.describe("live/tree: the decorations a client asks for")
 do
 	local pg = connections.postgres
@@ -250,5 +417,101 @@ do
 		check("a scoped sweep through the tree runs", swept ~= nil, true)
 		check("and the tree reports what was swept", tree.swept(namespace) ~= nil, true)
 		check("forgetting it is the client's call", tree.forget(namespace), true)
+	end
+end
+
+support.describe("live/tree: what counts() answers on each engine")
+do
+	-- PostgreSQL keeps no estimate until the table has been analysed:
+	-- reltuples is -1 on a table autovacuum has not reached, which is not an
+	-- estimate and is left out rather than reported as a count.
+	local COUNTED = {
+		{ driver = "postgres", namespace = "public", prepare = "analyze torture", estimates = true },
+		{ driver = "mysql", estimates = true },
+		{ driver = "mariadb", estimates = true },
+		{ driver = "mssql", namespace = "dbo", estimates = true },
+		{ driver = "sqlite" },
+		{ driver = "duckdb", namespace = "main" },
+		{ driver = "mongodb" },
+		{ driver = "trino" },
+	}
+	for _, target in ipairs(COUNTED) do
+		local connection = connections[target.driver]
+		connections_module.register(connection)
+		if not support.reachable(connection) then
+			note(("%s: skipped"):format(target.driver))
+		else
+			support.ensure_file_fixture(connection)
+			if target.prepare then
+				support.run(connection, target.prepare, { mode = "exec" })
+			end
+			local counts, err = support.sync(function(done)
+				tree.counts(
+					{ server = connection.id, namespace = target.namespace },
+					function(result, request_err)
+						done(result, request_err)
+					end
+				)
+			end, 90000)
+			check(("%s answers"):format(target.driver), err, nil)
+			if target.estimates then
+				check(
+					("%s estimates torture"):format(target.driver),
+					type(counts and counts.torture),
+					"number"
+				)
+				note(("%s: torture ~ %s rows"):format(target.driver, tostring(counts.torture)))
+			else
+				-- Nothing counts rows on the tree's behalf (ADR-0038): a
+				-- client shows no number rather than a wrong one, and an
+				-- empty map is how it learns that.
+				check(("%s keeps no estimate"):format(target.driver), vim.tbl_count(counts or {}), 0)
+			end
+		end
+	end
+end
+
+support.describe("live/tree: the statement a trino ref writes is one trino runs")
+do
+	local trino = connections.trino
+	connections_module.register(trino)
+	if not support.reachable(trino) then
+		note("skipped: nothing listening (tests/containers.sh up)")
+	else
+		-- The connection names no catalog, so the instance level exists and the
+		-- catalog has nowhere to come from but the ref (ADR-0039). Before that,
+		-- the name dropped it and Trino answered "Catalog must be specified
+		-- when session catalog is not set" - a tree that walked correctly and
+		-- wrote SQL that could not run.
+		local ref = { server = trino.id, instance = "tpch", namespace = "tiny", set = "nation" }
+		check("the name carries the catalog", tree.qualified_name(ref), '"tpch"."tiny"."nation"')
+
+		local text, text_err = support.sync(function(done)
+			tree.statement(ref, "select", function(result, err)
+				done(result, err)
+			end)
+		end, 90000)
+		check("the statement is written", text_err, nil)
+		check("and carries it too", text, 'SELECT * FROM "tpch"."tiny"."nation"')
+
+		-- The check that cannot be faked: a name the engine rejects is not a
+		-- name, however well-formed it looks.
+		local result, run_err = support.run(trino, text, { limit = 2, timeout = 90000 })
+		check("the engine accepts it", run_err and run_err.message or nil, nil)
+		check("and answers rows", result and #result.rows > 0, true)
+
+		-- Walking into a catalog is a longer name, not a new connection.
+		local instances = support.sync(function(done)
+			tree.children({ level = "server", ref = { server = trino.id } }, {}, function(nodes, err)
+				done(nodes, err)
+			end)
+		end, 90000)
+		local tpch = nil
+		for _, candidate in ipairs(instances or {}) do
+			if candidate.name == "tpch" then
+				tpch = candidate
+			end
+		end
+		check("a catalog node is not something you reconnect to", tpch and tpch.facts.reconnects, nil)
 	end
 end
