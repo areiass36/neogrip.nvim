@@ -231,6 +231,19 @@ check("into the same buffer", grid.current_buf(), sorted)
 -- only four reclamation paths, and sorting is the one case left that replaces.
 check("and the replaced cursor was handed back", vim.tbl_contains(released, "aaaabbbbcccc"), true)
 
+support.describe("tabs: :bd on a tab the reader gave up on")
+
+close_all()
+run_query("select 1")
+local abandoned = grid.current_buf()
+check("the tab is there", #grid.tabs(), 1)
+-- Deleting the buffer by hand has to reach the same bookkeeping close does, or
+-- the strip would name a buffer that no longer exists.
+vim.api.nvim_buf_delete(abandoned, { force = true })
+check("deleting its buffer forgets the tab", #grid.tabs(), 0)
+check("and nothing is active", grid.active_tab(), 0)
+check("its request was cancelled too", #cancelled, 1)
+
 close_all()
 check("no tabs left", #grid.tabs(), 0)
 check("and no clock", grid._ticking(), false)

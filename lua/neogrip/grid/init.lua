@@ -310,6 +310,14 @@ local function sync_ticker()
 		return
 	end
 	ticker = vim.uv.new_timer()
+	-- A libuv handle has to be closed before the loop goes rather than left for
+	-- the process to take with it. Its own group, created with clear, so there
+	-- is exactly one of these however many times the clock starts - and so it
+	-- cannot collide with the per-buffer group the cursor sync uses (ADR-0040).
+	vim.api.nvim_create_autocmd("VimLeavePre", {
+		group = vim.api.nvim_create_augroup("NeogripGridClock", { clear = true }),
+		callback = stop_ticking,
+	})
 	ticker:start(
 		TICK_MS,
 		TICK_MS,
@@ -662,7 +670,12 @@ local function attach_cursor_sync(bufnr)
 			M.maybe_load_more(bufnr)
 		end,
 	})
-	vim.api.nvim_create_autocmd("BufDelete", {
+	-- Both events, because a result buffer is unlisted and BufDelete is about
+	-- the buffer *list*: measured here, nvim_buf_delete on one of these fires
+	-- BufWipeout and not BufDelete, so the debounce timer this used to stop on
+	-- BufDelete alone was never actually stopped. forget is idempotent, so
+	-- hearing both costs nothing.
+	vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
 		group = group,
 		buffer = bufnr,
 		callback = function()
@@ -781,6 +794,10 @@ function M.open_pending(opts)
 	}
 	local winid = open_window(bufnr)
 	activate(bufnr)
+	-- Attached before there is any result, so that :bd on a tab the reader gave
+	-- up on still reaches the bookkeeping. The cursor half of it is inert while
+	-- the tab has no state, which is exactly the window this covers.
+	attach_cursor_sync(bufnr)
 	M.refresh_winbar(bufnr)
 	if opts.focus then
 		vim.api.nvim_set_current_win(winid)
