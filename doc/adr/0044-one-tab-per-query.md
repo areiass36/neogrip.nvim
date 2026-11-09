@@ -36,10 +36,13 @@ window's buffer; the window itself is created once and reused.
    state, every action and both autocommand paths are already inert on a running tab, and the winbar is
    the whole message. The body holds no lines.
 
-3. **A failed, refused or cancelled query keeps its tab**, which says what happened. The window is
+3. **A failed or cancelled query keeps its tab**, which says what happened. The window is
    already open by then, and making it vanish leaves the reader with nothing to look at and a renumbered
    strip. The error written into the buffer is the one the runner already translated, which is what keeps
    a secret out of it.
+
+   A statement refused for being a write against a read-only connection gets no tab, because it is refused
+   before any request leaves and there is nothing to show: that refusal stays a notification (ADR-0016).
 
 4. **Buffer names carry a counter that is never reused.** A duplicate buffer name is an error, and a
    hidden tab the user has not deleted still holds its name.
