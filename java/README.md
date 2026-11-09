@@ -12,7 +12,7 @@ parameters by name — and pipe frames in:
 ```sh
 javac -encoding UTF-8 -parameters -d build/classes $(find java -name '*.java')
 printf '%s\n%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":4}}' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":5}}' \
   '{"jsonrpc":"2.0","id":2,"method":"ping"}' \
   | java -cp build/classes neogrip.gripd.Daemon
 ```

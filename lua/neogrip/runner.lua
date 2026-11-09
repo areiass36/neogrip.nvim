@@ -19,6 +19,10 @@ local M = {}
 
 local queues = {}
 local running = {}
+-- Live handles by the name of the result they are about, so a frame gripd sends
+-- on its own can find the request waiting on it (ADR-0042). Only named results
+-- are in here, which is the same set that reports.
+local by_hash = {}
 local sequence = 0
 -- Whether a connection's session has an explicit transaction open, from the
 -- gripd's own answer to an intercepted BEGIN/COMMIT/ROLLBACK (ADR-0013).
@@ -34,12 +38,27 @@ function M.hash()
 	end))
 end
 
+--- Say where a request has got to. Swallowed when nobody asked, which is every
+--- caller but the one that opened a window for it.
+local function phase(handle, name)
+	handle.phase = name
+	local sink = handle.request.on_progress
+	if sink then
+		sink({ phase = name, hash = handle.hash })
+	end
+end
+
 local function finish(handle, result, err)
 	if handle.done then
 		return
 	end
 	handle.done = true
 	running[handle.id] = nil
+	-- Guarded rather than cleared outright: a continuation reuses the hash, so
+	-- an unguarded clear here would evict a handle that is still live.
+	if handle.hash and by_hash[handle.hash] == handle then
+		by_hash[handle.hash] = nil
+	end
 	local queue = queues[handle.connection_id]
 	if queue then
 		queue.active = false
@@ -162,6 +181,12 @@ local function dispatch(handle)
 		end
 		translate(handle, result)
 	end)
+	-- Guarded because gripd.request answers synchronously when the process is
+	-- gone: without this, a request that already failed would report "sent"
+	-- afterwards and talk over the error the caller just drew.
+	if not handle.done then
+		phase(handle, "sent")
+	end
 
 	-- The server-side timeout is the real one; this only catches a process
 	-- that stopped answering. A timeout of 0 means "run as long as it takes"
@@ -208,6 +233,11 @@ local function enqueue(handle)
 		end
 		table.insert(queues[id].waiting, index, handle)
 	end
+	-- Said before the pump, which may dispatch this very handle and overwrite
+	-- it with "sent"; the order is what makes a request that waits say so.
+	if queues[id].active then
+		phase(handle, "queued")
+	end
 	M._pump(id)
 end
 
@@ -235,6 +265,9 @@ function M.run(request, callback)
 		handle.hash = request.hash or M.hash()
 	end
 	running[handle.id] = handle
+	if handle.hash then
+		by_hash[handle.hash] = handle
+	end
 
 	local connection = request.connection
 	request.timeout_ms = request.timeout_ms or connection.timeout_ms or config.get().timeout_ms
@@ -244,6 +277,7 @@ function M.run(request, callback)
 		return handle
 	end
 
+	phase(handle, "connecting")
 	secrets.resolve(connection, function(auth, secret_err)
 		if secret_err then
 			return finish(handle, nil, { message = secret_err })
@@ -262,6 +296,20 @@ function M.run(request, callback)
 	end)
 
 	return handle
+end
+
+--- What gripd said about one result on its own (ADR-0042).
+---
+--- Ignoring an unknown name is the normal case, not a guard against a bug: the
+--- catalog tree and the dialect probes open named results too, and nothing is
+--- listening for theirs. The connection is checked because a hash is minted per
+--- client and two processes could mint the same one.
+function M.progress(connection, params)
+	local handle = by_hash[params.hash]
+	if not handle or handle.done or handle.connection_id ~= connection.id then
+		return
+	end
+	phase(handle, params.phase)
 end
 
 --- Ask the server to stop. Unlike killing a client process, this reaches the

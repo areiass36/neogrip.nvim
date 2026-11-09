@@ -5,6 +5,7 @@ local support = require("tests.support")
 
 local UNIT = {
 	"unit_rpc",
+	"unit_progress",
 	"unit_bootstrap",
 	"unit_sql",
 	"unit_codecs",

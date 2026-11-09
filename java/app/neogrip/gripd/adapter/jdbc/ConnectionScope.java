@@ -10,6 +10,7 @@ import neogrip.gripd.adapter.jdbc.catalog.Introspect;
 import neogrip.gripd.adapter.jdbc.catalog.Listings;
 import neogrip.gripd.adapter.jdbc.catalog.NativeDdl;
 import neogrip.gripd.adapter.jdbc.catalog.Snapshot;
+import neogrip.gripd.domain.Notifications;
 import neogrip.gripd.domain.ReadonlyPolicy;
 
 /**
@@ -35,12 +36,12 @@ public final class ConnectionScope {
     private final Counts counts;
     private final Introspect introspect;
 
-    ConnectionScope(Session session, ExecutionLane lane) {
+    ConnectionScope(Session session, ExecutionLane lane, Notifications notifications) {
         this.lane = lane;
         Connection connection = session.connection();
         ReadonlyPolicy guard = new ReadonlyPolicy(session.readonly());
         this.cursors = new Cursors();
-        this.statements = new Statements(connection, lane.running(), guard, cursors);
+        this.statements = new Statements(connection, lane.running(), guard, cursors, notifications);
         this.exports = new Exports(connection, lane.running(), guard);
         this.transactions = new Transactions(connection);
         this.listings = new Listings(connection);

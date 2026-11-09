@@ -230,9 +230,7 @@ function M.connect(connection, auth, on_done)
 			jar = jar,
 			handlers = {
 				on_notification = function(method, params)
-					if method == "status" and params and params.message then
-						neogrip.notify(("%s: %s"):format(connection.name, params.message))
-					end
+					M.notification(connection, method, params)
 				end,
 				on_exit = function()
 					processes[connection.id] = nil
@@ -265,6 +263,24 @@ function M.connect(connection, auth, on_done)
 			end)
 		end)
 	end)
+end
+
+--- What gripd says on its own, rather than as an answer to a request.
+---
+--- A named function and not the closure it replaced, so a suite can deliver one
+--- without a live process: ADR-0023 keeps a unit suite off the network, and this
+--- is the only path a server-sent frame takes into the plugin.
+function M.notification(connection, method, params)
+	if method == "status" and params and params.message then
+		return neogrip.notify(("%s: %s"):format(connection.name, params.message))
+	end
+	if method == "progress" and params and params.hash then
+		-- Required here rather than at the top: the runner requires this module,
+		-- so naming it up there would close the circle. The runner owns the map
+		-- from a result's name to the request waiting on it; this module knows
+		-- only which connection spoke.
+		return require("neogrip.runner").progress(connection, params)
+	end
 end
 
 --- Send a request on a connection's live process.

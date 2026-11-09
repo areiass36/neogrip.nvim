@@ -66,14 +66,17 @@ final class Cursor {
     /** How many column names the client has been told about. */
     private int announced;
     private long touchedAt = System.currentTimeMillis();
+    /** Told before each execution of this statement, refills included. */
+    private final Started started;
 
     private Cursor(Connection connection, Running running, String sql,
-            int timeoutSeconds, int fetchSize) {
+            int timeoutSeconds, int fetchSize, Started started) {
         this.connection = connection;
         this.running = running;
         this.sql = sql;
         this.timeoutSeconds = timeoutSeconds;
         this.fetchSize = fetchSize;
+        this.started = started;
     }
 
     /**
@@ -84,13 +87,15 @@ final class Cursor {
      *                  tells this apart from "everything": zero caps nothing.
      * @param continuable whether the client named this result and may ask for
      *                  more of it, which is what decides the opening window.
+     * @param started   told immediately before the statement runs, and again
+     *                  before every refill (ADR-0042).
      * @return a cursor holding the statement, whether or not it had rows; the
      *         caller asks hasRows() and closes either way.
      */
     static Cursor open(Connection connection, Running running, String sql,
-            int limit, int timeoutSeconds, boolean continuable) throws SQLException {
+            int limit, int timeoutSeconds, boolean continuable, Started started) throws SQLException {
         int fetchSize = limit > 0 ? Math.min(limit + 1, 1000) : 1000;
-        Cursor cursor = new Cursor(connection, running, sql, timeoutSeconds, fetchSize);
+        Cursor cursor = new Cursor(connection, running, sql, timeoutSeconds, fetchSize, started);
         Statement statement =
                 connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
         cursor.statement = statement;
@@ -106,6 +111,9 @@ final class Cursor {
         int opening = limit <= 0 ? 0 : continuable ? Math.max(limit, WINDOW) + 1 : limit + 1;
         cursor.prepare(statement, opening, opening);
 
+        // The last thing before the call that blocks: everything above is
+        // setup, and the clock the reader watches starts here (ADR-0042).
+        started.now();
         if (statement.execute(sql)) {
             cursor.hasRows = true;
             cursor.rows = statement.getResultSet();
@@ -276,6 +284,9 @@ final class Cursor {
         statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
         running.set(statement);
         prepare(statement, (int) Math.min(Integer.MAX_VALUE, skip + WINDOW + 1), WINDOW + 1);
+        // Another execution of the same statement, and the slowest thing a
+        // reader waits on, so it is announced like the first (ADR-0042).
+        started.now();
         rows = statement.executeQuery(sql);
         for (long i = 0; i < skip; i++) {
             if (!rows.next()) {

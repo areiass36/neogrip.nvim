@@ -7,6 +7,7 @@ import java.sql.Statement;
 import java.util.Locale;
 import neogrip.gripd.contract.Contracts.QueryPage;
 import neogrip.gripd.contract.Contracts.UpdateResult;
+import neogrip.gripd.domain.Notifications;
 import neogrip.gripd.domain.ReadonlyPolicy;
 
 /** Running statements, and turning their results into the wire records. */
@@ -15,13 +16,15 @@ public final class Statements {
     private final Running running;
     private final ReadonlyPolicy guard;
     private final Cursors cursors;
+    private final Notifications notifications;
 
     public Statements(Connection connection, Running running, ReadonlyPolicy guard,
-            Cursors cursors) {
+            Cursors cursors, Notifications notifications) {
         this.connection = connection;
         this.running = running;
         this.guard = guard;
         this.cursors = cursors;
+        this.notifications = notifications;
     }
 
     /**
@@ -38,7 +41,10 @@ public final class Statements {
         guard.refuseWrites(sql);
         long start = System.currentTimeMillis();
         boolean named = hash != null && !hash.isEmpty();
-        Cursor cursor = Cursor.open(connection, running, sql, limit, timeoutSeconds, named);
+        // Only a named result announces itself (ADR-0042): nothing is listening
+        // for a sample or a probe, and no frame could address one.
+        Started started = named ? () -> notifications.executing(hash) : () -> {};
+        Cursor cursor = Cursor.open(connection, running, sql, limit, timeoutSeconds, named, started);
         // Registration is tracked rather than inferred from `named`: a hash
         // that is already live is refused, and detaching it on the way out
         // would then take somebody else's cursor out of the registry without

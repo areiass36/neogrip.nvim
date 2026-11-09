@@ -8,5 +8,5 @@ package neogrip.gripd.adapter.rpc;
 public final class Protocol {
     private Protocol() {}
 
-    public static final int VERSION = 4;
+    public static final int VERSION = 5;
 }

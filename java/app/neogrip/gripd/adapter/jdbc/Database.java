@@ -36,6 +36,8 @@ import neogrip.jsonrpc.RpcLifecycle;
 public final class Database implements RpcLifecycle {
     private final Session session;
     private final ExecutionLane lane = new ExecutionLane();
+    /** Retained, not only handed to the watchdog: a statement reports itself. */
+    private final Notifications notifications;
 
     /** One sweep at a time: a second would double the connections it opens. */
     private final AtomicBoolean sweeping = new AtomicBoolean();
@@ -45,6 +47,7 @@ public final class Database implements RpcLifecycle {
 
     public Database(Session session, Notifications notifications) {
         this.session = session;
+        this.notifications = notifications;
         new IdleWatchdog(() -> scope, session, notifications).start();
     }
 
@@ -67,7 +70,7 @@ public final class Database implements RpcLifecycle {
         } catch (SQLException e) {
             throw new DataAccessException(e);
         }
-        scope = new ConnectionScope(session, lane);
+        scope = new ConnectionScope(session, lane, notifications);
         return new Contracts.ConnectResult(session.product(), session.driverName(), session.capabilities());
     }
 

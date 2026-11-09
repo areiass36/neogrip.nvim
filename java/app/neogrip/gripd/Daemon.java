@@ -5,7 +5,7 @@ import neogrip.gripd.adapter.jdbc.Database;
 import neogrip.gripd.adapter.jdbc.Session;
 import neogrip.gripd.adapter.rpc.ErrorCodes;
 import neogrip.gripd.adapter.rpc.SqlErrors;
-import neogrip.gripd.adapter.rpc.StatusNotifications;
+import neogrip.gripd.adapter.rpc.WireNotifications;
 import neogrip.gripd.adapter.rpc.handler.CatalogHandlers;
 import neogrip.gripd.adapter.rpc.handler.ConnectHandler;
 import neogrip.gripd.adapter.rpc.handler.ControlHandlers;
@@ -35,7 +35,7 @@ public final class Daemon {
                 .io(System.in, System.out)
                 .stopOn("shutdown")
                 .inline("initialize")
-                .components(Session.class, StatusNotifications.class, Database.class)
+                .components(Session.class, WireNotifications.class, Database.class)
                 .handlers(
                         HandshakeHandler.class,
                         ControlHandlers.class,

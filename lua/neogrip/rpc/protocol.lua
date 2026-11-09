@@ -6,8 +6,9 @@ local M = {}
 -- Bumped only by an ADR; a mismatch is refused at initialize. Version 2 made a
 -- result a cursor the client names (ADR-0031); version 3 renamed the
 -- handshake's sidecarInfo to gripdInfo with the program (ADR-0034); version 4
--- answers a tree the client draws (ADR-0036, ADR-0038).
-M.VERSION = 4
+-- answers a tree the client draws (ADR-0036, ADR-0038); version 5 says when a
+-- statement begins executing, so a clock can run while it does (ADR-0042).
+M.VERSION = 5
 
 M.ERRORS = {
 	-- JSON-RPC standard codes.

@@ -4,7 +4,7 @@ The contract between the Lua plugin and gripd, its Java daemon. This document is
 here bumps `protocolVersion`, is recorded in an ADR first, and lands in the same commit as both
 implementations (`lua/neogrip/rpc/` and `java/app/neogrip/gripd/`).
 
-Current `protocolVersion`: **4**.
+Current `protocolVersion`: **5**.
 
 ## Transport and framing
 
@@ -46,8 +46,8 @@ sweep at a time, outside the lock, on sibling connections of its own.
 ### initialize
 
 ```json
-→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":4,"clientInfo":{"name":"neogrip.nvim"}}}
-← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":4,"gripdInfo":{"java":"21.0.3"}}}
+→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":5,"clientInfo":{"name":"neogrip.nvim"}}}
+← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":5,"gripdInfo":{"java":"21.0.3"}}}
 ```
 
 A major-version mismatch is refused with error `-32002` and gripd exits.
@@ -114,7 +114,8 @@ batch; `done` is true when the result has no more rows, and gripd has then alrea
   out and one to learn the table has more, so the pages after the first cost nothing. A `query` with no
   `hash` asks for `limit + 1` instead, which is what a preview or a sample wants. When the window drains
   gripd re-executes the same statement and skips what it already delivered, keeping the same hash.
-  The client is not told - a refill is indistinguishable from a continuation.
+  That re-execution announces itself with `progress` like any other (ADR-0042), which is the only way a
+  client can tell a refill from a continuation; there is nothing else it can do differently about one.
 - A document result (ADR-0020) discovers its columns while reading, so a continuation may carry a grown
   `columns` list. When it does, the client replaces its own; a field absent from an earlier document is
   null in that row.
@@ -174,6 +175,11 @@ batch; `done` is true when the result has no more rows, and gripd has then alrea
 
 - Notification `status {phase, message}` — connection progress, authentication steps ("browser opened"),
   and the idle-transaction watchdog's rollback notice.
+- Notification `progress {hash, phase}` — the named result's statement has begun executing on the
+  server, sent immediately before each execution and therefore again on every window refill. `phase` is
+  `executing` and nothing else so far. Only a named result reports: `exec`, `export`, `validate`,
+  `catalog/*`, an intercepted transaction statement and an unnamed query send nothing. The response's
+  `elapsedMs` stays the authoritative duration; this only says when to start counting.
 - Notification `log {level, message}` — sparse; never anything derived from `connect` params.
 - Request `input {prompt, secret}` → `{value}` — reserved for authentication flows that need user input
   (device code). The client answers asynchronously.
