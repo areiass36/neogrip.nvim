@@ -278,3 +278,39 @@ check("and nothing to answer with", grid.current_buf(), nil)
 -- Reached again through BufDelete once the buffer is gone, so it has to be
 -- harmless the second time.
 check("forgetting it twice is harmless", pcall(grid.close, only), true)
+
+support.describe("grid: appending a batch keeps the marks on the row before it")
+
+-- The incremental clear is indexed off the rule line, and used to start one
+-- line too early: it cleared the last row of the previous batch, which the
+-- repaint loop never reaches because that starts at the first new row. Every
+-- append therefore stripped the stripe, the separators and the value colour off
+-- the row it appended after - invisible to every text assertion, so it is
+-- asserted on the extmarks.
+local append_ns = vim.api.nvim_create_namespace("neogrip_grid")
+local function marks_on(bufnr, line)
+	local out = {}
+	for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, append_ns, 0, -1, { details = true })) do
+		if mark[2] + 1 == line then
+			out[#out + 1] = ("%d:%s"):format(mark[3], mark[4].hl_group)
+		end
+	end
+	table.sort(out)
+	return out
+end
+
+grid.show({
+	columns = { "n", "s" },
+	rows = { { 1, "a" }, { 2, "b" }, { 3, "c" }, { 4, "d" } },
+	done = false,
+	connection = { name = "x", driver = "duckdb" },
+}, { focus = false })
+local append_buf = grid.current_buf()
+-- Row 4 is even, so it carries a stripe, and it is the last one drawn.
+local before_append = marks_on(append_buf, 4 + 2)
+check("the last row is painted", #before_append > 0, true)
+
+grid.add_page(append_buf, { rows = { { 5, "e" }, { 6, "f" } }, done = true })
+check("it is still painted after the append", marks_on(append_buf, 4 + 2), before_append)
+check("and the appended rows were painted too", #marks_on(append_buf, 6 + 2) > 0, true)
+grid.close(append_buf)

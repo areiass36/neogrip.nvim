@@ -168,7 +168,12 @@ function M.paint(bufnr, namespace, grid)
 	if first_row == 1 then
 		vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
 	else
-		vim.api.nvim_buf_clear_namespace(bufnr, namespace, first_row + RULE_LINE - 2, -1)
+		-- Data row `r` is 1-based line r + RULE_LINE, so the 0-based line this
+		-- clear has to start at is first_row + RULE_LINE - 1. It used to be one
+		-- less, which cleared the last row of the previous batch - a line the
+		-- repaint loop below never reaches, since that starts at first_row - so
+		-- every append stripped the marks off the row it appended after.
+		vim.api.nvim_buf_clear_namespace(bufnr, namespace, first_row + RULE_LINE - 1, -1)
 	end
 
 	local lines = grid.lines
