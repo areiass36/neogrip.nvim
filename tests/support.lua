@@ -276,17 +276,21 @@ function M.run(connection, sql, opts)
 end
 
 --- The next batch of a result left open under `hash` (ADR-0031).
-function M.next_batch(connection, hash, limit)
+--- @param opts table|nil merged into the request, so a suite can pass
+---             on_progress and watch what gripd says during a refill.
+function M.next_batch(connection, hash, limit, opts)
+	opts = opts or {}
+	local request = vim.tbl_extend("force", {
+		connection = connection,
+		mode = "next",
+		hash = hash,
+		limit = limit or 0,
+	}, opts)
 	return M.sync(function(done)
-		require("neogrip.runner").run({
-			connection = connection,
-			mode = "next",
-			hash = hash,
-			limit = limit or 0,
-		}, function(result, err)
+		require("neogrip.runner").run(request, function(result, err)
 			done(result, err)
 		end)
-	end)
+	end, opts.timeout)
 end
 
 --- First cell of the first row, as a number when it looks like one.

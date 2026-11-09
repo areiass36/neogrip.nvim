@@ -79,9 +79,21 @@ support.describe("live/cursor: the window refills without the client noticing")
 -- than the window so several batches come out of each execution: 2050 rows in
 -- batches of 300 crosses the 1000-row window twice. The opening execution asks
 -- for the batch and one row more; the window arrives with the first
--- continuation, and the re-executions behind it are invisible from here -
--- which is the property under test (ADR-0031).
+-- continuation, and the re-executions behind it leave no mark on the rows or
+-- the batch sizes - which is the property under test (ADR-0031).
+--
+-- They do announce themselves, which is what the progress counter below is
+-- for: protocol 5 says a notification precedes every execution of a statement,
+-- refills included, and more than one for the same hash is the only direct
+-- proof that the emission sits inside Cursor and not in Statements.query
+-- (ADR-0042).
 local TOTAL, PAGE = 2050, 300
+local executions = 0
+local function count_executing(event)
+	if event.phase == "executing" then
+		executions = executions + 1
+	end
+end
 support.run(pg, "drop table if exists window_probe", { mode = "exec" })
 support.run(
 	pg,
@@ -90,7 +102,8 @@ support.run(
 )
 
 local sql = "select n from window_probe order by n"
-local batch, batch_err = support.run(pg, sql, { limit = PAGE, timeout = 90000 })
+local batch, batch_err =
+	support.run(pg, sql, { limit = PAGE, timeout = 90000, on_progress = count_executing })
 if batch_err then
 	support.fail("opening the window probe", batch_err.message)
 else
@@ -119,7 +132,7 @@ else
 			support.fail("the window probe never finished", batches .. " batches")
 			break
 		end
-		local continued, err = support.next_batch(pg, batch.hash, PAGE)
+		local continued, err = support.next_batch(pg, batch.hash, PAGE, { on_progress = count_executing })
 		if err then
 			support.fail("batch " .. (batches + 1), err.message)
 			break
@@ -134,6 +147,11 @@ else
 	check("every batch but the last was full", full, true)
 	check("so the count is the page size and nothing else", batches, math.ceil(TOTAL / PAGE))
 	check("and the last one carries the remainder", #batch.rows, TOTAL % PAGE)
+	-- Three executions for 2050 rows over a 1000-row window: the opening one
+	-- and two refills. Asserted as "more than one" rather than exactly three,
+	-- so the check is about the refill reporting at all and not about where
+	-- the window happens to fall.
+	check("every execution announced itself, refills included", executions > 1, true)
 end
 
 support.describe("live/cursor: a continuation does not run the statement again")

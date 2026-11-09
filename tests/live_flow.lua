@@ -68,6 +68,16 @@ state = grid.state(grid.current_buf())
 check("the second statement ran", state.columns, { "n" })
 check("its value", state.rows[1][1], 2)
 
+-- Each query has its own tab, so the rows of the first are still there to go
+-- back to rather than having been overwritten (ADR-0044).
+check("the second query opened its own tab", #grid.tabs(), 2)
+check("and is the one on screen", grid.current_buf() ~= result_buf, true)
+local kept = grid.state(result_buf)
+check("the first tab still holds its rows", #kept.rows, 2)
+check("and its own columns", kept.columns, { "id", "s_comma", "s_null", "cjk" })
+local kept_bar = grid.winbar_text(result_buf)
+check("its winbar names the connection that answered", kept_bar:find(pg.name, 1, true) ~= nil, true)
+
 support.describe("live/flow: readonly refuses writes in layers")
 local readonly = vim.tbl_extend("force", vim.deepcopy(pg), { id = "test-pg-ro", readonly = true })
 connections_module.register(readonly)
