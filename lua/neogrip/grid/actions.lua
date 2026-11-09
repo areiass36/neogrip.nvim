@@ -320,6 +320,25 @@ function M.close(bufnr)
 	grid.close(bufnr or vim.api.nvim_get_current_buf())
 end
 
+--- Move between result tabs (ADR-0044).
+---
+--- These take no buffer, unlike everything else here: which tab the window
+--- shows is a property of the grid and not of any one buffer. There is no
+--- command for them, which is the same answer close has always had - the plugin
+--- maps no keys (ADR-0017) and the README's recipe is where keys are named.
+function M.next_tab()
+	grid.step_tab(1)
+end
+
+function M.prev_tab()
+	grid.step_tab(-1)
+end
+
+--- Show one tab by its position in the strip, 1-based.
+function M.goto_tab(index)
+	grid.goto_tab(index)
+end
+
 --- Ask where and in what format to export.
 function M.export(bufnr)
 	require("neogrip.grid.export").pick(bufnr or vim.api.nvim_get_current_buf())

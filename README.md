@@ -101,6 +101,8 @@ vim.api.nvim_create_autocmd("FileType", {
 		map("S", actions.sort_desc, "Sort descending")
 		map("]p", actions.page_next, "Load a batch")
 		map("[p", actions.page_prev, "Back a batch")
+		map("]t", actions.next_tab, "Next result tab")
+		map("[t", actions.prev_tab, "Previous result tab")
 		map("gf", actions.follow_fk, "Follow this foreign key")
 		map("<CR>", actions.show_document, "Show the whole document (Mongo)")
 		map("e", actions.export, "Export")

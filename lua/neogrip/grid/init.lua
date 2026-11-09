@@ -24,6 +24,16 @@ local CELL_PRIORITY = 150
 -- A query this slow is worth noticing, so the time in the footer says so.
 local SLOW_MS = 1000
 local states = {}
+-- Tabs whose query has not answered yet (ADR-0044). A pending tab deliberately
+-- has no entry in `states`: rendering one would draw a header with no columns
+-- and "no rows", which reads as "the query returned nothing" - a worse lie than
+-- an empty window. The winbar is the whole message until rows arrive.
+local waiting = {}
+-- When the statement in a tab began executing, by the server's word (ADR-0042),
+-- or nil when nothing is executing in it. One table for both cases a clock can
+-- run in: a tab waiting for its first answer, and one whose window drained and
+-- made gripd re-execute - the slowest wait there is.
+local clocks = {}
 -- The result buffers, in the order they were opened, and which of them the
 -- window is showing (ADR-0044). One window holds all of them; switching is
 -- setting its buffer.
@@ -35,6 +45,10 @@ local minted = 0
 -- Declared up here because the BufDelete autocommand is attached before the
 -- definition and has to reach it.
 local forget
+-- Declared up here because the winbar is painted above, and the strip it draws
+-- names every tab, so a change to one tab repaints whichever tab is on screen.
+local find_window
+local grid_window
 
 --- @class neogrip.GridState
 --- @field result table
@@ -54,6 +68,20 @@ function M.state(bufnr)
 	return states[bufnr or vim.api.nvim_get_current_buf()]
 end
 
+--- How long the statement in a tab has been executing, in ms.
+---
+--- Measured from the moment gripd said it had begun (ADR-0042), so the queue,
+--- the connect and a first-use compile of gripd are not in it. Nil when nothing
+--- is executing, which is what keeps a number off the screen that would be
+--- counting the wrong thing.
+local function elapsed_of(bufnr)
+	local started = clocks[bufnr]
+	if not started then
+		return nil
+	end
+	return math.floor((vim.uv.hrtime() - started) / 1e6)
+end
+
 --- The three things said about a result: which connection answered, how many
 --- rows are here, and how long the statement took.
 ---
@@ -64,7 +92,7 @@ end
 --- it touched, and this is the only place that count can appear: a window
 --- saying "no rows" is a worse answer than the one the server gave.
 --- @return table parts list of { text, group }
-local function describe(state)
+local function describe(bufnr, state)
 	local result = state.result
 	local connection = result.connection or {}
 	-- A count, not a range: rows accumulate, so the first one on screen is
@@ -100,7 +128,10 @@ local function describe(state)
 	elseif more then
 		suffix = " (more)"
 	end
-	local elapsed = result.elapsed_ms or 0
+	-- A refill is executing right now, so the number that matters is how long it
+	-- has been going, not how long the last batch took. The footer is where a
+	-- finished time belongs; this is the only live one (ADR-0042).
+	local elapsed = elapsed_of(bufnr) or result.elapsed_ms or 0
 	return {
 		{
 			("%s [%s]"):format(connection.name or "?", connection.driver or "?"),
@@ -120,25 +151,92 @@ local function escape(text)
 	return (tostring(text):gsub("%%", "%%%%"))
 end
 
+--- What a tab that has not answered yet says about itself.
+--- @return table parts list of { text, group }
+local function describe_pending(bufnr, entry)
+	local connection = entry.connection or {}
+	local parts = {
+		{
+			("%s [%s]"):format(connection.name or "?", connection.driver or "?"),
+			connection.production and "NGripGridProduction" or "NGripGridConnection",
+		},
+	}
+	if entry.failed then
+		parts[#parts + 1] = { entry.failed, "NGripGridSlow" }
+		return parts
+	end
+	local elapsed = elapsed_of(bufnr)
+	if not elapsed then
+		-- A word and never a number: until the server says it has begun, any
+		-- number on screen would be counting something the reader did not ask
+		-- about (ADR-0043).
+		parts[#parts + 1] = { entry.phase or "sent", "NGripGridElapsed" }
+		return parts
+	end
+	parts[#parts + 1] = { "running", "NGripGridCount" }
+	parts[#parts + 1] = {
+		("%d ms"):format(elapsed),
+		elapsed >= SLOW_MS and "NGripGridSlow" or "NGripGridElapsed",
+	}
+	return parts
+end
+
 --- The winbar of a result window (ADR-0043).
 ---
---- Says what the footer says, and is worth saying twice because the footer sits
---- after the last row: in a result read by scrolling it is thousands of lines
---- away, while this stays on screen.
+--- For a result, says what the footer says, which is worth saying twice because
+--- the footer sits after the last row: in a result read by scrolling it is
+--- thousands of lines away, while this stays on screen. For a query still
+--- running, it is the only thing on screen.
 ---
 --- Pure on purpose, so a suite asserts it with no window at all - the way
 --- row_number_for is already asserted.
 --- @return string ready for 'winbar'
 function M.winbar_text(bufnr)
-	local state = states[bufnr]
-	if not state then
+	local parts
+	if waiting[bufnr] then
+		parts = describe_pending(bufnr, waiting[bufnr])
+	elseif states[bufnr] then
+		parts = describe(bufnr, states[bufnr])
+	else
 		return ""
 	end
 	local out = {}
-	for _, part in ipairs(describe(state)) do
+	for _, part in ipairs(parts) do
 		out[#out + 1] = ("%%#%s#%s"):format(part[2], escape(part[1]))
 	end
-	return table.concat(out, "%#NGripGridFooter#" .. SEPARATOR)
+	local text = table.concat(out, "%#NGripGridFooter#" .. SEPARATOR)
+	local strip = M.tab_strip(bufnr)
+	if strip ~= "" then
+		text = strip .. "%#NGripGridFooter#" .. SEPARATOR .. text
+	end
+	return text
+end
+
+--- The tab strip: one number per tab, the one on screen marked.
+---
+--- Numbers and not statement text, because a label wide enough to tell two
+--- queries apart leaves no room for the clock, and the number is what
+--- grid.actions.goto_tab takes. Empty while there is only one tab: a strip of
+--- one says nothing a reader does not already know.
+--- @return string
+function M.tab_strip(bufnr)
+	if #tabs < 2 then
+		return ""
+	end
+	local out = {}
+	for index, tab in ipairs(tabs) do
+		local group = "NGripGridTab"
+		local entry = waiting[tab]
+		if entry and entry.failed then
+			group = "NGripGridTabError"
+		elseif entry then
+			group = "NGripGridTabRunning"
+		elseif tab == bufnr then
+			group = "NGripGridTabActive"
+		end
+		out[#out + 1] = ("%%#%s#%s%d"):format(group, tab == bufnr and "▸" or " ", index)
+	end
+	return table.concat(out, "")
 end
 
 --- Put the winbar on a result window.
@@ -151,20 +249,89 @@ local function paint_winbar(winid, bufnr)
 	pcall(vim.api.nvim_set_option_value, "winbar", M.winbar_text(bufnr), { win = winid, scope = "local" })
 end
 
---- Redraw the winbar of whichever window is showing this buffer.
+--- Redraw the winbar after something about a tab changed.
+---
+--- The result window is repainted whatever tab it is showing, because the strip
+--- names every tab: a query finishing in a hidden tab changes the bar in front
+--- of the reader. A window showing the tab that changed is repainted too, for
+--- the case where it is not the result window.
 function M.refresh_winbar(bufnr)
-	for _, winid in ipairs(vim.api.nvim_list_wins()) do
-		if vim.api.nvim_win_get_buf(winid) == bufnr then
-			paint_winbar(winid, bufnr)
+	local painting = {}
+	local grid_win = grid_window()
+	if grid_win then
+		painting[grid_win] = vim.api.nvim_win_get_buf(grid_win)
+	end
+	if bufnr then
+		for _, winid in ipairs(vim.api.nvim_list_wins()) do
+			if vim.api.nvim_win_get_buf(winid) == bufnr then
+				painting[winid] = bufnr
+			end
 		end
 	end
+	for winid, buffer in pairs(painting) do
+		paint_winbar(winid, buffer)
+	end
+end
+
+-- Fast enough to read as moving, slow enough that the cost is one option
+-- assignment per window per tick and nothing else.
+local TICK_MS = 100
+local ticker = nil
+
+--- Stop the clock and let go of the timer.
+---
+--- Closed as well as stopped, which the autoload debounce does not do and the
+--- runner's watchdog does not even do the first half of (ADR-0043).
+local function stop_ticking()
+	if ticker then
+		ticker:stop()
+		ticker:close()
+		ticker = nil
+	end
+end
+
+--- Keep one timer for the module while any tab is executing, and none when
+--- none is. One per tab would be a handle per query for the same redraw.
+local function sync_ticker()
+	local running = false
+	for bufnr in pairs(clocks) do
+		if vim.api.nvim_buf_is_valid(bufnr) then
+			running = true
+		else
+			-- A buffer that went while its statement was executing: the answer
+			-- can no longer land anywhere, so neither can its clock.
+			clocks[bufnr] = nil
+		end
+	end
+	if not running then
+		return stop_ticking()
+	end
+	if ticker then
+		return
+	end
+	ticker = vim.uv.new_timer()
+	ticker:start(
+		TICK_MS,
+		TICK_MS,
+		vim.schedule_wrap(function()
+			for bufnr in pairs(clocks) do
+				M.refresh_winbar(bufnr)
+			end
+		end)
+	)
+end
+
+--- Whether the clock is running. For the suites: a timer that outlives the
+--- queries it was drawing is the failure this feature can have.
+function M._ticking()
+	return ticker ~= nil
 end
 
 --- The footer, and the byte span of each part so they can be told apart.
 --- @return string text
 --- @return table segments list of { start_byte, end_byte, group }
-local function footer(state)
-	local parts = describe(state)
+local function footer(bufnr, state)
+	local parts = describe(bufnr, state)
 	if state.has_binary then
 		parts[#parts + 1] = { "binary column: select encode(col,'hex') to read it", "NGripGridBinary" }
 	end
@@ -257,7 +424,7 @@ local function render(bufnr)
 
 	-- The blank and the footer sit immediately after the rows, so appending
 	-- rows overwrites exactly where they were and nothing stale is left behind.
-	local footer_text, footer_segments = footer(state)
+	local footer_text, footer_segments = footer(bufnr, state)
 	local last = #state.rows + 2
 	lines[last + 1] = ""
 	lines[last + 2] = footer_text
@@ -376,7 +543,7 @@ function M.cell_value(bufnr)
 	return row and row[state.column]
 end
 
-local function find_window(bufnr)
+function find_window(bufnr)
 	for _, winid in ipairs(vim.api.nvim_list_wins()) do
 		if vim.api.nvim_win_get_buf(winid) == bufnr then
 			return winid
@@ -506,42 +673,202 @@ local function attach_cursor_sync(bufnr)
 	})
 end
 
+--- Hand back the cursor of the result a tab is about to stop holding.
+---
+--- One of the four reclamation paths ADR-0041 requires, and it lives in the grid
+--- rather than in execute because the grid is what knows a result is being
+--- replaced: a sort reuses its tab, and the result it replaces is not coming
+--- back, so gripd can let that cursor go now instead of an hour from now.
+local function release_replaced(state, result)
+	local stale = state and state.result and state.result.hash
+	if stale and stale ~= result.hash and state.result.connection then
+		require("neogrip.runner").release(state.result.connection, stale)
+	end
+end
+
+--- A fresh scratch buffer for one tab.
+local function new_tab_buffer()
+	local bufnr = vim.api.nvim_create_buf(false, true)
+	vim.bo[bufnr].buftype = "nofile"
+	vim.bo[bufnr].bufhidden = "hide"
+	vim.bo[bufnr].swapfile = false
+	minted = minted + 1
+	vim.api.nvim_buf_set_name(bufnr, ("neogrip://result/%d"):format(minted))
+	-- The filetype is set after the name so a user FileType autocommand
+	-- sees the finished buffer.
+	vim.bo[bufnr].filetype = M.FILETYPE
+	return bufnr
+end
+
+--- The window the tabs live in, whichever one of them it is showing.
+function grid_window()
+	local current = M.current_buf()
+	if current then
+		local winid = find_window(current)
+		if winid then
+			return winid
+		end
+	end
+	for _, bufnr in ipairs(tabs) do
+		local winid = find_window(bufnr)
+		if winid then
+			return winid
+		end
+	end
+	return nil
+end
+
+--- Open the result window if it is not open, and show this tab in it.
+local function open_window(bufnr)
+	local winid = grid_window()
+	if winid then
+		if vim.api.nvim_win_get_buf(winid) ~= bufnr then
+			vim.api.nvim_win_set_buf(winid, bufnr)
+		end
+		return winid
+	end
+	local origin = vim.api.nvim_get_current_win()
+	vim.cmd("botright split")
+	winid = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_height(winid, math.max(10, math.floor(vim.o.lines * 0.4)))
+	vim.api.nvim_win_set_buf(winid, bufnr)
+	vim.wo[winid].wrap = false
+	vim.wo[winid].number = false
+	vim.wo[winid].relativenumber = false
+	vim.wo[winid].cursorline = false
+	if require("neogrip.config").get().row_numbers then
+		vim.wo[winid].statuscolumn = "%!v:lua.require'neogrip.grid'.row_label()"
+	end
+	vim.api.nvim_set_current_win(origin)
+	return winid
+end
+
+--- Put a tab in the list if it is new, and make it the one the window shows.
+local function activate(bufnr)
+	for index, tab in ipairs(tabs) do
+		if tab == bufnr then
+			active = index
+			return
+		end
+	end
+	tabs[#tabs + 1] = bufnr
+	active = #tabs
+end
+
+--- Open a tab for a query that has not answered yet (ADR-0044).
+---
+--- The window appears now and the rows arrive into this same buffer later. The
+--- caller has to mint the result's name before the request leaves, because the
+--- runner can answer synchronously - a dead process does - and there would
+--- otherwise be no tab for the answer to land in.
+--- `into` reuses a tab instead of opening one, which is what a sort does: the
+--- rows already on screen stay readable while the new order is fetched, and the
+--- clock runs over them.
+--- @param opts table { into, hash, connection, origin_buf, statement, label, focus }
+--- @return integer bufnr
+function M.open_pending(opts)
+	local bufnr = opts.into
+	if not (bufnr and vim.api.nvim_buf_is_valid(bufnr)) then
+		bufnr = new_tab_buffer()
+	end
+	waiting[bufnr] = {
+		hash = opts.hash,
+		connection = opts.connection,
+		origin_buf = opts.origin_buf,
+		statement = opts.statement,
+		label = opts.label,
+		phase = "sent",
+	}
+	local winid = open_window(bufnr)
+	activate(bufnr)
+	M.refresh_winbar(bufnr)
+	if opts.focus then
+		vim.api.nvim_set_current_win(winid)
+	end
+	return bufnr
+end
+
+--- Whether a tab is still waiting for its answer.
+function M.is_pending(bufnr)
+	return waiting[bufnr] ~= nil
+end
+
+--- Remember the handle, so closing the tab can cancel the request behind it.
+function M.attach_handle(bufnr, handle)
+	local entry = waiting[bufnr]
+	if entry then
+		entry.handle = handle
+	end
+end
+
+--- Where a pending query has got to: a phase from the runner, or gripd saying
+--- the statement has begun executing (ADR-0042), which is what starts the clock.
+--- Reaches a tab waiting for its first answer and one whose refill is running,
+--- which is why the clock is keyed by buffer rather than kept on either.
+function M.progress(bufnr, event)
+	if not event or not (waiting[bufnr] or states[bufnr]) then
+		return
+	end
+	if waiting[bufnr] then
+		waiting[bufnr].phase = event.phase
+	end
+	if event.phase == "executing" then
+		-- Restarted rather than kept, because a refill is another execution of
+		-- the same statement and its own wait.
+		clocks[bufnr] = vim.uv.hrtime()
+	end
+	sync_ticker()
+	M.refresh_winbar(bufnr)
+end
+
+--- The query failed, was refused or was cancelled. The tab stays and says so:
+--- the window is already open, and one that vanishes leaves the reader with
+--- nothing to look at and a renumbered strip (ADR-0044).
+--- @param err table the translated error - already redacted by errors.from_rpc,
+---            because a raw driver message can carry a secret
+function M.fail(bufnr, err)
+	local entry = waiting[bufnr]
+	if not entry or not vim.api.nvim_buf_is_valid(bufnr) then
+		return
+	end
+	clocks[bufnr] = nil
+	entry.failed = err and err.cancelled and "cancelled" or "failed"
+	entry.handle = nil
+	sync_ticker()
+	-- A tab that was reused - a sort whose re-run failed - still holds the rows
+	-- the reader was looking at, and they are not what went wrong. The winbar
+	-- carries the word; only an empty tab gets the message as its body.
+	if not states[bufnr] then
+		local message = err and err.message or "the statement did not run"
+		vim.bo[bufnr].modifiable = true
+		vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(message, "\n", { plain = true }))
+		vim.bo[bufnr].modifiable = false
+	end
+	M.refresh_winbar(bufnr)
+end
+
 --- Show a result, reusing the window that already holds one.
+--- @param context table|nil { into, origin_buf, statement, focus }
 --- @return integer bufnr
 function M.show(result, context)
 	context = context or {}
-	local bufnr = M.current_buf()
-	local winid
-
-	if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-		winid = find_window(bufnr)
-	else
-		bufnr = vim.api.nvim_create_buf(false, true)
-		vim.bo[bufnr].buftype = "nofile"
-		vim.bo[bufnr].bufhidden = "hide"
-		vim.bo[bufnr].swapfile = false
-		minted = minted + 1
-		vim.api.nvim_buf_set_name(bufnr, ("neogrip://result/%d"):format(minted))
-		-- The filetype is set after the name so a user FileType autocommand
-		-- sees the finished buffer.
-		vim.bo[bufnr].filetype = M.FILETYPE
+	local bufnr = context.into
+	if not (bufnr and vim.api.nvim_buf_is_valid(bufnr)) then
+		bufnr = M.current_buf()
+	end
+	if not (bufnr and vim.api.nvim_buf_is_valid(bufnr)) then
+		bufnr = new_tab_buffer()
 	end
 
-	if not winid then
-		local origin = vim.api.nvim_get_current_win()
-		vim.cmd("botright split")
-		winid = vim.api.nvim_get_current_win()
-		vim.api.nvim_win_set_height(winid, math.max(10, math.floor(vim.o.lines * 0.4)))
-		vim.api.nvim_win_set_buf(winid, bufnr)
-		vim.wo[winid].wrap = false
-		vim.wo[winid].number = false
-		vim.wo[winid].relativenumber = false
-		vim.wo[winid].cursorline = false
-		if require("neogrip.config").get().row_numbers then
-			vim.wo[winid].statuscolumn = "%!v:lua.require'neogrip.grid'.row_label()"
-		end
-		vim.api.nvim_set_current_win(origin)
-	end
+	local pending_entry = waiting[bufnr]
+	waiting[bufnr] = nil
+	clocks[bufnr] = nil
+	sync_ticker()
+	-- Reusing a tab - which is what a sort does - replaces what it held.
+	release_replaced(states[bufnr], result)
+
+	local winid = open_window(bufnr)
+	activate(bufnr)
 
 	states[bufnr] = {
 		result = result,
@@ -553,18 +880,10 @@ function M.show(result, context)
 		documents = result.documents,
 		row = 1,
 		column = 1,
-		origin_buf = context.origin_buf,
-		statement = context.statement,
+		origin_buf = context.origin_buf or (pending_entry and pending_entry.origin_buf),
+		statement = context.statement or (pending_entry and pending_entry.statement),
+		label = pending_entry and pending_entry.label,
 	}
-	if not vim.tbl_contains(tabs, bufnr) then
-		tabs[#tabs + 1] = bufnr
-	end
-	for index, tab in ipairs(tabs) do
-		if tab == bufnr then
-			active = index
-			break
-		end
-	end
 	render(bufnr)
 	attach_cursor_sync(bufnr)
 
@@ -614,7 +933,16 @@ function forget(bufnr)
 	if result and result.hash and result.connection then
 		require("neogrip.runner").release(result.connection, result.hash)
 	end
+	-- A tab dismissed before it answered takes its request with it: leaving the
+	-- statement running would cost the reader a cursor they just closed.
+	local entry = waiting[bufnr]
+	if entry and entry.handle then
+		require("neogrip.runner").cancel(entry.handle)
+	end
+	waiting[bufnr] = nil
 	states[bufnr] = nil
+	clocks[bufnr] = nil
+	sync_ticker()
 	if pending[bufnr] then
 		pending[bufnr]:stop()
 		pending[bufnr] = nil
@@ -638,12 +966,48 @@ function forget(bufnr)
 	end
 end
 
+--- Show the tab at this index. Out of range is a no-op, so a mapping that
+--- names a tab the reader does not have does nothing rather than erroring.
+function M.goto_tab(index)
+	local bufnr = tabs[index]
+	if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+		return nil
+	end
+	active = index
+	local winid = grid_window()
+	if winid then
+		vim.api.nvim_win_set_buf(winid, bufnr)
+		M.refresh_winbar(bufnr)
+		if states[bufnr] then
+			M.focus_cell(bufnr, winid)
+		end
+	end
+	return bufnr
+end
+
+--- Step through the tabs, wrapping at each end.
+function M.step_tab(delta)
+	if #tabs == 0 then
+		return nil
+	end
+	return M.goto_tab((active - 1 + delta) % #tabs + 1)
+end
+
 function M.close(bufnr)
 	bufnr = bufnr or M.current_buf()
 	if not bufnr then
 		return
 	end
+	-- The window is handed its next tab before the buffer goes, so closing one
+	-- of several leaves the window in place showing a neighbour; only the last
+	-- tab lets the window go with it.
+	local winid = find_window(bufnr)
 	forget(bufnr)
+	local neighbour = tabs[active]
+	if winid and neighbour and vim.api.nvim_buf_is_valid(neighbour) then
+		pcall(vim.api.nvim_win_set_buf, winid, neighbour)
+		M.refresh_winbar(neighbour)
+	end
 	if vim.api.nvim_buf_is_valid(bufnr) then
 		pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
 	end
@@ -657,6 +1021,7 @@ function M.set_result(bufnr, result)
 	if not state then
 		return
 	end
+	release_replaced(state, result)
 	state.result = result
 	state.columns = result.columns or {}
 	state.rows = result.rows or {}
@@ -715,6 +1080,9 @@ function M.add_page(bufnr, batch)
 		state.result.column_tables = batch.column_tables
 		state.result.column_schemas = batch.column_schemas
 	end
+	-- The refill, if there was one, is over.
+	clocks[bufnr] = nil
+	sync_ticker()
 	state.result.done = batch.done
 	state.result.elapsed_ms = batch.elapsed_ms
 	local moved = render(bufnr)

@@ -186,6 +186,11 @@ function M.setup()
 		if not bufnr then
 			return neogrip.notify("no result yet")
 		end
+		-- Said here rather than letting requery answer "no rows to
+		-- materialise", which is true and tells the reader the wrong thing.
+		if grid.is_pending(bufnr) then
+			return neogrip.notify("this tab is still running")
+		end
 		require("neogrip.grid.requery").materialise(bufnr)
 	end, { desc = "Query the current result with SQL (DuckDB)" })
 
@@ -202,6 +207,9 @@ function M.setup()
 		local bufnr = grid.current_buf()
 		if not bufnr then
 			return neogrip.notify("no result to export", vim.log.levels.WARN)
+		end
+		if grid.is_pending(bufnr) then
+			return neogrip.notify("this tab is still running", vim.log.levels.WARN)
 		end
 		require("neogrip.grid.export").pick(bufnr)
 	end, { desc = "Export the current result as CSV or JSON" })

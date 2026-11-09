@@ -143,9 +143,34 @@ README carries a complete recipe).
   follow_fk                                   open the row this key points at
   show_document                               the whole Mongo document
   export       materialise  close
+  next_tab     prev_tab     goto_tab({n})     move between result tabs
 
 Yanks and exports always read the stored value, never the drawn text: what is
 on screen may be truncated.
+
+                                                *neogrip-grid-tabs*
+Every query gets its own tab, and they all live in one window: running a
+second statement does not destroy the rows you were reading. The tab appears
+as soon as the statement is sent, before any answer, and its 'winbar' says
+how long the statement has been executing - counting only the execution, so
+nothing on screen is ever counting a queue wait or a first-use build of
+gripd. A selection holding several statements opens one tab per statement.
+
+Sorting a column reuses its tab: the same rows in another order is the same
+query. A statement that fails keeps its tab and says why.
+
+`next_tab` and `prev_tab` wrap; `goto_tab({n})` takes a position in the
+strip, 1-based, and does nothing if there is no such tab. There are no
+commands for them, as with every other grid action. Closing a tab hands its
+result back to the server and shows a neighbour; closing the last one closes
+the window.
+
+There is no limit on how many tabs are open, and each one holds a cursor on
+the server until it is closed or |neogrip-options| `cursor_idle_seconds`
+elapses. Many large results open at once is the one way to make gripd run out
+of memory, which it reports as having stopped answering.
+
+`:NGripResults`, `:NGripExport` and `:NGripKeep` act on the tab on screen.
 
 Rows accumulate: the grid holds row one through the last one loaded, and
 reading to the bottom loads the next batch on its own once the cursor comes
@@ -323,7 +348,8 @@ lives, `lua/neogrip/config.lua`): >lua
 Every group is defined with `default = true`, so your own |nvim_set_hl()|
 wins. The grid's groups are prefixed `NGripGrid`: Header, HeaderSorted, Rule,
 Separator, Stripe, Ellipsis, Cell, Null, Number, Boolean, Temporal, Uuid,
-Json, Binary, Footer, Connection, Production, Count, Elapsed, Slow.
+Json, Binary, Footer, Connection, Production, Count, Elapsed, Slow, Tab,
+TabActive, TabRunning, TabError.
 
 ==============================================================================
 12. LIMITATIONS                                 *neogrip-limitations*

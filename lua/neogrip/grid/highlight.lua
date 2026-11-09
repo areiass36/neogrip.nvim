@@ -67,6 +67,13 @@ local SPEC = {
 	NGripGridCount = { fg = { "@number", "Number" } },
 	NGripGridElapsed = { fg = { "Comment" } },
 	NGripGridSlow = { fg = { "DiagnosticWarn", "WarningMsg" } },
+
+	-- The winbar's tab strip (ADR-0044). Painted through statusline format
+	-- items rather than extmarks, so these are named in the string itself.
+	NGripGridTab = { fg = { "Comment" } },
+	NGripGridTabActive = { fg = { "@attribute", "Function", "Identifier" }, bold = true },
+	NGripGridTabRunning = { fg = { "@number", "Number" } },
+	NGripGridTabError = { fg = { "DiagnosticError", "ErrorMsg" } },
 }
 
 --- What value.kind says a cell is -> the group that paints it. "text" is

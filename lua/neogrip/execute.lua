@@ -35,17 +35,6 @@ local function flash(bufnr, statement)
 	)
 end
 
---- Say something only if the query is still running two seconds in. Tied to
---- the handle, not to "is anything running": another connection's query
---- finishing is not news about this one.
-local function start_progress(connection, handle)
-	vim.defer_fn(function()
-		if not handle.done then
-			neogrip.notify(("running on %s... (:NGripCancel cancels)"):format(connection.name))
-		end
-	end, 2000)
-end
-
 --- The one mechanical refusal: a write against a connection that says it is
 --- read-only never runs. Gripd refuses as well, because the Lua
 --- classifier can be wrong about an exotic statement.
@@ -99,15 +88,45 @@ local function execute_statement(p)
 	-- No LIMIT is spliced into the statement: the driver caps the rows
 	-- (setMaxRows) and the result stays open as a cursor, which works the same
 	-- whatever the dialect spells it (ADR-0014, ADR-0031).
+	-- Minted here rather than left to the runner, because the tab has to exist
+	-- before the request leaves and the tab is addressed by this name. The
+	-- runner answers synchronously when the process is gone, so opening the tab
+	-- afterwards would open it after the answer had already been handled.
+	local hash = runner.hash()
+	local tab = nil
+	if p.show then
+		tab = grid.open_pending({
+			-- A sort hands back the tab it is re-ordering, so the rows already
+			-- on screen stay readable while the new order is fetched.
+			into = p.into,
+			hash = hash,
+			connection = connection,
+			origin_buf = bufnr,
+			statement = p.statement,
+			label = p.label,
+			focus = false,
+		})
+	end
+
 	local handle
 	handle = runner.run({
 		connection = connection,
 		sql = sql,
 		mode = "query",
 		limit = p.limit,
+		hash = hash,
+		on_progress = tab and function(event)
+			grid.progress(tab, event)
+		end or nil,
 	}, function(result, err)
 		in_flight[bufnr] = nil
 		if err then
+			-- The tab keeps the window it opened and says what happened. The
+			-- message has already been through errors.from_rpc, which is what
+			-- keeps a driver's text - and any secret in it - out of a buffer.
+			if tab then
+				grid.fail(tab, err)
+			end
 			if err.cancelled then
 				return neogrip.notify("cancelled")
 			end
@@ -120,42 +139,32 @@ local function execute_statement(p)
 			result.base_sql = base_sql
 			result.order_by = p.order_by
 			result.descending = p.descending
-			-- The grid is about to hold a different result, and the one it held
-			-- is not coming back: gripd can let that cursor go now rather
-			-- than wait for its idle sweep (ADR-0031).
-			local previous_buf = grid.current_buf()
-			local previous = previous_buf and grid.state(previous_buf)
-			local stale = previous and previous.result and previous.result.hash
-			if stale and stale ~= result.hash then
-				runner.release(connection, stale)
-			end
-			grid.show(result, { origin_buf = bufnr, statement = p.statement, focus = p.focus })
+			grid.show(result, {
+				into = tab,
+				origin_buf = bufnr,
+				statement = p.statement,
+				focus = p.focus,
+			})
 		end
 		if p.on_done then
 			p.on_done(result)
 		end
 	end)
 	in_flight[bufnr] = handle
-	start_progress(connection, handle)
-end
-
---- One line describing what a statement did, for the ones in a sequence whose
---- result does not reach the grid.
-local function summarise(label, result)
-	if result.rows_written then
-		return ("%s: wrote %d rows"):format(label, result.rows_written)
+	if tab then
+		grid.attach_handle(tab, handle)
 	end
-	if result.update_count and result.update_count >= 0 then
-		return ("%s: %d rows affected"):format(label, result.update_count)
-	end
-	return ("%s: %d rows%s"):format(label, #(result.rows or {}), result.done == false and "+" or "")
 end
 
 --- Run several statements against one connection one after another. The driver
 --- takes a single statement per call - Trino rejects even two separated by a
 --- ';' with "mismatched input ';'" - so a selection that holds more than one is
 --- a sequence, exactly as a SQL console runs it: each in turn, stopping at the
---- first error, with only the last one's rows shown in the grid.
+--- first error, and each one in its own tab.
+---
+--- That last part supersedes ADR-0030's clause that only the last statement's
+--- rows reach the grid, and the notification that summarised the others goes
+--- with it: a tab says everything that line said and stays put (ADR-0044).
 local function run_sequence(bufnr, connection, outer, parts, opts)
 	local total = #parts
 	local function step(index)
@@ -174,8 +183,10 @@ local function run_sequence(bufnr, connection, outer, parts, opts)
 				end_line = outer.end_line,
 			},
 			limit = opts.limit,
+			-- Every statement gets a tab; only the last one takes the window,
+			-- so the cursor does not jump once per statement.
 			focus = last and opts.focus or false,
-			show = last,
+			show = true,
 			label = label,
 			on_done = function(result)
 				if last then
@@ -183,7 +194,6 @@ local function run_sequence(bufnr, connection, outer, parts, opts)
 						opts.on_done(result)
 					end
 				else
-					neogrip.notify(summarise(label, result))
 					step(index + 1)
 				end
 			end,
@@ -245,6 +255,7 @@ function M.run(opts)
 		descending = opts.descending,
 		focus = opts.focus,
 		show = true,
+		into = opts.into,
 		on_done = opts.on_done,
 	})
 end
@@ -277,6 +288,9 @@ local function rerun(state, changes)
 		order_by = result.order_by,
 		descending = result.descending,
 		focus = false,
+		-- The same rows in another order is the same query to the reader, so it
+		-- replaces this tab instead of opening one per sort click (ADR-0044).
+		into = state.bufnr,
 	}, changes))
 end
 
@@ -304,7 +318,9 @@ end
 --- @return boolean asked whether a request actually went out
 function M.load_more(state, opts)
 	opts = opts or {}
-	local bufnr = state and (state.bufnr or grid.current_buf())
+	-- state.bufnr is always set by show, and with tabs a fallback to whichever
+	-- tab is active could address a different one than this state belongs to.
+	local bufnr = state and state.bufnr
 	if not bufnr then
 		return false
 	end
@@ -342,6 +358,13 @@ function M.load_more(state, opts)
 		hash = result.hash,
 		mode = "next",
 		limit = result.limit or config.get().limit,
+		-- A continuation that drains the window makes gripd re-execute the
+		-- statement, which announces itself like any other execution (ADR-0042).
+		-- That is the slowest wait there is - ADR-0031 measured 226s on a Trino
+		-- refill - so it is the one that most needs a clock.
+		on_progress = function(event)
+			grid.progress(bufnr, event)
+		end,
 	}, function(batch, err)
 		auto.loading = false
 		if opts.track then
@@ -405,7 +428,7 @@ function M.page(state, delta)
 	if not state then
 		return
 	end
-	local bufnr = state.bufnr or grid.current_buf()
+	local bufnr = state.bufnr
 	if not bufnr then
 		return
 	end
