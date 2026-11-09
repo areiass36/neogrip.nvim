@@ -192,6 +192,10 @@ server no longer has the result - which happens after |neogrip-options|
 `cursor_idle_seconds` of nothing reading from it, or if it was cancelled. The
 rows already loaded stay usable; nothing is re-run to recover the rest.
 
+The time in the footer is the statement's own, and loading more rows does not
+replace it: a batch is a continuation of the same cursor and costs a few
+milliseconds, so the number stays the one that says what the statement cost.
+
 The window's 'winbar' says the same three things, and is worth saying twice
 because the footer sits after the last row: in a long result read by
 scrolling it is thousands of lines away, while the bar stays on screen. It is

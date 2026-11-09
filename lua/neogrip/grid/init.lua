@@ -1084,7 +1084,11 @@ function M.add_page(bufnr, batch)
 	clocks[bufnr] = nil
 	sync_ticker()
 	state.result.done = batch.done
-	state.result.elapsed_ms = batch.elapsed_ms
+	-- The query's own time is kept, not replaced by this batch's. A batch is a
+	-- continuation of the same cursor and usually costs a few milliseconds, so
+	-- overwriting turned "this statement took 1420 ms" into "3 ms" the moment
+	-- the reader scrolled - and the statement's cost is what the number is for.
+	state.last_batch_ms = batch.elapsed_ms
 	local moved = render(bufnr)
 	-- The cursor stays on the row it was on. When the table moved sideways its
 	-- byte column now addresses another cell, so it is put back on the cell it

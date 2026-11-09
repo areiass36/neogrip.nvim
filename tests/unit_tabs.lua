@@ -197,7 +197,12 @@ grid.state(scrolled).auto.loading = false
 grid.add_page(scrolled, { rows = { { 2 } }, done = true, elapsed_ms = 4 })
 check("the batch landing stops the clock", grid._ticking(), false)
 local landed = grid.winbar_text(scrolled)
-check("and the footer is a finished time again", landed:find("4 ms", 1, true) ~= nil, true)
+-- The statement's own time survives the batch. Overwriting it turned "this
+-- statement took 1420 ms" into "3 ms" as soon as the reader scrolled, and the
+-- statement's cost is what the number is for.
+check("the query's own time is still the one shown", landed:find("12 ms", 1, true) ~= nil, true)
+check("not the batch's", landed:find("4 ms", 1, true), nil)
+check("but the batch's is kept", grid.state(scrolled).last_batch_ms, 4)
 
 support.describe("tabs: sorting reuses the tab it is sorting")
 
