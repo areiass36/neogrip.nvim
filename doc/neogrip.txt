@@ -167,6 +167,20 @@ server no longer has the result - which happens after |neogrip-options|
 `cursor_idle_seconds` of nothing reading from it, or if it was cancelled. The
 rows already loaded stay usable; nothing is re-run to recover the rest.
 
+The window's 'winbar' says the same three things, and is worth saying twice
+because the footer sits after the last row: in a long result read by
+scrolling it is thousands of lines away, while the bar stays on screen. It is
+set per window, so it appears on the result window and nowhere else. Clear it
+with a |FileType| autocommand on `neogrip-grid` if you would rather not have
+it: >
+
+	vim.api.nvim_create_autocmd("FileType", {
+		pattern = "neogrip-grid",
+		callback = function()
+			vim.wo.winbar = nil
+		end,
+	})
+<
 ==============================================================================
 7. CATALOG TREE                                 *neogrip-tree*
 

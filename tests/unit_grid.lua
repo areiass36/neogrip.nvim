@@ -219,3 +219,38 @@ grid.add_page(gb, { rows = { { 100 } }, done = true })
 check("the gutter is the same width at 100 rows as at 99", grid.row_number_for(gb, 3), at_99)
 check("and it is the floor until four digits are needed", at_99, "   1 ")
 grid.close(gb)
+
+support.describe("grid: the winbar")
+
+-- Asserted with no window at all: winbar_text takes a buffer and returns a
+-- string, which is what keeps a redraw out of the test (ADR-0043).
+local bar_buf = vim.api.nvim_create_buf(false, true)
+grid.buf = bar_buf
+grid.show({
+	columns = { "a" },
+	rows = { { 1 }, { 2 } },
+	done = false,
+	elapsed_ms = 7,
+	connection = { name = "pg", driver = "postgres" },
+}, { focus = false })
+local bb = grid.current_buf()
+local bar = grid.winbar_text(bb)
+check("it names the connection and its driver", bar:find("pg [postgres]", 1, true) ~= nil, true)
+check("counts the rows it holds", bar:find("2 rows", 1, true) ~= nil, true)
+check("still promises more, as the footer does", bar:find("(more)", 1, true) ~= nil, true)
+check("and ends in the elapsed time", bar:find("7 ms", 1, true) ~= nil, true)
+check("each part carries its own group", bar:find("%%#NGripGridConnection#") ~= nil, true)
+check("the slow time is marked as slow", bar:find("NGripGridSlow") == nil, true)
+
+-- The footer and the winbar say the same things, from the same parts, so the
+-- two cannot drift apart.
+local footer_line = vim.api.nvim_buf_get_lines(bb, 0, -1, false)
+footer_line = footer_line[#footer_line]
+check("the winbar says what the footer says", (bar:gsub("%%#[%w]+#", "")), footer_line)
+
+-- A per cent in a connection name would be read as the start of an item.
+grid.state(bb).result.connection = { name = "100%", driver = "duckdb" }
+check("a per cent in a name is escaped", grid.winbar_text(bb):find("100%%%%", 1, false) ~= nil, true)
+
+check("a buffer with no result has no winbar", grid.winbar_text(vim.api.nvim_create_buf(false, true)), "")
+grid.close(bb)

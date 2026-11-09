@@ -43,15 +43,17 @@ function M.state(bufnr)
 	return states[bufnr or vim.api.nvim_get_current_buf()]
 end
 
---- The footer, and the byte span of each part so they can be told apart: which
---- connection answered, how many rows, how long it took.
+--- The three things said about a result: which connection answered, how many
+--- rows are here, and how long the statement took.
+---
+--- Shared by the footer and the winbar so the two cannot drift apart. The
+--- footer adds a fourth part of its own; the winbar has no room for a sentence.
 ---
 --- An UPDATE or an INSERT has no columns and no rows, only a count of the rows
 --- it touched, and this is the only place that count can appear: a window
 --- saying "no rows" is a worse answer than the one the server gave.
---- @return string text
---- @return table segments list of { start_byte, end_byte, group }
-local function footer(state)
+--- @return table parts list of { text, group }
+local function describe(state)
 	local result = state.result
 	local connection = result.connection or {}
 	-- A count, not a range: rows accumulate, so the first one on screen is
@@ -88,7 +90,7 @@ local function footer(state)
 		suffix = " (more)"
 	end
 	local elapsed = result.elapsed_ms or 0
-	local parts = {
+	return {
 		{
 			("%s [%s]"):format(connection.name or "?", connection.driver or "?"),
 			connection.production and "NGripGridProduction" or "NGripGridConnection",
@@ -96,11 +98,66 @@ local function footer(state)
 		{ range .. suffix, "NGripGridCount" },
 		{ ("%d ms"):format(elapsed), elapsed >= SLOW_MS and "NGripGridSlow" or "NGripGridElapsed" },
 	}
+end
+
+--- What separates one part from the next, in the footer and in the winbar.
+local SEPARATOR = "  ·  "
+
+--- Make a value safe to put in a statusline-format string. A per cent in a
+--- connection name would otherwise be read as the start of an item.
+local function escape(text)
+	return (tostring(text):gsub("%%", "%%%%"))
+end
+
+--- The winbar of a result window (ADR-0043).
+---
+--- Says what the footer says, and is worth saying twice because the footer sits
+--- after the last row: in a result read by scrolling it is thousands of lines
+--- away, while this stays on screen.
+---
+--- Pure on purpose, so a suite asserts it with no window at all - the way
+--- row_number_for is already asserted.
+--- @return string ready for 'winbar'
+function M.winbar_text(bufnr)
+	local state = states[bufnr]
+	if not state then
+		return ""
+	end
+	local out = {}
+	for _, part in ipairs(describe(state)) do
+		out[#out + 1] = ("%%#%s#%s"):format(part[2], escape(part[1]))
+	end
+	return table.concat(out, "%#NGripGridFooter#" .. SEPARATOR)
+end
+
+--- Put the winbar on a result window.
+---
+--- Set as a literal string rather than a `%!` expression, and set per window
+--- rather than globally: 'winbar' is global-local, and an expression would have
+--- to be told to re-evaluate, which only :redrawstatus! reaches reliably and
+--- which would re-evaluate every other window's statusline too (ADR-0043).
+local function paint_winbar(winid, bufnr)
+	pcall(vim.api.nvim_set_option_value, "winbar", M.winbar_text(bufnr), { win = winid, scope = "local" })
+end
+
+--- Redraw the winbar of whichever window is showing this buffer.
+function M.refresh_winbar(bufnr)
+	for _, winid in ipairs(vim.api.nvim_list_wins()) do
+		if vim.api.nvim_win_get_buf(winid) == bufnr then
+			paint_winbar(winid, bufnr)
+		end
+	end
+end
+
+--- The footer, and the byte span of each part so they can be told apart.
+--- @return string text
+--- @return table segments list of { start_byte, end_byte, group }
+local function footer(state)
+	local parts = describe(state)
 	if state.has_binary then
 		parts[#parts + 1] = { "binary column: select encode(col,'hex') to read it", "NGripGridBinary" }
 	end
 
-	local SEPARATOR = "  ·  "
 	local texts, segments, cursor = {}, {}, 0
 	for index, part in ipairs(parts) do
 		if index > 1 then
@@ -235,6 +292,9 @@ local function render(bufnr)
 	})
 
 	M.highlight_cell(bufnr)
+	-- The winbar says the same three things as the footer, so it moves when
+	-- they do: a batch that lands changes the count and the time.
+	M.refresh_winbar(bufnr)
 	return moved
 end
 
