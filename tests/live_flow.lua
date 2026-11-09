@@ -156,3 +156,30 @@ check("descending starts at the highest row of the whole table", state.rows[1][1
 check("not just of what was loaded", #state.batches, 1)
 check("and the old rows are gone", #state.rows, 10)
 support.run(pg, "drop table if exists paging", { mode = "exec" })
+
+support.describe("live/flow: closing a tab hands its result back")
+
+-- Nothing on the wire reports how many results gripd holds, so the only way to
+-- ask is to try to continue one: a hash that is gone answers -32600, which
+-- doc/protocol.md pins as the contract. ADR-0041 requires this path to work -
+-- with tabs it is one of only two automatic reclamations left, the other being
+-- the hour-long idle sweep.
+local protocol = require("neogrip.rpc.protocol")
+support.run(pg, "drop table if exists closing", { mode = "exec" })
+support.run(pg, "create table closing as select generate_series(1, 40) as n", { mode = "exec" })
+
+local kept_open = support.run(pg, "select n from closing order by n", { limit = 5 })
+check("the result is open", kept_open.done, false)
+local live = grid.show(kept_open, { focus = false })
+check("it is a tab", vim.tbl_contains(grid.tabs(), live), true)
+
+grid.close(live)
+-- Polled, not read once: the release is fire-and-forget and the close behind it
+-- waits for the execution lane, so a continuation sent at the same moment can
+-- still be served from the registry.
+local handed_back = support.wait(function()
+	local _, err = support.next_batch(pg, kept_open.hash, 5)
+	return err ~= nil and err.rpc_code == protocol.ERRORS.invalid_request
+end, 15000)
+check("closing the tab released it on the server", handed_back, true)
+support.run(pg, "drop table if exists closing", { mode = "exec" })

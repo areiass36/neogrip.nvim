@@ -79,11 +79,16 @@ longer compiles.
    `lua/` file. Confirm it loads with no error.
 2. Walk a PostgreSQL connection from the server down to a column, one level at a time, and confirm every
    level answers and is labelled the way `tree.shape()` says.
-3. Expand a table's rows, page once more, then collapse it. Confirm the rows arrive, that the second page
-   continues the first, and that `:NGripDoctor` shows no cursor left open afterwards.
+3. Expand a table's rows, page once more, then collapse it. Confirm the rows arrive and that the second
+   page continues the first.
 4. Expand five tables' rows without collapsing any, and confirm all five still answer: nothing evicts an
-   open result any more (ADR-0041). Then collapse them and confirm with `:NGripDoctor` that no cursor is
-   left open — the reclamation is the client's job now, and an hour of idle sweep is the only backstop.
+   open result any more (ADR-0041).
+
+   Steps 3 and 4 used to end by confirming with `:NGripDoctor` that no cursor was left open, which cannot
+   be done: the doctor reports each connection's product and the round trip of one `select 1`, and no
+   method on the wire says how many results gripd holds. That a collapsed listing hands its cursor back
+   is covered by the live suites, which ask the server to continue a hash they released and expect
+   `-32600`.
 5. Ask for a long level with `limit` and walk it to the end. Confirm no set is missing or repeated, and
    that the last page reports `done`.
 6. Re-introspect one namespace after an `alter table`, and confirm only that namespace changed: the other
@@ -110,11 +115,18 @@ the suites assert what the bar says, never that it moved or appeared.
    on screen, and that `]t` / `[t` move between them with the rows of each intact.
 6. Run a statement with a syntax error. Confirm its tab stays, says why in the body, and that the bar marks
    it as failed rather than as a result with no rows.
-7. Sort a column. Confirm no new tab appears and that `:NGripDoctor` shows one cursor, not two — the
-   replaced result is handed back (ADR-0041).
-8. Open twenty tabs and confirm `:NGripDoctor` shows twenty cursors. This is the memory cost ADR-0044
-   accepts: gripd runs with no explicit heap limit, and the failure at the far end reads as "gripd stopped
-   answering; restarting it" with no mention of memory.
+7. Sort a column. Confirm no new tab appears and that the rows come back in the new order. Nothing on the
+   client reports how many results the server holds, so the release of the replaced one is covered by
+   `tests/unit_tabs.lua` instead; what is manual here is only that sorting reuses its tab.
+8. Open twenty tabs against one connection, each with rows left unread so none of their results is
+   finished, and watch the gripd process's memory (its PID is in `:NGripDoctor`). This is the cost
+   ADR-0044 accepts: gripd runs with no explicit heap limit, and the failure at the far end reads as
+   "gripd stopped answering; restarting it" with no mention of memory.
+9. On a result read to its end, confirm whether the clock restarts on the last batch. On a driver that
+   ignores `setMaxRows` — DuckDB does, and `Drivers.tolerate` swallows the refusal — the window never
+   limits, so the cursor re-executes the whole statement once at the end to find out it is finished. The
+   notice is honest (an execution really is running), but on a slow statement it reads as the clock
+   restarting for no reason. Measured: 3999 rows came out of one execution with `maxRows` set to 1001.
 
 ## Results
 
