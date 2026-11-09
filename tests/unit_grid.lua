@@ -190,10 +190,8 @@ vim.api.nvim_buf_delete(narrow_buf, { force = true })
 support.describe("grid: the optional row-number gutter")
 
 local grid = require("neogrip.grid")
--- A fabricated state: three data rows under the two header lines.
-local rownum_buf = vim.api.nvim_create_buf(false, true)
-require("neogrip.grid").buf = rownum_buf
--- Reach into show() by faking a minimal result so states[buf] exists.
+-- A fabricated state: three data rows under the two header lines. show() opens
+-- the tab, so there is no buffer to hand it.
 grid.show({
 	columns = { "a" },
 	rows = { { 1 }, { 2 }, { 3 } },
@@ -224,8 +222,6 @@ support.describe("grid: the winbar")
 
 -- Asserted with no window at all: winbar_text takes a buffer and returns a
 -- string, which is what keeps a redraw out of the test (ADR-0043).
-local bar_buf = vim.api.nvim_create_buf(false, true)
-grid.buf = bar_buf
 grid.show({
 	columns = { "a" },
 	rows = { { 1 }, { 2 } },
@@ -254,3 +250,31 @@ check("a per cent in a name is escaped", grid.winbar_text(bb):find("100%%%%", 1,
 
 check("a buffer with no result has no winbar", grid.winbar_text(vim.api.nvim_create_buf(false, true)), "")
 grid.close(bb)
+
+support.describe("grid: the tab list")
+
+check("no result means no tabs", #grid.tabs(), 0)
+check("and nothing active", grid.active_tab(), 0)
+
+grid.show({
+	columns = { "a" },
+	rows = { { 1 } },
+	connection = { name = "x", driver = "duckdb" },
+}, { focus = false })
+local only = grid.current_buf()
+check("showing a result opens a tab", #grid.tabs(), 1)
+check("which is the active one", grid.active_tab(), 1)
+check("and is what current_buf answers", grid.tabs()[1], only)
+
+-- Each tab's buffer name has to be its own: a hidden one the user has not
+-- deleted still holds its name, and a duplicate name is an error.
+local only_name = vim.api.nvim_buf_get_name(only)
+check("the buffer is named after its number", only_name:find("neogrip://result/") ~= nil, true)
+
+grid.close(only)
+check("closing the last tab empties the list", #grid.tabs(), 0)
+check("and leaves nothing active", grid.active_tab(), 0)
+check("and nothing to answer with", grid.current_buf(), nil)
+-- Reached again through BufDelete once the buffer is gone, so it has to be
+-- harmless the second time.
+check("forgetting it twice is harmless", pcall(grid.close, only), true)

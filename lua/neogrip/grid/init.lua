@@ -24,6 +24,17 @@ local CELL_PRIORITY = 150
 -- A query this slow is worth noticing, so the time in the footer says so.
 local SLOW_MS = 1000
 local states = {}
+-- The result buffers, in the order they were opened, and which of them the
+-- window is showing (ADR-0044). One window holds all of them; switching is
+-- setting its buffer.
+local tabs = {}
+local active = 0
+-- Never reused, because a hidden tab the user has not deleted still holds its
+-- buffer name and a duplicate name is an error.
+local minted = 0
+-- Declared up here because the BufDelete autocommand is attached before the
+-- definition and has to reach it.
+local forget
 
 --- @class neogrip.GridState
 --- @field result table
@@ -488,10 +499,9 @@ local function attach_cursor_sync(bufnr)
 		group = group,
 		buffer = bufnr,
 		callback = function()
-			if pending[bufnr] then
-				pending[bufnr]:stop()
-				pending[bufnr] = nil
-			end
+			-- :bd in the result window has to leave the strip honest, so this
+			-- is the same bookkeeping close does and not just the timer.
+			forget(bufnr)
 		end,
 	})
 end
@@ -510,7 +520,8 @@ function M.show(result, context)
 		vim.bo[bufnr].buftype = "nofile"
 		vim.bo[bufnr].bufhidden = "hide"
 		vim.bo[bufnr].swapfile = false
-		vim.api.nvim_buf_set_name(bufnr, "neogrip://result")
+		minted = minted + 1
+		vim.api.nvim_buf_set_name(bufnr, ("neogrip://result/%d"):format(minted))
 		-- The filetype is set after the name so a user FileType autocommand
 		-- sees the finished buffer.
 		vim.bo[bufnr].filetype = M.FILETYPE
@@ -545,7 +556,15 @@ function M.show(result, context)
 		origin_buf = context.origin_buf,
 		statement = context.statement,
 	}
-	M.buf = bufnr
+	if not vim.tbl_contains(tabs, bufnr) then
+		tabs[#tabs + 1] = bufnr
+	end
+	for index, tab in ipairs(tabs) do
+		if tab == bufnr then
+			active = index
+			break
+		end
+	end
 	render(bufnr)
 	attach_cursor_sync(bufnr)
 
@@ -556,32 +575,78 @@ function M.show(result, context)
 	return bufnr
 end
 
+--- The tab the window is showing, or nil when there is none.
 function M.current_buf()
-	if M.buf and vim.api.nvim_buf_is_valid(M.buf) then
-		return M.buf
+	local bufnr = tabs[active]
+	if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+		return bufnr
 	end
 	return nil
+end
+
+--- Every tab, oldest first. A copy: the list is the grid's own.
+function M.tabs()
+	return vim.list_extend({}, tabs)
+end
+
+--- Which tab is showing, 1-based, or 0 when there is none.
+function M.active_tab()
+	return active
 end
 
 function M.refresh(bufnr)
 	render(bufnr or M.current_buf())
 end
 
+--- Forget a tab: hand its result back and drop every trace of it.
+---
+--- Idempotent because it is reached twice for one close - directly, and again
+--- through BufDelete once the buffer is gone.
+function forget(bufnr)
+	if not bufnr then
+		return
+	end
+	local state = states[bufnr]
+	-- Hand the result back. Nothing evicts an open one any more (ADR-0041),
+	-- so a closed grid would otherwise hold a statement on the server until
+	-- the idle sweep reached it an hour later.
+	local result = state and state.result
+	if result and result.hash and result.connection then
+		require("neogrip.runner").release(result.connection, result.hash)
+	end
+	states[bufnr] = nil
+	if pending[bufnr] then
+		pending[bufnr]:stop()
+		pending[bufnr] = nil
+	end
+	for index, tab in ipairs(tabs) do
+		if tab == bufnr then
+			table.remove(tabs, index)
+			if active > index then
+				-- Every tab after the one that went shifted down by one.
+				active = active - 1
+			elseif active == index then
+				-- The window was showing it: the next tab takes its place, or
+				-- the one before it when the last tab went.
+				active = math.min(index, #tabs)
+			end
+			break
+		end
+	end
+	if #tabs == 0 then
+		active = 0
+	end
+end
+
 function M.close(bufnr)
 	bufnr = bufnr or M.current_buf()
-	if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-		local state = states[bufnr]
-		-- Hand the result back. Nothing evicts an open one any more (ADR-0041),
-		-- so a closed grid would otherwise hold a statement on the server until
-		-- the idle sweep reached it an hour later.
-		local result = state and state.result
-		if result and result.hash and result.connection then
-			require("neogrip.runner").release(result.connection, result.hash)
-		end
-		states[bufnr] = nil
+	if not bufnr then
+		return
+	end
+	forget(bufnr)
+	if vim.api.nvim_buf_is_valid(bufnr) then
 		pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
 	end
-	M.buf = nil
 end
 
 --- Replace the whole result in place, for a re-run: a different sort, or the

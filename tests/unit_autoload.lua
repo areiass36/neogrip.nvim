@@ -50,7 +50,6 @@ local function fresh(opts)
 	if opts.no_hash then
 		hash = nil
 	end
-	grid.buf = vim.api.nvim_create_buf(false, true)
 	grid.show({
 		columns = { "n" },
 		rows = rows,
