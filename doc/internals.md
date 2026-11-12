@@ -9,15 +9,15 @@ and the code lean on. Each fact lives here exactly once, and the code points at 
 
 - A whole render measured 23 ms at 200 rows, 1091 ms at 10 000 and 1983 ms at 20 000; rendering only
   the rows a batch added holds a batch at 35-45 ms. This is why the reuse path exists in
-  `lua/neogrip/grid/init.lua`, `render`.
+  `lua/neogrip/grid/render.lua`, `M.draw`.
 - Rendering from an index instead of from the top: re-rendering everything measured 425 ms per batch
   at ten thousand rows with eight columns. `opts.from` in `lua/neogrip/grid/layout.lua`, `M.render`.
 - The execution clock fires ten times a second and a full render measured about 2 s at 20 000 rows,
-  so a tick rewrites only the footer line (`lua/neogrip/grid/init.lua`, `repaint_footer`) and repaints
+  so a tick rewrites only the footer line (`lua/neogrip/grid/status.lua`, `repaint_footer`) and repaints
   only that line (`lua/neogrip/grid/highlight.lua`, `paint_line`); `M.paint`'s buffer-wide clear is
   the cost the clock exists to avoid.
 - A continuation batch's `elapsed_ms` must not overwrite the statement's: doing so turned "this
-  statement took 1420 ms" into "3 ms" the moment the reader scrolled. `lua/neogrip/grid/init.lua`,
+  statement took 1420 ms" into "3 ms" the moment the reader scrolled. `lua/neogrip/grid/pages.lua`,
   `M.add_page`.
 - `nvim_buf_delete` on an unlisted buffer fires `BufWipeout` and not `BufDelete` (BufDelete is about
   the buffer list), so a cleanup hooked to BufDelete alone never ran and the debounce timer was never
@@ -27,10 +27,10 @@ and the code lean on. Each fact lives here exactly once, and the code points at 
   `lua/neogrip/grid/init.lua`, `attach_cursor_sync`.
 - A gutter width taken from the row count re-widthed the whole gutter at row 100 and again at row
   1000 while the reader scrolled, so the width has a floor of four digits.
-  `lua/neogrip/grid/init.lua`, `M.row_number_for`.
+  `lua/neogrip/grid/cursor.lua`, `M.row_number_for`.
 - The cursor-driven load is debounced at 120 ms so holding `j` asks once rather than once per line;
   the dialect module's repaint debounce settled on the same value. `DEBOUNCE_MS` in
-  `lua/neogrip/grid/init.lua` and the `vim.defer_fn` in `lua/neogrip/ui/syntax.lua`.
+  `lua/neogrip/grid/cursor.lua` and the `vim.defer_fn` in `lua/neogrip/ui/syntax.lua`.
 - Extmark priorities in the grid: the stripe paints at 90, below treesitter's 100, so it only tints;
   cell content paints at 100, the ellipsis at 105, and the cursor cell over everything at 150.
   `lua/neogrip/grid/highlight.lua`.
@@ -39,7 +39,7 @@ and the code lean on. Each fact lives here exactly once, and the code points at 
   `lua/neogrip/grid/highlight.lua`, `M.paint`.
 - JDBC `getUpdateCount` answers -1 when the driver will not say, which is not the same as zero rows
   affected; the footer says "statement ran" instead of "-1 rows affected".
-  `lua/neogrip/grid/init.lua`, `describe`.
+  `lua/neogrip/grid/status.lua`, `describe`.
 - Postgres `bytea` arrives with its invalid bytes already replaced by U+FFFD, so the original cannot
   be recovered; binary detection therefore looks for the replacement character itself.
   `lua/neogrip/grid/layout.lua`, `M.looks_binary`.
@@ -51,7 +51,7 @@ and the code lean on. Each fact lives here exactly once, and the code points at 
 - Trino refuses a statement that carries its terminator and rejects two statements in one call, both
   failing with "mismatched input ';'"; a trailing terminator also breaks the subquery the sort wraps
   a statement in. The terminator is stripped in `lua/neogrip/execute.lua`, `execute_statement`, and in
-  `lua/neogrip/sql/split.lua`, `M.selection`; one statement per call is the shape of
+  `lua/neogrip/ui/statement.lua`, `M.selection`; one statement per call is the shape of
   `lua/neogrip/execute.lua`, `run_sequence`.
 - A continuable result opens with the whole paging window: opening with batch+1 made the second page
   drain and refill, paying an expensive statement twice - measured on a Trino GROUP BY over a Delta
