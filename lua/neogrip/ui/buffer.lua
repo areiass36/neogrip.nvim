@@ -1,18 +1,14 @@
+local lsp = require("neogrip.lsp")
 local resolve = require("neogrip.connections.resolve")
+local syntax = require("neogrip.ui.syntax")
 
 local M = {}
 
 local scratch_count = 0
 
 local function attach_services(bufnr, connection)
-	local dialect_ok, dialect = pcall(require, "neogrip.ui.syntax")
-	if dialect_ok then
-		dialect.attach(bufnr, connection.driver)
-	end
-	local lsp_ok, lsp = pcall(require, "neogrip.lsp")
-	if lsp_ok then
-		lsp.start(bufnr)
-	end
+	syntax.attach(bufnr, connection.driver)
+	lsp.start(bufnr)
 end
 
 --- A scratch query buffer; acwrite plus BufWriteCmd so :w asks where to save instead of failing.
@@ -80,8 +76,22 @@ function M.setup()
 	-- Neovim has no filetype for a mongosh script.
 	vim.filetype.add({ extension = { mongodb = "mongodb" } })
 
+	local group = vim.api.nvim_create_augroup("NeogripBuffers", { clear = true })
+
+	-- A buffer bound to another connection needs that engine's dialect and its own server.
+	vim.api.nvim_create_autocmd("User", {
+		group = group,
+		pattern = "NeogripConnectionBound",
+		callback = function(args)
+			local data = args.data or {}
+			if data.buf and data.connection then
+				attach_services(data.buf, data.connection)
+			end
+		end,
+	})
+
 	vim.api.nvim_create_autocmd("FileType", {
-		group = vim.api.nvim_create_augroup("NeogripBuffers", { clear = true }),
+		group = group,
 		pattern = { "sql", "mysql", "plsql", "mongodb" },
 		callback = function(args)
 			M.attach(args.buf)

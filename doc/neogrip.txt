@@ -99,6 +99,17 @@ Which connection a buffer uses is resolved most-specific-first: an explicit
 choice, a saved binding for the file, a glob from the project file, the
 project default, the last one used. `:NGripWhich` explains the answer.
 
+Binding a buffer fires `User NeogripConnectionBound` with
+`{ buf, connection }` in the event's `data`. That is how the dialect layer
+and the language server learn to re-attach, and it is yours to hook: >lua
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "NeogripConnectionBound",
+      callback = function(args)
+        vim.notify(args.data.connection.name)
+      end,
+    })
+<
+
 ==============================================================================
 5. COMMANDS                                     *neogrip-commands*
 

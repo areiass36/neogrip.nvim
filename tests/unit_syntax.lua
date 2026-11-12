@@ -109,3 +109,16 @@ check("nor one inside a string with a doubled quote", marked_at(2, 13), nil)
 check("so only two marks on the first line", #vim.tbl_filter(function(mark)
 	return mark.row == 0
 end, by_text), 2)
+
+support.describe("syntax: an announced binding re-attaches the layer")
+
+-- resolve.bind announces; what attaches is ui/buffer, which is the half asserted here
+-- (bind itself would write into a developer's state dir).
+require("neogrip.ui.buffer").setup()
+local announced = vim.api.nvim_create_buf(false, true)
+vim.api.nvim_buf_set_lines(announced, 0, -1, false, { "select jsonb_agg(x) from t;" })
+vim.api.nvim_exec_autocmds("User", {
+	pattern = "NeogripConnectionBound",
+	data = { buf = announced, connection = { id = "__announced__", name = "a", driver = "postgres" } },
+})
+check("the announced buffer got the dialect", vim.b[announced].neogrip_dialect, "postgres")

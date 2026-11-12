@@ -123,16 +123,12 @@ function M.for_buf(bufnr)
 	return nil, nil
 end
 
---- Attached via pcall: the port grows in phases and resolve must not fail while a module is unported.
-local function attach_services(bufnr, connection)
-	local dialect_ok, dialect = pcall(require, "neogrip.ui.syntax")
-	if dialect_ok then
-		dialect.attach(bufnr, connection.driver)
-	end
-	local lsp_ok, lsp = pcall(require, "neogrip.lsp")
-	if lsp_ok then
-		lsp.start(bufnr)
-	end
+--- Announced rather than acted on: which services a buffer gets is the editor's business.
+local function announce(bufnr, connection)
+	vim.api.nvim_exec_autocmds("User", {
+		pattern = "NeogripConnectionBound",
+		data = { buf = bufnr, connection = connection },
+	})
 end
 
 --- Remember the connection for this buffer's file, and as the project's last used.
@@ -147,7 +143,7 @@ function M.bind(bufnr, id)
 	save()
 	local connection = connections.get(id)
 	if connection then
-		attach_services(bufnr, connection)
+		announce(bufnr, connection)
 	end
 end
 
