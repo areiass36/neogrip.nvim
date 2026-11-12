@@ -98,23 +98,25 @@ longer compiles.
 
 ## Result tabs and the running clock
 
-A timer-driven redraw and a `'winbar'` that is actually drawn are exactly what a headless run cannot see:
-the suites assert what the bar says, never that it moved or appeared.
+A timer-driven redraw that is actually seen moving is exactly what a headless run cannot confirm: the
+suites assert what the status line says, never that it moved (ADR-0045).
 
 1. Run a deliberately slow statement (`select pg_sleep(5)`, or a Trino aggregate over something large).
-   Confirm the window appears immediately, before any answer, with the connection's name and a word rather
-   than a number.
+   Confirm the window appears immediately, before any answer, with one status line in its body naming
+   the connection and a word rather than a number.
 2. Confirm the number then appears and **moves**, roughly ten times a second, and that it starts near zero
    even if the connection had to be opened first — a first-use build of gripd can take tens of seconds and
    none of it belongs in that number.
-3. Confirm the number it settles on is within a few milliseconds of the footer's. They are not expected to
-   be equal, and either may be the larger (ADR-0042).
-4. Scroll a result of more than 1001 rows to its end. Confirm the clock restarts at the refill and that the
-   footer still counts the rows it holds while it does.
-5. Run a selection of three statements. Confirm three tabs, one per statement, that the strip marks the one
-   on screen, and that `]t` / `[t` move between them with the rows of each intact.
-6. Run a statement with a syntax error. Confirm its tab stays, says why in the body, and that the bar marks
-   it as failed rather than as a result with no rows.
+3. Confirm the number it settles on is within a few milliseconds of the final footer's. They are not
+   expected to be equal, and either may be the larger (ADR-0042).
+4. Scroll a result of more than 1001 rows to its end. Confirm the clock restarts at the refill — the
+   footer line itself ticking in place — and that it still counts the rows it holds while it does.
+5. Run a selection of three statements. Confirm three tabs, one per statement, that the strip in the
+   result window's winbar names each by its SQL in the native tab bar's colours and marks the one on
+   screen, that the strip is already there from the first query, and that `]t` / `[t` move between
+   them with the rows of each intact.
+6. Run a statement with a syntax error. Confirm its tab stays and says why in the body, not as a result
+   with no rows, and that the notification carries the same message.
 7. Sort a column. Confirm no new tab appears and that the rows come back in the new order. Nothing on the
    client reports how many results the server holds, so the release of the replaced one is covered by
    `tests/unit_tabs.lua` instead; what is manual here is only that sorting reuses its tab.

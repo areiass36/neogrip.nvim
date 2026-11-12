@@ -1,54 +1,29 @@
--- Colour in the result grid.
---
--- A cell is painted for what it holds -- a number, a date, a boolean, NULL --
--- in the colour the colourscheme already gives that kind of literal in a
--- buffer, so a result reads like the rest of the editor instead of like a
--- second theme. Text is the exception and is left on the plain foreground: it
--- is most of a result and it is what you are actually reading, so it keeps the
--- best contrast there is.
---
--- The table's furniture is pushed the other way. The rule and the │ between
--- columns drop to the colour of a window separator: they are there to be
--- looked past, and drawn in a plain or a bright colour they end up louder than
--- the values they are separating.
---
--- Every group is defined with `default = true`, so
--- `vim.api.nvim_set_hl(0, "NGripGridNumber", { fg = "#ff0000" })` from init.lua
--- wins, and rebuilt on ColorScheme because :colorscheme clears every group --
--- a link included -- and the colours here are resolved, not linked.
+-- Colour in the result grid: cells painted in the colourscheme's own literal
+-- colours, the table's furniture dimmed to the window-separator colour.
 local config = require("neogrip.config")
 
 local M = {}
 
 local ELLIPSIS = "…"
 
--- Where the parts of the table are. The header is line 1, the rule line 2, and
--- the rows follow; layout.render builds them in that order.
 local HEADER_LINE = 1
 local RULE_LINE = 2
 
--- Below treesitter's 100, so a stripe tints the row without touching any
--- foreground; the cell under the cursor is painted over everything at 150.
+-- The layers tint below and paint over treesitter; see doc/internals.md#grid.
 local STRIPE_PRIORITY = 90
 local CONTENT_PRIORITY = 100
 local ELLIPSIS_PRIORITY = 105
 
 --- @type table<string, { fg: string[]|nil, bg: string[]|nil, link: string|nil }>
---- fg/bg list the groups a colour is taken from, best first: the first one that
---- has that attribute, and has it different from Normal, wins. So a
---- colourscheme that never heard of @boolean still lands on Boolean, and one
---- where @string.special is just the plain foreground falls through to Special
---- rather than painting a date in the colour it already was.
+--- fg/bg list the source groups, best first: the first whose attribute differs
+--- from Normal's wins, so a cell is never painted the colour it already was.
 local SPEC = {
 	NGripGridHeader = { fg = { "@attribute", "Function", "Identifier" }, bold = true },
-	-- The column the result is ordered by, which is otherwise invisible once
-	-- the rows come back sorted. Same colour as the other names, underlined:
-	-- one hue in the header row is enough.
+	-- The column the result is ordered by, otherwise invisible once the rows come back sorted.
 	NGripGridHeaderSorted = { fg = { "@attribute", "Function", "Identifier" }, bold = true, underline = true },
 	NGripGridRule = { fg = { "WinSeparator", "VertSplit", "NonText" } },
 	NGripGridSeparator = { fg = { "WinSeparator", "VertSplit", "NonText" } },
-	-- Every other row, in whatever tint the colourscheme uses for the cursor
-	-- line: the one thing that keeps a wide row readable all the way across.
+	-- The stripe is what keeps a wide row readable all the way across.
 	NGripGridStripe = { bg = { "CursorLine", "ColorColumn" } },
 	NGripGridEllipsis = { fg = { "NonText", "Comment" } },
 	NGripGridCell = { link = "Visual" },
@@ -68,16 +43,16 @@ local SPEC = {
 	NGripGridElapsed = { fg = { "Comment" } },
 	NGripGridSlow = { fg = { "DiagnosticWarn", "WarningMsg" } },
 
-	-- The winbar's tab strip (ADR-0044). Painted through statusline format
-	-- items rather than extmarks, so these are named in the string itself.
-	NGripGridTab = { fg = { "Comment" } },
-	NGripGridTabActive = { fg = { "@attribute", "Function", "Identifier" }, bold = true },
-	NGripGridTabRunning = { fg = { "@number", "Number" } },
-	NGripGridTabError = { fg = { "DiagnosticError", "ErrorMsg" } },
+	-- The winbar's tab strip (ADR-0045), in the native tabline's faces; named
+	-- in the statusline string itself rather than painted with extmarks.
+	NGripGridTab = { link = "TabLine" },
+	NGripGridTabActive = { link = "TabLineSel" },
+	NGripGridTabFill = { link = "TabLineFill" },
+	NGripGridTabRunning = { fg = { "@number", "Number" }, bg = { "TabLine", "StatusLineNC" } },
+	NGripGridTabError = { fg = { "DiagnosticError", "ErrorMsg" }, bg = { "TabLine", "StatusLineNC" } },
 }
 
---- What value.kind says a cell is -> the group that paints it. "text" is
---- deliberately absent: a name, an address or a description keeps Normal.
+--- value.kind -> the group that paints it. "text" is deliberately absent: it keeps Normal.
 local KIND_GROUPS = {
 	null = "NGripGridNull",
 	number = "NGripGridNumber",
@@ -95,9 +70,7 @@ local function resolve(name)
 	return ok and type(hl) == "table" and hl or {}
 end
 
---- The first of `names` that carries `field`, skipping any that carries the
---- same value as Normal: a cell painted the colour it already was is not
---- painted at all, and a stripe the colour of the background is not a stripe.
+--- The first of `names` that carries `field` with a value different from Normal's.
 local function attribute_of(field, names)
 	local plain = resolve("Normal")[field]
 	local fallback = nil
@@ -115,8 +88,7 @@ end
 
 local watching = false
 
---- Define the groups. Idempotent: `default = true` means a second call is a
---- no-op until something clears them.
+--- Define the groups; `default = true` makes a second call a no-op and lets a user override win.
 function M.setup()
 	for name, spec in pairs(SPEC) do
 		if spec.link then
@@ -133,6 +105,8 @@ function M.setup()
 		end
 	end
 
+	-- :colorscheme clears every group and the colours here are resolved, not
+	-- linked, so they are rebuilt on ColorScheme.
 	if not watching then
 		watching = true
 		vim.api.nvim_create_autocmd("ColorScheme", {
@@ -150,12 +124,8 @@ function M.groups()
 	return vim.tbl_keys(SPEC)
 end
 
---- `grid.from` paints only the rows from that index on, and clears only from
---- there down - which also takes the old footer's marks with it, because the
---- footer moves when rows are appended. The stripe parity is the absolute row
---- number, so a tail stripes correctly on its own; that holds only because rows
---- accumulate and never shift (ADR-0040).
----
+--- `grid.from` paints and clears only from that row down; the stripe parity is
+--- the absolute row number, which holds because rows accumulate and never shift (ADR-0040).
 --- @param grid { lines: string[], spans: table, kinds: table, rows: integer,
 --- sorted_column: integer|nil, footer: { line: integer, segments: table }|nil,
 --- from: integer|nil }
@@ -168,11 +138,7 @@ function M.paint(bufnr, namespace, grid)
 	if first_row == 1 then
 		vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
 	else
-		-- Data row `r` is 1-based line r + RULE_LINE, so the 0-based line this
-		-- clear has to start at is first_row + RULE_LINE - 1. It used to be one
-		-- less, which cleared the last row of the previous batch - a line the
-		-- repaint loop below never reaches, since that starts at first_row - so
-		-- every append stripped the marks off the row it appended after.
+		-- Clear from the batch's own first line; see doc/internals.md#grid.
 		vim.api.nvim_buf_clear_namespace(bufnr, namespace, first_row + RULE_LINE - 1, -1)
 	end
 
@@ -190,8 +156,7 @@ function M.paint(bufnr, namespace, grid)
 		})
 	end
 
-	-- The ` │ ` between two cells, plus the space at either edge: everything on
-	-- the line that is not a cell.
+	-- Everything on the line that is not a cell.
 	local function furniture(line, line_spans)
 		local previous = 0
 		for _, span in ipairs(line_spans) do
@@ -221,8 +186,7 @@ function M.paint(bufnr, namespace, grid)
 		furniture(line, line_spans)
 		for index, span in ipairs(line_spans) do
 			mark(line, span[1], span[2], KIND_GROUPS[kinds[index]])
-			-- An ellipsis is the grid saying the value goes on, not part of the
-			-- value: dim it so a truncated cell is obvious without reading it.
+			-- Dim the ellipsis so a truncated cell is obvious without reading it.
 			local cell = lines[line]:sub(span[1] + 1, span[2]):gsub("%s+$", "")
 			if #cell >= #ELLIPSIS and cell:sub(-#ELLIPSIS) == ELLIPSIS then
 				local from = span[1] + #cell - #ELLIPSIS
@@ -237,6 +201,29 @@ function M.paint(bufnr, namespace, grid)
 		for _, segment in ipairs(grid.footer.segments or {}) do
 			mark(line, segment[1], segment[2], segment[3], ELLIPSIS_PRIORITY)
 		end
+	end
+end
+
+--- Clear and repaint one status line (ADR-0045); see doc/internals.md#grid.
+function M.paint_line(bufnr, namespace, line, text, segments)
+	if not vim.api.nvim_buf_is_valid(bufnr) then
+		return
+	end
+	M.setup()
+	vim.api.nvim_buf_clear_namespace(bufnr, namespace, line - 1, line)
+	local function mark(from, to, group, priority)
+		if not group or from >= to then
+			return
+		end
+		pcall(vim.api.nvim_buf_set_extmark, bufnr, namespace, line - 1, from, {
+			end_col = to,
+			hl_group = group,
+			priority = priority or CONTENT_PRIORITY,
+		})
+	end
+	mark(0, #text, "NGripGridFooter")
+	for _, segment in ipairs(segments or {}) do
+		mark(segment[1], segment[2], segment[3], ELLIPSIS_PRIORITY)
 	end
 end
 

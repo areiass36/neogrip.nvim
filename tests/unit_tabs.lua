@@ -1,9 +1,5 @@
--- One tab per query, opened before the answer arrives (ADR-0044), and the clock
--- that runs in the winbar while it does (ADR-0042, ADR-0043).
---
--- Transient state is asserted by holding the runner's callback rather than by
--- advancing a clock, which is the only way a suite can stand inside the moment
--- a query is still running.
+-- One tab per query and its clock. Transient state is asserted by holding the
+-- runner's callback: the only way to stand inside a running query.
 local support = require("tests.support")
 local check = support.check
 local execute = require("neogrip.execute")
@@ -69,24 +65,34 @@ check("a tab is open", first ~= nil, true)
 check("and it is the only one", #grid.tabs(), 1)
 check("the request is out", #requests, 1)
 check("it is waiting for an answer", grid.is_pending(first), true)
--- No GridState on purpose: a rendered header with no columns and "no rows"
--- reads as "the query returned nothing", which is a worse lie than a blank
--- window (ADR-0044).
+-- No GridState on purpose: "no rows" before the answer would read as an empty result (ADR-0044).
 check("with no result state", grid.state(first), nil)
-check("and nothing in the body", vim.api.nvim_buf_get_lines(first, 0, -1, false), { "" })
+local first_body = vim.api.nvim_buf_get_lines(first, 0, -1, false)
+check("the body is one status line", #first_body, 1)
+check("naming the connection", first_body[1]:find("probe [postgres]", 1, true) ~= nil, true)
+local lone_strip = grid.strip_text(first)
+check("the strip is there from the first query", lone_strip ~= "", true)
+check("naming its statement", lone_strip:find("select 1", 1, true) ~= nil, true)
+check("in the native selected face", lone_strip:find("NGripGridTabActive") ~= nil, true)
+check("and ending in the tabline's fill", lone_strip:find("NGripGridTabFill") ~= nil, true)
 
 support.describe("tabs: a word while it waits, a number once it runs")
 
-local bar = grid.winbar_text(first)
-check("the winbar names the connection", bar:find("probe [postgres]", 1, true) ~= nil, true)
--- Until the server says it has begun, any number would be counting the queue,
--- the connect or a first-use compile of gripd - not the statement (ADR-0043).
+local bar = grid.status_text(first)
+check("the status names the connection", bar:find("probe [postgres]", 1, true) ~= nil, true)
+-- Before the server says it has begun, a number would count the queue or the connect,
+-- not the statement (ADR-0042).
 check("and shows no number at all", bar:find("%d+ ms") == nil, true)
 check("but says where it got to", bar:find("sent", 1, true) ~= nil, true)
 
 grid.progress(first, { phase = "executing" })
 check("the clock is running", grid._ticking(), true)
-check("and the winbar is a number", grid.winbar_text(first):find("%d+ ms") ~= nil, true)
+check("and the status is a number", grid.status_text(first):find("%d+ ms") ~= nil, true)
+check(
+	"painted into the body",
+	vim.api.nvim_buf_get_lines(first, 0, -1, false)[1]:find("running", 1, true) ~= nil,
+	true
+)
 
 support.describe("tabs: the clock belongs to one tab")
 
@@ -94,8 +100,8 @@ run_query("select 2")
 local second = grid.current_buf()
 check("a second query opens a second tab", #grid.tabs(), 2)
 check("which is a different buffer", second ~= first, true)
-check("the new tab shows a word", grid.winbar_text(second):find("%d+ ms") == nil, true)
-check("while the first still shows its number", grid.winbar_text(first):find("%d+ ms") ~= nil, true)
+check("the new tab shows a word", grid.status_text(second):find("%d+ ms") == nil, true)
+check("while the first still shows its number", grid.status_text(first):find("%d+ ms") ~= nil, true)
 
 support.describe("tabs: the answer fills the tab the query opened")
 
@@ -103,16 +109,23 @@ answer(2, { columns = { "n" }, rows = { { 2 } }, done = true, elapsed_ms = 3 })
 check("the tab stopped waiting", grid.is_pending(second), false)
 check("and holds the rows", #grid.state(second).rows, 1)
 check("without opening another tab", #grid.tabs(), 2)
-check("the winbar counts them", grid.winbar_text(second):find("1 rows", 1, true) ~= nil, true)
+check("the status counts them", grid.status_text(second):find("1 rows", 1, true) ~= nil, true)
 
 answer(1, { columns = { "n" }, rows = { { 1 } }, done = true, elapsed_ms = 1 })
 check("and once every query answered, the clock stops", grid._ticking(), false)
 
-support.describe("tabs: the strip names every tab")
+support.describe("tabs: the strip names every tab by its statement")
 
-local strip = grid.tab_strip(second)
-check("it names both tabs", strip:find("1", 1, true) ~= nil and strip:find("2", 1, true) ~= nil, true)
+-- The buffers stay unlisted: the strip names them, so :ls gains nothing (ADR-0045).
+check("a tab is not a listed buffer", vim.bo[first].buflisted, false)
+local strip = grid.strip_text(second)
+check("the strip names both statements", strip:find("select 1", 1, true) ~= nil, true)
+check("each with its own", strip:find("select 2", 1, true) ~= nil, true)
 check("marking the one on screen", strip:find("NGripGridTabActive") ~= nil, true)
+local first_name = vim.api.nvim_buf_get_name(first)
+local second_name = vim.api.nvim_buf_get_name(second)
+check("the buffer name carries the same label", first_name:find("select 1", 1, true) ~= nil, true)
+check("and the names are distinct", first_name ~= second_name, true)
 
 support.describe("tabs: moving between them")
 
@@ -154,14 +167,15 @@ check("the tab is still there", grid.current_buf(), failed)
 check("it never became a result", grid.state(failed), nil)
 local failed_body = vim.api.nvim_buf_get_lines(failed, 0, -1, false)
 check("the body says what happened", failed_body[1]:find("syntax error", 1, true) ~= nil, true)
-check("and the winbar says it failed", grid.winbar_text(failed):find("failed", 1, true) ~= nil, true)
+check("and the status says it failed", grid.status_text(failed):find("failed", 1, true) ~= nil, true)
 
 run_query("select slow")
 local stopped = grid.current_buf()
 held[#held](nil, { message = "cancelled", cancelled = true })
 check("a cancelled query keeps its tab too", grid.current_buf(), stopped)
-local stopped_bar = grid.winbar_text(stopped)
+local stopped_bar = grid.status_text(stopped)
 check("and is not called a failure", stopped_bar:find("cancelled", 1, true) ~= nil, true)
+check("the strip marks the failure", grid.strip_text(stopped):find("NGripGridTabError") ~= nil, true)
 
 support.describe("tabs: closing a pending tab cancels its request")
 
@@ -178,28 +192,32 @@ close_all()
 run_query("select * from big")
 local scrolled = grid.current_buf()
 answer(1, { columns = { "n" }, rows = { { 1 } }, done = false, elapsed_ms = 12, hash = "cafecafecafe" })
-check("the batch's own time is in the footer", grid.winbar_text(scrolled):find("12 ms", 1, true) ~= nil, true)
+check("the batch's own time is in the footer", grid.status_text(scrolled):find("12 ms", 1, true) ~= nil, true)
 check("and no clock is running", grid._ticking(), false)
 
--- Draining the window makes gripd re-execute the statement, which announces
--- itself like any other execution (ADR-0042). It is the slowest wait there is,
--- so it is the one that most needs a clock - and the tab holds rows already,
--- so this is the path a pending-only clock would have missed.
+-- A refill re-executes the statement (ADR-0042) with rows already in the tab,
+-- which is the path a pending-only clock would have missed.
 grid.state(scrolled).auto.loading = true
 grid.progress(scrolled, { phase = "executing" })
 check("the refill starts the clock", grid._ticking(), true)
-local refilling = grid.winbar_text(scrolled)
+local refilling = grid.status_text(scrolled)
 check("the rows are still counted", refilling:find("1 rows", 1, true) ~= nil, true)
 check("and it says a batch is on its way", refilling:find("loading", 1, true) ~= nil, true)
 check("the time is no longer the last batch's", refilling:find("12 ms", 1, true), nil)
+-- The clock is the footer line itself, rewritten in place (ADR-0045).
+local refill_lines = vim.api.nvim_buf_get_lines(scrolled, 0, -1, false)
+check(
+	"and the footer line in the buffer was rewritten",
+	refill_lines[#refill_lines]:find("loading", 1, true) ~= nil,
+	true
+)
 
 grid.state(scrolled).auto.loading = false
 grid.add_page(scrolled, { rows = { { 2 } }, done = true, elapsed_ms = 4 })
 check("the batch landing stops the clock", grid._ticking(), false)
-local landed = grid.winbar_text(scrolled)
--- The statement's own time survives the batch. Overwriting it turned "this
--- statement took 1420 ms" into "3 ms" as soon as the reader scrolled, and the
--- statement's cost is what the number is for.
+local landed = grid.status_text(scrolled)
+-- Overwriting the statement's time with the batch's turned "1420 ms" into "3 ms"
+-- as soon as the reader scrolled.
 check("the query's own time is still the one shown", landed:find("12 ms", 1, true) ~= nil, true)
 check("not the batch's", landed:find("4 ms", 1, true), nil)
 check("but the batch's is kept", grid.state(scrolled).last_batch_ms, 4)
@@ -218,6 +236,8 @@ answer(1, {
 })
 check("one tab", #grid.tabs(), 1)
 execute.sort(grid.state(sorted), "a", false)
+local sorting_body = vim.api.nvim_buf_get_lines(sorted, 0, -1, false)
+check("the rows stay on screen while it re-runs", sorting_body[3]:find("1", 1, true) ~= nil, true)
 answer(2, {
 	columns = { "a" },
 	rows = { { 1 } },
@@ -227,8 +247,7 @@ answer(2, {
 })
 check("sorting opened no second tab", #grid.tabs(), 1)
 check("into the same buffer", grid.current_buf(), sorted)
--- ADR-0041 names the client's release of a result it is replacing as one of
--- only four reclamation paths, and sorting is the one case left that replaces.
+-- Sorting is the one remaining replace, one of ADR-0041's four reclamation paths.
 check("and the replaced cursor was handed back", vim.tbl_contains(released, "aaaabbbbcccc"), true)
 
 support.describe("tabs: :bd on a tab the reader gave up on")
@@ -237,8 +256,6 @@ close_all()
 run_query("select 1")
 local abandoned = grid.current_buf()
 check("the tab is there", #grid.tabs(), 1)
--- Deleting the buffer by hand has to reach the same bookkeeping close does, or
--- the strip would name a buffer that no longer exists.
 vim.api.nvim_buf_delete(abandoned, { force = true })
 check("deleting its buffer forgets the tab", #grid.tabs(), 0)
 check("and nothing is active", grid.active_tab(), 0)

@@ -150,9 +150,19 @@ on screen may be truncated.
 
                                                 *neogrip-grid-tabs*
 Every query gets its own tab, and they all live in one window: running a
-second statement does not destroy the rows you were reading. The tab appears
-as soon as the statement is sent, before any answer, and its 'winbar' says
-how long the statement has been executing - counting only the execution, so
+second statement does not destroy the rows you were reading. The strip
+naming them is the result window's own 'winbar', drawn in the native tab
+bar's faces (|hl-TabLine|, |hl-TabLineSel|, |hl-TabLineFill|) so it looks
+like Vim's tabs: one cell per tab with its position and the start of its
+SQL, the one on screen in the selected face, a running or failed one tinted
+as such. The strip appears with the first query and is always there while
+the window is. The buffers themselves are unlisted scratch buffers named
+`neogrip://{n}/{statement}`.
+
+The tab appears as soon as the statement is sent, before any answer, and its
+body holds a single status line: which connection was asked, how far the
+request got, and - once the server says it has begun - how long the
+statement has been executing. The clock counts only the execution, so
 nothing on screen is ever counting a queue wait or a first-use build of
 gripd. A selection holding several statements opens one tab per statement.
 
@@ -163,7 +173,7 @@ query. A statement that fails keeps its tab and says why.
 strip, 1-based, and does nothing if there is no such tab. There are no
 commands for them, as with every other grid action. Closing a tab hands its
 result back to the server and shows a neighbour; closing the last one closes
-the window.
+the window. `:bd` on a result buffer closes its tab properly too.
 
 There is no limit on how many tabs are open, and each one holds a cursor on
 the server until it is closed or |neogrip-options| `cursor_idle_seconds`
@@ -196,12 +206,13 @@ The time in the footer is the statement's own, and loading more rows does not
 replace it: a batch is a continuation of the same cursor and costs a few
 milliseconds, so the number stays the one that says what the statement cost.
 
-The window's 'winbar' says the same three things, and is worth saying twice
-because the footer sits after the last row: in a long result read by
-scrolling it is thousands of lines away, while the bar stays on screen. It is
-set per window, so it appears on the result window and nowhere else. Clear it
-with a |FileType| autocommand on `neogrip-grid` if you would rather not have
-it: >
+While a refill is executing - the window drained and gripd is re-running
+the statement - the footer line itself is the clock, rewritten in place
+until the batch lands.
+
+The tab strip is set per window, so it appears on the result window and
+nowhere else. Clear it with a |FileType| autocommand on `neogrip-grid` if
+you would rather not have it: >
 
 	vim.api.nvim_create_autocmd("FileType", {
 		pattern = "neogrip-grid",
@@ -353,7 +364,8 @@ Every group is defined with `default = true`, so your own |nvim_set_hl()|
 wins. The grid's groups are prefixed `NGripGrid`: Header, HeaderSorted, Rule,
 Separator, Stripe, Ellipsis, Cell, Null, Number, Boolean, Temporal, Uuid,
 Json, Binary, Footer, Connection, Production, Count, Elapsed, Slow, Tab,
-TabActive, TabRunning, TabError.
+TabActive, TabFill, TabRunning, TabError - the strip's five follow the
+native |hl-TabLine| faces by default.
 
 ==============================================================================
 12. LIMITATIONS                                 *neogrip-limitations*

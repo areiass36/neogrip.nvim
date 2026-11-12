@@ -24,12 +24,8 @@ check(
 	vim.fn.strdisplaywidth(layout.truncate("🚀🔥🚀🔥", 5)) <= 5,
 	true
 )
--- A cell far wider than the column: the point is that truncate measures by
--- binary search rather than walking the string, which used to be asserted with
--- a 50 ms wall clock. That failed whenever the machine was busy - six database
--- containers and a live suite were enough - so the shape of the answer is
--- asserted instead, with a budget loose enough to catch only a return to
--- something quadratic.
+-- A 50 ms wall-clock assertion failed on busy machines, so the budget is loose
+-- enough to catch only a return to something quadratic.
 local huge = string.rep("x", 200000)
 local started = vim.uv.hrtime()
 local cut = layout.truncate(huge, 40)
@@ -124,8 +120,7 @@ highlight.paint(paint_buf, namespace, {
 	footer = { line = #paint_lines, segments = { { 0, 12, "NGripGridConnection" } } },
 })
 
--- Several marks can start at the same byte -- a stripe, the leading space and
--- the cell itself all begin the line -- so these are sets, not lookups.
+-- Several marks can start at the same byte, so these are sets, not lookups.
 local painted, mark_count = {}, {}
 for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(paint_buf, namespace, 0, -1, { details = true })) do
 	local line, column, group = mark[2] + 1, mark[3], mark[4].hl_group
@@ -190,8 +185,6 @@ vim.api.nvim_buf_delete(narrow_buf, { force = true })
 support.describe("grid: the optional row-number gutter")
 
 local grid = require("neogrip.grid")
--- A fabricated state: three data rows under the two header lines. show() opens
--- the tab, so there is no buffer to hand it.
 grid.show({
 	columns = { "a" },
 	rows = { { 1 }, { 2 }, { 3 } },
@@ -204,9 +197,8 @@ check("first data row is 1", grid.row_number_for(gb, 3), "   1 ")
 check("third data row is 3", grid.row_number_for(gb, 5), "   3 ")
 check("past the data is blank", grid.row_number_for(gb, 6), "")
 
--- The gutter width must not change while the result is being read: it used to
--- come straight from the row count, so crossing row 100 moved every line of
--- the table one cell to the right (ADR-0040).
+-- The gutter width came straight from the row count once, so crossing row 100
+-- moved the whole table one cell to the right (ADR-0040).
 local wide = {}
 for index = 1, 99 do
 	wide[index] = { index }
@@ -218,10 +210,9 @@ check("the gutter is the same width at 100 rows as at 99", grid.row_number_for(g
 check("and it is the floor until four digits are needed", at_99, "   1 ")
 grid.close(gb)
 
-support.describe("grid: the winbar")
+support.describe("grid: the status text")
 
--- Asserted with no window at all: winbar_text takes a buffer and returns a
--- string, which is what keeps a redraw out of the test (ADR-0043).
+-- Asserted with no window at all, which keeps a redraw out of the test (ADR-0045).
 grid.show({
 	columns = { "a" },
 	rows = { { 1 }, { 2 } },
@@ -230,25 +221,17 @@ grid.show({
 	connection = { name = "pg", driver = "postgres" },
 }, { focus = false })
 local bb = grid.current_buf()
-local bar = grid.winbar_text(bb)
+local bar = grid.status_text(bb)
 check("it names the connection and its driver", bar:find("pg [postgres]", 1, true) ~= nil, true)
 check("counts the rows it holds", bar:find("2 rows", 1, true) ~= nil, true)
 check("still promises more, as the footer does", bar:find("(more)", 1, true) ~= nil, true)
 check("and ends in the elapsed time", bar:find("7 ms", 1, true) ~= nil, true)
-check("each part carries its own group", bar:find("%%#NGripGridConnection#") ~= nil, true)
-check("the slow time is marked as slow", bar:find("NGripGridSlow") == nil, true)
 
--- The footer and the winbar say the same things, from the same parts, so the
--- two cannot drift apart.
 local footer_line = vim.api.nvim_buf_get_lines(bb, 0, -1, false)
 footer_line = footer_line[#footer_line]
-check("the winbar says what the footer says", (bar:gsub("%%#[%w]+#", "")), footer_line)
+check("the status is the footer, byte for byte", bar, footer_line)
 
--- A per cent in a connection name would be read as the start of an item.
-grid.state(bb).result.connection = { name = "100%", driver = "duckdb" }
-check("a per cent in a name is escaped", grid.winbar_text(bb):find("100%%%%", 1, false) ~= nil, true)
-
-check("a buffer with no result has no winbar", grid.winbar_text(vim.api.nvim_create_buf(false, true)), "")
+check("a buffer with no result has no status", grid.status_text(vim.api.nvim_create_buf(false, true)), "")
 grid.close(bb)
 
 support.describe("grid: the tab list")
@@ -266,27 +249,22 @@ check("showing a result opens a tab", #grid.tabs(), 1)
 check("which is the active one", grid.active_tab(), 1)
 check("and is what current_buf answers", grid.tabs()[1], only)
 
--- Each tab's buffer name has to be its own: a hidden one the user has not
--- deleted still holds its name, and a duplicate name is an error.
+-- A hidden tab still holds its buffer name and a duplicate name is an error,
+-- hence the counter in the scheme (ADR-0045).
 local only_name = vim.api.nvim_buf_get_name(only)
-check("the buffer is named after its number", only_name:find("neogrip://result/") ~= nil, true)
+check("the buffer is named under the scheme", only_name:find("neogrip://%d+/") ~= nil, true)
 
 grid.close(only)
 check("closing the last tab empties the list", #grid.tabs(), 0)
 check("and leaves nothing active", grid.active_tab(), 0)
 check("and nothing to answer with", grid.current_buf(), nil)
--- Reached again through BufDelete once the buffer is gone, so it has to be
--- harmless the second time.
+-- BufDelete reaches close a second time once the buffer is gone.
 check("forgetting it twice is harmless", pcall(grid.close, only), true)
 
 support.describe("grid: appending a batch keeps the marks on the row before it")
 
--- The incremental clear is indexed off the rule line, and used to start one
--- line too early: it cleared the last row of the previous batch, which the
--- repaint loop never reaches because that starts at the first new row. Every
--- append therefore stripped the stripe, the separators and the value colour off
--- the row it appended after - invisible to every text assertion, so it is
--- asserted on the extmarks.
+-- The incremental clear used to start one line too early and strip the marks off
+-- the last row of the previous batch - invisible to text assertions, hence extmarks.
 local append_ns = vim.api.nvim_create_namespace("neogrip_grid")
 local function marks_on(bufnr, line)
 	local out = {}

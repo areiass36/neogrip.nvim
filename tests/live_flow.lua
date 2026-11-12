@@ -1,6 +1,4 @@
--- The path a command takes: statement under the cursor, grid, paging, server
--- side sorting. Grid actions and the DuckDB requery are exercised in their own
--- suites once those phases land.
+-- The path a command takes: statement under the cursor, grid, paging, server-side sorting.
 local support = require("tests.support")
 local check, note = support.check, support.note
 local neogrip = require("neogrip")
@@ -24,7 +22,6 @@ local grid = require("neogrip.grid")
 local resolve = require("neogrip.resolve")
 local connections_module = require("neogrip.connections")
 
--- Make the test connection resolvable by id, the way a project file would.
 connections_module.register(pg)
 
 local bufnr = vim.api.nvim_create_buf(false, true)
@@ -68,23 +65,21 @@ state = grid.state(grid.current_buf())
 check("the second statement ran", state.columns, { "n" })
 check("its value", state.rows[1][1], 2)
 
--- Each query has its own tab, so the rows of the first are still there to go
--- back to rather than having been overwritten (ADR-0044).
+-- Each query has its own tab (ADR-0044).
 check("the second query opened its own tab", #grid.tabs(), 2)
 check("and is the one on screen", grid.current_buf() ~= result_buf, true)
 local kept = grid.state(result_buf)
 check("the first tab still holds its rows", #kept.rows, 2)
 check("and its own columns", kept.columns, { "id", "s_comma", "s_null", "cjk" })
-local kept_bar = grid.winbar_text(result_buf)
-check("its winbar names the connection that answered", kept_bar:find(pg.name, 1, true) ~= nil, true)
+local kept_bar = grid.status_text(result_buf)
+check("its status names the connection that answered", kept_bar:find(pg.name, 1, true) ~= nil, true)
 
 support.describe("live/flow: readonly refuses writes in layers")
 local readonly = vim.tbl_extend("force", vim.deepcopy(pg), { id = "test-pg-ro", readonly = true })
 connections_module.register(readonly)
--- The Lua classifier is the first layer.
 local _, lua_refused = support.run(readonly, "delete from torture", { mode = "exec" })
--- The classifier never sees this path (support.run goes straight to the
--- runner), so gripd's own keyword check answers.
+-- support.run goes straight to the runner, so gripd's own keyword check answers,
+-- not the Lua classifier.
 check("gripd refuses a write on a readonly connection", lua_refused ~= nil, true)
 if lua_refused then
 	note("refusal: " .. tostring(lua_refused.message))
@@ -93,7 +88,6 @@ local still_there = support.scalar(readonly, "select count(*) from torture")
 check("and the rows are still there", still_there, 2)
 
 support.describe("live/flow: paging")
--- A table with more rows than one page.
 support.run(pg, "drop table if exists paging", { mode = "exec" })
 support.run(pg, "create table paging as select generate_series(1, 25) as n", { mode = "exec" })
 
@@ -120,8 +114,7 @@ support.wait(function()
 	return current and #current.rows == 20
 end, 20000)
 state = grid.state(grid.current_buf())
--- Accumulation, against a real server: row one is still here, and the batch
--- landed after it rather than replacing it (ADR-0040).
+-- Accumulation against a real server (ADR-0040).
 check("the first row is still the first row", state.rows[1][1], 1)
 check("and the batch continues from where the last ended", state.rows[11][1], 11)
 check("and still has more", state.result.done, false)
@@ -137,8 +130,7 @@ check("the last batch is short", #state.batches, 3)
 check("and the rows are all of them", #state.rows, 25)
 check("and it says so", state.result.done, true)
 
--- Going back is a cursor jump: the rows never left the editor, so there is
--- nothing to wait for (ADR-0031, ADR-0040).
+-- Going back is a cursor jump: the rows never left the editor (ADR-0031, ADR-0040).
 execute.page(grid.state(grid.current_buf()), -1)
 check("and going back moves to where that batch began", grid.state(grid.current_buf()).row, 11)
 check("with nothing fetched or dropped", #grid.state(grid.current_buf()).rows, 25)
@@ -152,18 +144,14 @@ support.wait(function()
 end, 20000)
 state = grid.state(grid.current_buf())
 check("descending starts at the highest row of the whole table", state.rows[1][1], 25)
--- A sort is a different result, so the rows of the old one go with it.
 check("not just of what was loaded", #state.batches, 1)
 check("and the old rows are gone", #state.rows, 10)
 support.run(pg, "drop table if exists paging", { mode = "exec" })
 
 support.describe("live/flow: closing a tab hands its result back")
 
--- Nothing on the wire reports how many results gripd holds, so the only way to
--- ask is to try to continue one: a hash that is gone answers -32600, which
--- doc/protocol.md pins as the contract. ADR-0041 requires this path to work -
--- with tabs it is one of only two automatic reclamations left, the other being
--- the hour-long idle sweep.
+-- Continuing a gone hash answers -32600 (doc/protocol.md), the only way to ask what
+-- gripd still holds; ADR-0041 makes this one of only two automatic reclamations.
 local protocol = require("neogrip.rpc.protocol")
 support.run(pg, "drop table if exists closing", { mode = "exec" })
 support.run(pg, "create table closing as select generate_series(1, 40) as n", { mode = "exec" })
@@ -174,9 +162,8 @@ local live = grid.show(kept_open, { focus = false })
 check("it is a tab", vim.tbl_contains(grid.tabs(), live), true)
 
 grid.close(live)
--- Polled, not read once: the release is fire-and-forget and the close behind it
--- waits for the execution lane, so a continuation sent at the same moment can
--- still be served from the registry.
+-- Polled, not read once: the release is fire-and-forget, so a continuation sent at
+-- the same moment can still be served.
 local handed_back = support.wait(function()
 	local _, err = support.next_batch(pg, kept_open.hash, 5)
 	return err ~= nil and err.rpc_code == protocol.ERRORS.invalid_request
