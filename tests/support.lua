@@ -178,6 +178,16 @@ function M.ensure_fixture(connection)
 				.. "s_comma text, cjk text)",
 			"insert into torture values (1,null,'','a,b','日本語')",
 			"insert into torture values (2,null,'','x','中文')",
+			"create table ddl_parent(id integer not null, part integer not null, "
+				.. 'label text not null, total numeric default 0, "Odd Name" text, '
+				.. "constraint ddl_parent_pk primary key (id, part), "
+				.. "constraint ddl_parent_total_ck check (total >= 0))",
+			"create unique index ddl_parent_label_uq on ddl_parent(label)",
+			"create table ddl_child(id integer primary key, parent_id integer not null, "
+				.. "parent_part integer not null, "
+				.. "constraint ddl_child_parent_fk foreign key (parent_id, parent_part) "
+				.. "references ddl_parent(id, part))",
+			"create view ddl_sight as select id, s_comma from torture",
 		}
 	elseif connection.driver == "trino" then
 		-- Trino's memory catalog starts empty and dies with the process, so it is seeded here,
@@ -197,6 +207,19 @@ function M.ensure_fixture(connection)
 				.. "s_comma varchar, cjk varchar)",
 			"delete from torture",
 			"insert into torture values (1,null,'','a,b','日本語'),(2,null,'','x','中文')",
+			"drop view if exists ddl_sight",
+			"drop table if exists ddl_child",
+			"drop table if exists ddl_parent",
+			"create table ddl_parent(id integer not null, part integer not null, "
+				.. 'label varchar not null, total decimal(10,2) default 0, "Odd Name" varchar, '
+				.. "constraint ddl_parent_pk primary key (id, part), "
+				.. "constraint ddl_parent_total_ck check (total >= 0))",
+			"create unique index ddl_parent_label_uq on ddl_parent(label)",
+			"create table ddl_child(id integer primary key, parent_id integer not null, "
+				.. "parent_part integer not null, "
+				.. "constraint ddl_child_parent_fk foreign key (parent_id, parent_part) "
+				.. "references ddl_parent(id, part))",
+			"create view ddl_sight as select id, s_comma from torture",
 		}
 	end
 	for _, sql in ipairs(statements or {}) do

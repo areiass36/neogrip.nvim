@@ -45,8 +45,40 @@ seed_postgres() {
     insert into torture values
      (1, null, '', 'a,b', 'he said \"hi\"', E'li\nnha', 8.90, 9007199254740993,
       '\x01020aff'::bytea, true, '2024-03-05 14:30:00+00', '日本語テキスト', '🚀🔥'),
-     (2, null, '', 'x', 'y', 'z', -0.01, 123, null, false, null, '中文', '✅');"
+     (2, null, '', 'x', 'y', 'z', -0.01, 123, null, false, null, '中文', '✅');
+    drop view if exists ddl_sight;
+    drop table if exists ddl_child;
+    drop table if exists ddl_parent;
+    create table ddl_parent(
+      id int not null, part int not null, label text not null, total numeric(10,2) default 0,
+      \"Odd Name\" text,
+      constraint ddl_parent_pk primary key (id, part),
+      constraint ddl_parent_total_ck check (total >= 0));
+    create unique index ddl_parent_label_uq on ddl_parent(label);
+    create table ddl_child(
+      id int primary key, parent_id int not null, parent_part int not null,
+      constraint ddl_child_parent_fk foreign key (parent_id, parent_part)
+        references ddl_parent(id, part));
+    create view ddl_sight as select id, s_comma from torture;"
 }
+
+# The structural half of the fixture, shared by MySQL and MariaDB: DDL the
+# export suite replays, awkward in structure where torture is awkward in data.
+MYSQL_DDL="
+    drop view if exists ddl_sight;
+    drop table if exists ddl_child;
+    drop table if exists ddl_parent;
+    create table ddl_parent(
+      id int not null, part int not null, label varchar(80) not null,
+      total decimal(10,2) default 0, \`Odd Name\` varchar(80),
+      constraint ddl_parent_pk primary key (id, part),
+      constraint ddl_parent_total_ck check (total >= 0),
+      unique key ddl_parent_label_uq (label));
+    create table ddl_child(
+      id int primary key, parent_id int not null, parent_part int not null,
+      constraint ddl_child_parent_fk foreign key (parent_id, parent_part)
+        references ddl_parent(id, part));
+    create view ddl_sight as select id, s_comma from torture;"
 
 seed_mysql() {
     # --default-character-set matters: the client defaults to latin1 and would
@@ -55,7 +87,8 @@ seed_mysql() {
     create table if not exists torture(id int primary key, s_null text, s_empty text,
       s_comma text, n decimal(10,2), flag boolean, cjk text);
     truncate torture;
-    insert into torture values (1,null,'','a,b',8.90,true,'日本語'),(2,null,'','x',-0.01,false,'中文');"
+    insert into torture values (1,null,'','a,b',8.90,true,'日本語'),(2,null,'','x',-0.01,false,'中文');
+    $MYSQL_DDL"
 }
 
 seed_maria() {
@@ -64,7 +97,8 @@ seed_maria() {
     create table if not exists torture(id int primary key, s_null text, s_empty text,
       s_comma text, n decimal(10,2), flag boolean, cjk text);
     truncate torture;
-    insert into torture values (1,null,'','a,b',8.90,true,'日本語'),(2,null,'','x',-0.01,false,'中文');"
+    insert into torture values (1,null,'','a,b',8.90,true,'日本語'),(2,null,'','x',-0.01,false,'中文');
+    $MYSQL_DDL"
 }
 
 seed_mongo() {
@@ -89,10 +123,24 @@ seed_mongo() {
 
 seed_mssql() {
     docker exec nvdb-ms /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_PW" -C -b -Q "
+    if object_id('dbo.ddl_sight') is not null drop view dbo.ddl_sight;
+    if object_id('dbo.ddl_child') is not null drop table dbo.ddl_child;
+    if object_id('dbo.ddl_parent') is not null drop table dbo.ddl_parent;
     if object_id('dbo.torture') is not null drop table dbo.torture;
     create table dbo.torture(id int primary key, s_null nvarchar(100), s_empty nvarchar(100),
       s_comma nvarchar(100), n decimal(10,2), flag bit, cjk nvarchar(100));
-    insert into dbo.torture values (1,null,'','a,b',8.90,1,N'日本語'),(2,null,'','x',-0.01,0,N'中文');"
+    insert into dbo.torture values (1,null,'','a,b',8.90,1,N'日本語'),(2,null,'','x',-0.01,0,N'中文');
+    create table dbo.ddl_parent(
+      id int not null, part int not null, label nvarchar(80) not null,
+      total decimal(10,2) default 0, [Odd Name] nvarchar(80),
+      constraint ddl_parent_pk primary key (id, part),
+      constraint ddl_parent_total_ck check (total >= 0));
+    create unique index ddl_parent_label_uq on dbo.ddl_parent(label);
+    create table dbo.ddl_child(
+      id int primary key, parent_id int not null, parent_part int not null,
+      constraint ddl_child_parent_fk foreign key (parent_id, parent_part)
+        references dbo.ddl_parent(id, part));
+    exec('create view dbo.ddl_sight as select id, s_comma from dbo.torture');"
 }
 
 seed_trino() {
