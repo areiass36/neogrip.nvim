@@ -30,7 +30,7 @@ and the code lean on. Each fact lives here exactly once, and the code points at 
   `lua/neogrip/grid/init.lua`, `M.row_number_for`.
 - The cursor-driven load is debounced at 120 ms so holding `j` asks once rather than once per line;
   the dialect module's repaint debounce settled on the same value. `DEBOUNCE_MS` in
-  `lua/neogrip/grid/init.lua` and the `vim.defer_fn` in `lua/neogrip/dialect.lua`.
+  `lua/neogrip/grid/init.lua` and the `vim.defer_fn` in `lua/neogrip/ui/syntax.lua`.
 - Extmark priorities in the grid: the stripe paints at 90, below treesitter's 100, so it only tints;
   cell content paints at 100, the ellipsis at 105, and the cursor cell over everything at 150.
   `lua/neogrip/grid/highlight.lua`.
@@ -61,7 +61,7 @@ and the code lean on. Each fact lives here exactly once, and the code points at 
   `lua/neogrip/execute.lua`, `M.load_more`.
 - The runner's watchdog arms at the request timeout plus 10 s, and only when the timeout is
   non-zero: a timeout of 0 means "run as long as it takes" and must not arm and kill at 10 s.
-  `lua/neogrip/runner.lua`, `M.run`.
+  `lua/neogrip/gripd/runner.lua`, `M.run`.
 
 ## gripd-process
 
@@ -69,7 +69,7 @@ and the code lean on. Each fact lives here exactly once, and the code points at 
   old package layout turned a JDK mismatch into hangs (they are deleted best-effort, because a
   Windows process can hold a class file open), and classes compiled by a newer `NEOGRIP_TEST_JDK`
   javac failed to load on the pinned runtime with `UnsupportedClassVersionError` - which also
-  surfaced as hangs, not as a build error. Both constrain `lua/neogrip/gripd.lua`, `M.build` (the
+  surfaced as hangs, not as a build error. Both constrain `lua/neogrip/gripd/init.lua`, `M.build` (the
   stale-tree sweep and the `--release` flag).
 - An `Error` - not just an `Exception` - leaving a handler thread without a response makes the
   client wait forever: a class cache compiled by a newer JDK made every statement hang on a
@@ -79,26 +79,26 @@ and the code lean on. Each fact lives here exactly once, and the code points at 
   legacy merge sort does not enforce the check - hence `-Djava.util.Arrays.useLegacyMergeSort=true`
   on gripd's command line. Past that, the wrapper's JDBC `getTables` still throws
   `NumberFormatException` parsing a null, so collection names come from the wrapper's own
-  `db.getCollectionNames()` script instead. `lua/neogrip/gripd.lua`, `M.launch`;
+  `db.getCollectionNames()` script instead. `lua/neogrip/gripd/init.lua`, `M.launch`;
   `java/app/neogrip/gripd/adapter/jdbc/catalog/MongoFields.java`, `collectionNames`.
 
 ## lsp
 
 - Treesitter's sql parser errors on T-SQL (bracketed names, TOP, @variables, MERGE, GO), so mssql
   buffers use `syntax/tsql.vim` instead of the extmark layer, and statement splitting is a
-  hand-written lexer rather than a treesitter walk. `lua/neogrip/dialect.lua`,
+  hand-written lexer rather than a treesitter walk. `lua/neogrip/ui/syntax.lua`,
   `lua/neogrip/sql/split.lua`.
 - Highlight layer priorities: the dialect extmark layer paints at 110, above treesitter (100) and
   below semantic tokens (125) and diagnostics (150). The LSP deliberately does not advertise
   semantic tokens - they would paint at 125, over the dialect layer's 110 - and matchadd was
-  rejected because it is per window and breaks in a split. `lua/neogrip/dialect.lua`;
-  `CAPABILITIES` in `lua/neogrip/lsp.lua`.
+  rejected because it is per window and breaks in a split. `lua/neogrip/ui/syntax.lua`;
+  `CAPABILITIES` in `lua/neogrip/lsp/init.lua`.
 
 ## schema-and-tree
 
 - `getSchemas` answers nothing on SQLite, so its sets hang directly off the connection in the tree;
   MySQL has no schema layer either, and the shared schema reader treats a `getSchemas` exception as
-  exactly that. `lua/neogrip/tree.lua`;
+  exactly that. `lua/neogrip/catalog/tree.lua`;
   `java/app/neogrip/gripd/adapter/jdbc/catalog/Metadata.java`, `schemaNames`.
 - DuckDB reports main, information_schema and pg_catalog once per attached catalog, so schema names
   are deduplicated (exactly, since an engine that tells Main from main has two schemas there).
@@ -152,18 +152,18 @@ and the code lean on. Each fact lives here exactly once, and the code points at 
 
 - Document URIs are percent-encoded with rfc2396 rather than Neovim's default rfc3986, which leaves
   "/" alone - a schema called "a/b" would then spell a path separator. `ENCODING` in
-  `lua/neogrip/document.lua`.
+  `lua/neogrip/ui/document.lua`.
 - A multi-line value written into a single buffer line raises out of a BufReadCmd, so passing notes
-  are flattened to one line before being rendered. `lua/neogrip/document.lua`, `comment`.
+  are flattened to one line before being rendered. `lua/neogrip/ui/document.lua`, `comment`.
 - `:edit` refuses to leave a modified buffer when 'hidden' is off; the fallback still opens the
-  document in a fresh buffer, losing only the way back. `lua/neogrip/document.lua`, `M.open`.
+  document in a fresh buffer, losing only the way back. `lua/neogrip/ui/document.lua`, `M.open`.
 - MySQL reports every primary key's name as PRIMARY, a name it will not accept back in DDL, so that
-  name is dropped from the rendered definition. `lua/neogrip/render.lua`, `constraints`.
+  name is dropped from the rendered definition. `lua/neogrip/catalog/ddl.lua`, `constraints`.
 - An index's kind is not shared syntax (USING btree is Postgres, CLUSTERED is T-SQL), so the kind is
-  said in a trailing comment rather than spelled in the statement. `lua/neogrip/render.lua`,
+  said in a trailing comment rather than spelled in the statement. `lua/neogrip/catalog/ddl.lua`,
   `indexes`.
 - MySQL and SQLite spell column comments inside the column definition; the portable COMMENT ON form
-  is written rather than guessing each dialect's spelling. `lua/neogrip/render.lua`, `comments`.
+  is written rather than guessing each dialect's spelling. `lua/neogrip/catalog/ddl.lua`, `comments`.
 
 ## requery
 
@@ -196,25 +196,25 @@ and the code lean on. Each fact lives here exactly once, and the code points at 
 ## connections-and-dsn
 
 - PostgreSQL: without `sslmode=disable` for a localhost address, a local server's refused TLS
-  handshake is reported as a password problem. `lua/neogrip/dsn.lua`.
+  handshake is reported as a password problem. `lua/neogrip/gripd/dsn.lua`.
 - MySQL and MariaDB: without `characterEncoding=UTF-8` the connector negotiates latin1 and non-ASCII
-  values come back mojibaked. `lua/neogrip/dsn.lua`.
+  values come back mojibaked. `lua/neogrip/gripd/dsn.lua`.
 - Trino: port 443 is TLS in practice, and without `SSL=true` the driver reports a TLS server as an
-  unexpected end of stream rather than as the wrong scheme. `lua/neogrip/dsn.lua`.
+  unexpected end of stream rather than as the wrong scheme. `lua/neogrip/gripd/dsn.lua`.
 - Trino: the driver rejects an empty catalog segment in the URL path, and refuses a property it sees
   both in the URL and in the properties object - so only the file-url drivers (sqlite, duckdb) get
-  their options passed as JDBC properties. `lua/neogrip/dsn.lua`.
+  their options passed as JDBC properties. `lua/neogrip/gripd/dsn.lua`.
 
 ## bootstrap
 
 - Windows `vim.fn.executable()` can report 0 for a freshly extracted .exe while antivirus still
   holds it, so the JDK probe checks presence with `fs_stat` and lets a true failure surface at
-  spawn. `lua/neogrip/bootstrap/jdk.lua`, `find_executable`.
+  spawn. `lua/neogrip/gripd/bootstrap/jdk.lua`, `find_executable`.
 - Corporate TLS inspection serves certificates without revocation information, which Windows curl
   (schannel) rejects; downloads on Windows pass `--ssl-revoke-best-effort`.
-  `lua/neogrip/bootstrap/download.lua`, `fetch`.
+  `lua/neogrip/gripd/bootstrap/download.lua`, `fetch`.
 - Hashing uses the OS tool because reading a 190 MB archive into a Lua string would double its
-  memory cost. `lua/neogrip/bootstrap/download.lua`, `M.sha256_of`.
+  memory cost. `lua/neogrip/gripd/bootstrap/download.lua`, `M.sha256_of`.
 
 ## protocol
 

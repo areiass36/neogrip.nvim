@@ -1,9 +1,9 @@
 -- The lifecycle of gripd, the Java daemon. The argv built here never carries
 -- connection parameters or secrets.
-local jdk = require("neogrip.bootstrap.jdk")
-local platform = require("neogrip.bootstrap.platform")
-local client = require("neogrip.rpc.client")
-local protocol = require("neogrip.rpc.protocol")
+local jdk = require("neogrip.gripd.bootstrap.jdk")
+local platform = require("neogrip.gripd.bootstrap.platform")
+local client = require("neogrip.gripd.client")
+local protocol = require("neogrip.gripd.protocol")
 local neogrip = require("neogrip")
 
 local M = {}
@@ -164,7 +164,7 @@ function M.ensure_driver(driver, on_done)
 		if not ok then
 			return on_done(nil, err)
 		end
-		require("neogrip.bootstrap.jdbc").ensure(driver, on_done)
+		require("neogrip.gripd.bootstrap.jdbc").ensure(driver, on_done)
 	end)
 end
 
@@ -174,7 +174,7 @@ function M.is_connected_to(connection)
 	if not entry or entry.gripd.exited then
 		return false
 	end
-	local url = require("neogrip.dsn").build(connection)
+	local url = require("neogrip.gripd.dsn").build(connection)
 	return entry.url == url
 end
 
@@ -188,7 +188,7 @@ end
 --- different url; the resolved auth table is never logged (ADR-0009).
 --- @param on_done fun(ok: boolean, err: table|string|nil)
 function M.connect(connection, auth, on_done)
-	local dsn = require("neogrip.dsn")
+	local dsn = require("neogrip.gripd.dsn")
 	local url, url_err = dsn.build(connection)
 	if not url then
 		return on_done(false, url_err)
@@ -253,7 +253,7 @@ function M.notification(connection, method, params)
 	end
 	if method == "progress" and params and params.hash then
 		-- Required here rather than at the top: the runner requires this module.
-		return require("neogrip.runner").progress(connection, params)
+		return require("neogrip.gripd.runner").progress(connection, params)
 	end
 end
 

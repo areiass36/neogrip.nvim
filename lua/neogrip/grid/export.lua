@@ -2,7 +2,7 @@
 -- or "everything" re-run without a LIMIT and streamed straight to a file.
 local csv = require("neogrip.codec.csv")
 local neogrip = require("neogrip")
-local value_module = require("neogrip.value")
+local value_module = require("neogrip.codec.value")
 
 local M = {}
 
@@ -114,7 +114,7 @@ end
 --- Re-run without a limit, streaming straight to disk: the Java side writes the
 --- file row by row, so a result far larger than memory still exports.
 function M.everything(state, path)
-	local runner = require("neogrip.runner")
+	local runner = require("neogrip.gripd.runner")
 	local result = state.result
 	neogrip.notify("exporting the full result...")
 	runner.run({

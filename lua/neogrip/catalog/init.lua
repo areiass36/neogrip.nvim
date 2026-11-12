@@ -4,8 +4,8 @@
 local config = require("neogrip.config")
 local neogrip = require("neogrip")
 local gripd = require("neogrip.gripd")
-local runner = require("neogrip.runner")
-local store = require("neogrip.schema.store")
+local runner = require("neogrip.gripd.runner")
+local store = require("neogrip.catalog.store")
 
 local M = {}
 

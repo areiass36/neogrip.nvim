@@ -1,7 +1,7 @@
 -- An optional nvim-cmp source; the user's source lists are never touched, because
 -- cmp.setup.filetype replaces them, which is not a plugin's call to make.
-local resolve = require("neogrip.resolve")
-local schema = require("neogrip.schema")
+local resolve = require("neogrip.connections.resolve")
+local schema = require("neogrip.catalog")
 
 local M = {}
 

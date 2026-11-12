@@ -64,7 +64,7 @@ jobs:
           path: |
             .testdata/nvim/neogrip/jdbc
             .testdata/nvim-data/neogrip/jdbc
-          key: jdbc-${{ hashFiles('lua/neogrip/bootstrap/jdbc.lua') }}
+          key: jdbc-${{ hashFiles('lua/neogrip/gripd/bootstrap/jdbc.lua') }}
       - name: Run unit and live suites
         # The JDK comes from setup-java so CI never downloads 190 MB; live
         # suites that need a database server skip on runners without one, and

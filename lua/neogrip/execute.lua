@@ -2,10 +2,10 @@ local classify = require("neogrip.sql.classify")
 local config = require("neogrip.config")
 local neogrip = require("neogrip")
 local diagnostics = require("neogrip.diagnostics")
-local protocol = require("neogrip.rpc.protocol")
+local protocol = require("neogrip.gripd.protocol")
 local grid = require("neogrip.grid")
-local resolve = require("neogrip.resolve")
-local runner = require("neogrip.runner")
+local resolve = require("neogrip.connections.resolve")
+local runner = require("neogrip.gripd.runner")
 local split = require("neogrip.sql.split")
 
 local M = {}
@@ -57,7 +57,7 @@ local function execute_statement(p)
 	if p.order_by then
 		-- Sorted server-side so the order covers every page, not just the rows fetched.
 		local quoted = '"' .. tostring(p.order_by):gsub('"', '""') .. '"'
-		local schema_ok, schema = pcall(require, "neogrip.schema")
+		local schema_ok, schema = pcall(require, "neogrip.catalog")
 		if schema_ok then
 			quoted = schema.quote(connection.driver, p.order_by)
 		end

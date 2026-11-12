@@ -1,7 +1,7 @@
 -- Dialect-specific highlighting, and the T-SQL fallback.
 local support = require("tests.support")
 local check = support.check
-local dialect = require("neogrip.dialect")
+local syntax = require("neogrip.ui.syntax")
 
 support.describe("dialect: the extra keyword layer")
 local bufnr = vim.api.nvim_create_buf(false, true)
@@ -10,10 +10,10 @@ vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
 	"select jsonb_agg(x) from t where a ilike 'jsonb_agg'",
 	"-- jsonb_agg in a comment",
 })
-dialect.attach(bufnr, "postgres")
+syntax.attach(bufnr, "postgres")
 check("the dialect is recorded on the buffer", vim.b[bufnr].neogrip_dialect, "postgres")
 
-local marks = dialect.draw_now(bufnr)
+local marks = syntax.draw_now(bufnr)
 local function marked_text(mark)
 	local row, col = mark[2], mark[3]
 	local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
@@ -38,7 +38,7 @@ check(
 	marks[1]
 		and vim.api.nvim_buf_get_extmarks(
 			bufnr,
-			vim.api.nvim_create_namespace("neogrip_dialect"),
+			vim.api.nvim_create_namespace("neogrip.ui.syntax"),
 			0,
 			-1,
 			{ details = true }
@@ -54,7 +54,7 @@ support.describe("dialect: sql server uses the syntax file, not treesitter")
 local tsql_buf = vim.api.nvim_create_buf(false, true)
 vim.bo[tsql_buf].filetype = "sql"
 vim.api.nvim_buf_set_lines(tsql_buf, 0, -1, false, { "select top 10 [order] from dbo.t where @id = 1" })
-dialect.attach(tsql_buf, "mssql")
+syntax.attach(tsql_buf, "mssql")
 -- Applying the syntax is scheduled: doing it inline would be undone by the
 -- runtime's own syntax autocommand.
 support.wait(function()
@@ -63,7 +63,7 @@ end, 2000)
 check("syntax switched", vim.bo[tsql_buf].syntax, "tsql")
 check("the dialect is recorded", vim.b[tsql_buf].neogrip_dialect, "mssql")
 
-dialect.attach(tsql_buf, "postgres")
+syntax.attach(tsql_buf, "postgres")
 support.wait(function()
 	return vim.bo[tsql_buf].syntax ~= "tsql"
 end, 2000)
@@ -71,7 +71,7 @@ check("switching back gives up the tsql syntax", vim.bo[tsql_buf].syntax ~= "tsq
 
 support.describe("dialect: mongo is javascript")
 local mongo_buf = vim.api.nvim_create_buf(false, true)
-dialect.attach(mongo_buf, "mongodb")
+syntax.attach(mongo_buf, "mongodb")
 check("filetype", vim.bo[mongo_buf].filetype, "mongodb")
 
 support.describe("dialect: keywords inside a string or comment are left alone")
@@ -82,8 +82,8 @@ vim.api.nvim_buf_set_lines(tricky, 0, -1, false, {
 	"-- jsonb_agg in a comment",
 	"select 'it''s jsonb_agg' as s",
 })
-dialect.attach(tricky, "postgres")
-local drawn = dialect.draw_now(tricky)
+syntax.attach(tricky, "postgres")
+local drawn = syntax.draw_now(tricky)
 local by_text = {}
 for _, mark in ipairs(drawn) do
 	local line = vim.api.nvim_buf_get_lines(tricky, mark[2], mark[2] + 1, false)[1]

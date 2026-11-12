@@ -3,8 +3,8 @@
 local support = require("tests.support")
 local check = support.check
 local connections = require("neogrip.connections")
-local identifier = require("neogrip.sql.identifier")
-local store = require("neogrip.schema.store")
+local identifier = require("neogrip.lsp.identifier")
+local store = require("neogrip.catalog.store")
 
 -- An id no real connection can have: the snapshot lands next to a developer's own.
 local connection = connections.register({

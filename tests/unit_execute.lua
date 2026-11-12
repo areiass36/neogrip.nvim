@@ -45,7 +45,7 @@ check(
 support.describe("execute: timeout_ms = 0 runs without arming the watchdog")
 
 -- A stub that never answers proves a zero timeout arms no watchdog.
-local runner = require("neogrip.runner")
+local runner = require("neogrip.gripd.runner")
 local config = require("neogrip.config")
 local gripd = require("neogrip.gripd")
 
@@ -84,7 +84,7 @@ config.setup({})
 support.describe("execute: a visual selection of several statements runs them in sequence")
 
 -- The driver takes one statement per call: Trino rejects even two separated by ';'.
-local resolve = require("neogrip.resolve")
+local resolve = require("neogrip.connections.resolve")
 local grid = require("neogrip.grid")
 
 local saved_for_buf = resolve.for_buf

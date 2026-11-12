@@ -13,7 +13,7 @@ local function respond_error(id, code, message, data)
 	send({ jsonrpc = "2.0", id = id, error = { code = code, message = message, data = data } })
 end
 
--- Kept in step with lua/neogrip/rpc/protocol.lua by hand: nvim --clean has no plugin path.
+-- Kept in step with lua/neogrip/gripd/protocol.lua by hand: nvim --clean has no plugin path.
 local VERSION = 5
 local initialized = false
 

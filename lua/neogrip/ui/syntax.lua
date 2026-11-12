@@ -2,7 +2,7 @@
 -- an extmark layer wedged between treesitter's and the LSP's. See doc/internals.md#lsp.
 local M = {}
 
-local NAMESPACE = vim.api.nvim_create_namespace("neogrip_dialect")
+local NAMESPACE = vim.api.nvim_create_namespace("neogrip.ui.syntax")
 local PRIORITY = 110
 
 -- Only what the sql parser does not already know.

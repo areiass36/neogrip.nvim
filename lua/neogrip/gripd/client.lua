@@ -1,6 +1,6 @@
 -- The JSON-RPC client. It never logs a frame: any payload can carry a secret,
 -- and never logging anything is the cheapest way to never log one.
-local protocol = require("neogrip.rpc.protocol")
+local protocol = require("neogrip.gripd.protocol")
 
 local M = {}
 

@@ -17,7 +17,7 @@ function M.check()
 		health.error("kvstore.nvim is missing", { "install areiass36/kvstore.nvim; it holds every secret" })
 	end
 
-	local jdk = require("neogrip.bootstrap.jdk")
+	local jdk = require("neogrip.gripd.bootstrap.jdk")
 	if jdk.installed() then
 		health.ok("JDK: " .. jdk.java())
 	else

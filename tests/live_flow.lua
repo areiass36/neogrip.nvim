@@ -19,7 +19,7 @@ end
 
 local execute = require("neogrip.execute")
 local grid = require("neogrip.grid")
-local resolve = require("neogrip.resolve")
+local resolve = require("neogrip.connections.resolve")
 local connections_module = require("neogrip.connections")
 
 connections_module.register(pg)
@@ -152,7 +152,7 @@ support.describe("live/flow: closing a tab hands its result back")
 
 -- Continuing a gone hash answers -32600 (doc/protocol.md), the only way to ask what
 -- gripd still holds; ADR-0041 makes this one of only two automatic reclamations.
-local protocol = require("neogrip.rpc.protocol")
+local protocol = require("neogrip.gripd.protocol")
 support.run(pg, "drop table if exists closing", { mode = "exec" })
 support.run(pg, "create table closing as select generate_series(1, 40) as n", { mode = "exec" })
 

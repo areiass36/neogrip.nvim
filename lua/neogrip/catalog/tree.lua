@@ -2,9 +2,9 @@
 -- server -> instance -> namespace -> set -> object -> attribute.
 local connections = require("neogrip.connections")
 local gripd = require("neogrip.gripd")
-local runner = require("neogrip.runner")
-local schema = require("neogrip.schema")
-local store = require("neogrip.schema.store")
+local runner = require("neogrip.gripd.runner")
+local schema = require("neogrip.catalog")
+local store = require("neogrip.catalog.store")
 
 local M = {}
 
@@ -512,7 +512,14 @@ function M.statement(ref, kind, callback)
 			return callback(nil, err)
 		end
 		callback(
-			require("neogrip.sql.statement").for_set(connection, namespace, ref.set, kind, columns, catalog),
+			require("neogrip.catalog.statement").for_set(
+				connection,
+				namespace,
+				ref.set,
+				kind,
+				columns,
+				catalog
+			),
 			nil
 		)
 	end, catalog)

@@ -1,9 +1,9 @@
 -- Queue requests per connection, apply timeouts, translate gripd's answers.
 local neogrip = require("neogrip")
-local errors = require("neogrip.errors")
+local errors = require("neogrip.gripd.errors")
 local gripd = require("neogrip.gripd")
 local config = require("neogrip.config")
-local secrets = require("neogrip.secrets")
+local secrets = require("neogrip.connections.secrets")
 
 local M = {}
 

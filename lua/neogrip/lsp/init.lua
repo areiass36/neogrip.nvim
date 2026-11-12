@@ -1,8 +1,8 @@
 -- An in-process SQL language server, one client per connection, answering from
 -- the catalog :NGripIntrospect wrote to disk.
 local neogrip = require("neogrip")
-local identifier = require("neogrip.sql.identifier")
-local schema = require("neogrip.schema")
+local identifier = require("neogrip.lsp.identifier")
+local schema = require("neogrip.catalog")
 local split = require("neogrip.sql.split")
 
 local M = {}
@@ -39,7 +39,7 @@ local NOT_SWEPT = "Not introspected yet -- run `:NGripIntrospect`."
 --- Asked for rather than required: an answer that needs the document module is
 --- better left empty than raised into the LSP loop.
 local function documents()
-	local ok, module = pcall(require, "neogrip.document")
+	local ok, module = pcall(require, "neogrip.ui.document")
 	return ok and module or nil
 end
 
@@ -520,7 +520,7 @@ end
 --- @return integer|nil client_id
 function M.start(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
-	local connection = require("neogrip.resolve").for_buf(bufnr)
+	local connection = require("neogrip.connections.resolve").for_buf(bufnr)
 	if not connection then
 		return nil
 	end

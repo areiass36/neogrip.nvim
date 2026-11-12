@@ -1,7 +1,7 @@
 -- Each connection runs with only its own driver on the classpath: the MongoDB driver's bundled
 -- GraalVM engine slows every other connection's queries. Digests computed from the official
 -- artifacts on 2026-10-29; bump jar, url and sha256 together.
-local download = require("neogrip.bootstrap.download")
+local download = require("neogrip.gripd.bootstrap.download")
 local neogrip = require("neogrip")
 
 local MAVEN = "https://repo1.maven.org/maven2"

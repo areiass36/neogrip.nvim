@@ -1,7 +1,7 @@
 -- Turning rows into aligned text. Widths are measured with strdisplaywidth,
 -- never bytes: a CJK character is two cells and a combining mark none.
 local config = require("neogrip.config")
-local value_module = require("neogrip.value")
+local value_module = require("neogrip.codec.value")
 
 local M = {}
 

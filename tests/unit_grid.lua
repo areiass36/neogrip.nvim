@@ -59,7 +59,7 @@ check("plain text is not binary", layout.looks_binary("日本語"), false)
 check("a number is not binary", layout.looks_binary(42), false)
 
 support.describe("value: what a cell holds")
-local value_module = require("neogrip.value")
+local value_module = require("neogrip.codec.value")
 check("null", value_module.kind(neogrip.NULL), "null")
 check("a boolean", value_module.kind(true), "boolean")
 check("a boolean the driver sent as text", value_module.kind("false"), "boolean")

@@ -225,7 +225,7 @@ you would rather not have it: >
 7. CATALOG TREE                                 *neogrip-tree*
 
 The plugin draws no explorer (ADR-0037). It answers the catalog as data and
-you draw it: `require("neogrip.tree")`.
+you draw it: `require("neogrip.catalog.tree")`.
 
 Six levels, a closed set:
 
@@ -237,7 +237,7 @@ knowledge: SQLite has no schemas, MySQL has databases but no schemas, Trino
 calls a database a catalog, and a connection that names its database starts
 below the level that chooses one.
 
-                                                *neogrip.tree.shape()*
+                                                *neogrip.catalog.tree.shape()*
 shape(connection)
         The walk this connection has, already truncated, as
         `{ levels = { { level, label, on_demand?, reconnects? } }, sweepable,
@@ -257,7 +257,7 @@ shape(connection)
         exists, so there the chosen catalog lands in the name instead
         (ADR-0039) and `qualified_name` writes all three parts.
 
-                                                *neogrip.tree.children()*
+                                                *neogrip.catalog.tree.children()*
 children(node, opts, callback)
         The children of `node`, at whatever level comes next. `node` of nil
         answers the configured connections, so one recursive function walks
@@ -302,9 +302,9 @@ The rest are tools, not UI. None of them opens a buffer:
   swept(ref)                     when it was swept and what it holds, or nil
   forget(ref)                    drop what is cached; the client decides when
 
-`require("neogrip.render").details(connection, namespace, set, details)` turns
+`require("neogrip.catalog.ddl").details(connection, namespace, set, details)` turns
 a details record into lines of SQL, if you want the definition the plugin used
-to draw. `require("neogrip.icons")` is a table you may read or ignore.
+to draw. `require("neogrip.ui.icons")` is a table you may read or ignore.
 
 Nothing watches the database: after a migration, the client calls `sweep` or
 `forget` itself.
@@ -328,7 +328,7 @@ see |neogrip-options| `validate_on_save`.
 ==============================================================================
 9. STATUSLINE                                   *neogrip-statusline*
 
-`require("neogrip.statusline").component()` renders `replica [RO][PROD][TX]`
+`require("neogrip.ui.statusline").component()` renders `replica [RO][PROD][TX]`
 for the current buffer: read-only, production - the one effect
 `production: true` has - and an open explicit transaction. `status(bufnr)`
 returns the same facts as a table; `is_production(bufnr)` is the single flag.

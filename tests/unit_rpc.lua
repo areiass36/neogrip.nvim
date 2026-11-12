@@ -1,7 +1,7 @@
 -- The rpc client against the mock gripd, which is another headless nvim: no JVM, no network.
 local support = require("tests.support")
-local protocol = require("neogrip.rpc.protocol")
-local client = require("neogrip.rpc.client")
+local protocol = require("neogrip.gripd.protocol")
+local client = require("neogrip.gripd.client")
 
 support.describe("rpc client")
 

@@ -9,9 +9,9 @@ if not support.has_jdk() then
 	return
 end
 support.seed_secrets()
-local tree = require("neogrip.tree")
+local tree = require("neogrip.catalog.tree")
 local connections_module = require("neogrip.connections")
-local schema = require("neogrip.schema")
+local schema = require("neogrip.catalog")
 local connections = support.connections()
 
 local function children(node, opts)

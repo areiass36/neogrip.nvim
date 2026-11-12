@@ -2,7 +2,7 @@
 -- shapes below are the ones a driver rejects when they are wrong.
 local support = require("tests.support")
 local check = support.check
-local dsn = require("neogrip.dsn")
+local dsn = require("neogrip.gripd.dsn")
 
 local function url(overrides)
 	return dsn.build(vim.tbl_extend("force", { id = "t", driver = "postgres", options = {} }, overrides))

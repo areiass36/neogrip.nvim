@@ -3,9 +3,9 @@
 local classify = require("neogrip.sql.classify")
 local config = require("neogrip.config")
 local neogrip = require("neogrip")
-local errors = require("neogrip.errors")
-local resolve = require("neogrip.resolve")
-local runner = require("neogrip.runner")
+local errors = require("neogrip.gripd.errors")
+local resolve = require("neogrip.connections.resolve")
+local runner = require("neogrip.gripd.runner")
 local split = require("neogrip.sql.split")
 
 local M = {}

@@ -168,7 +168,7 @@ check("a name nobody opened is refused", unknown ~= nil, true)
 -- The refusal of a duplicate name must not cost the result that already holds it.
 local held = support.run(pg, sql, { limit = 10 })
 local _, duplicate = support.sync(function(done)
-	require("neogrip.runner").run({
+	require("neogrip.gripd.runner").run({
 		connection = pg,
 		sql = sql,
 		mode = "query",
@@ -195,7 +195,7 @@ local newest = support.next_batch(pg, hashes[10], 1)
 check("so is the tenth", newest ~= nil and #newest.rows, 1)
 
 -- Closed by hand: ten cursors on an hour-long idle window would outlive the run.
-local runner_module = require("neogrip.runner")
+local runner_module = require("neogrip.gripd.runner")
 for _, hash in ipairs(hashes) do
 	runner_module.release(pg, hash)
 end

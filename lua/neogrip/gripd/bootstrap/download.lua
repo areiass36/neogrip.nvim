@@ -1,7 +1,7 @@
 -- Download a pinned artifact with curl: nothing is extracted or executed before its SHA-256
 -- passes. curl and tar ship with all three platforms; the macOS and Windows tar also open
 -- .zip files.
-local platform = require("neogrip.bootstrap.platform")
+local platform = require("neogrip.gripd.bootstrap.platform")
 local neogrip = require("neogrip")
 
 local M = {}

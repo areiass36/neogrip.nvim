@@ -4,7 +4,7 @@ local support = require("tests.support")
 local check, note = support.check, support.note
 local config = require("neogrip.config")
 local grid = require("neogrip.grid")
-local runner = require("neogrip.runner")
+local runner = require("neogrip.gripd.runner")
 
 local connection = { id = "auto", name = "auto", driver = "duckdb" }
 

@@ -4,7 +4,7 @@ local support = require("tests.support")
 local check = support.check
 local execute = require("neogrip.execute")
 local grid = require("neogrip.grid")
-local runner = require("neogrip.runner")
+local runner = require("neogrip.gripd.runner")
 local gripd = require("neogrip.gripd")
 
 support.describe("cursor: the client names the result")

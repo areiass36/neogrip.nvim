@@ -83,7 +83,7 @@ These rules must never be broken, even for convenience, debugging or refactoring
 - A secret reaches gripd only inside the `connect` request on the stdio pipe, never in a command-line
   argument, an environment variable or a JDBC URL (ADR-0009).
 - A secret never appears in a log, a notification, an error message, a register or a buffer. Every message
-  derived from a driver error passes through the redaction in `dsn.lua` before a user can see it.
+  derived from a driver error passes through the redaction in `gripd/dsn.lua` before a user can see it.
 - The Java side never echoes `connect` parameters into responses, exceptions or stderr.
 - Keep secret values in memory only as long as strictly needed: read at connect time, handed over, dropped.
 

@@ -1,6 +1,6 @@
 -- Render a table's definition from JDBC metadata. The rule the file is written
 -- to: every non-comment line is runnable SQL; what JDBC cannot spell is said in a comment, never guessed.
-local schema = require("neogrip.schema")
+local schema = require("neogrip.catalog")
 
 local M = {}
 

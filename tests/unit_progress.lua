@@ -2,7 +2,7 @@
 -- a frame about one result must reach only the request waiting on that result.
 local support = require("tests.support")
 local check = support.check
-local runner = require("neogrip.runner")
+local runner = require("neogrip.gripd.runner")
 local gripd = require("neogrip.gripd")
 local neogrip = require("neogrip")
 

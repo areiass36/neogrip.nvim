@@ -17,7 +17,7 @@ support.describe("live/safety: the secret never reaches the process table")
 if not support.reachable(pg) then
 	note("skipped: nothing listening (tests/containers.sh up)")
 else
-	local runner = require("neogrip.runner")
+	local runner = require("neogrip.gripd.runner")
 	local gripd = require("neogrip.gripd")
 	local finished = false
 	runner.run({ connection = pg, sql = "select pg_sleep(3), 1 as a", mode = "query", limit = 1 }, function()
@@ -48,7 +48,7 @@ else
 	check("its command line holds no password", command_line:find(password, 1, true), nil)
 	check(
 		"nor the url-encoded form",
-		command_line:find(require("neogrip.dsn").encode(password), 1, true),
+		command_line:find(require("neogrip.gripd.dsn").encode(password), 1, true),
 		nil
 	)
 	check("nor the user name", command_line:find("testuser", 1, true), nil)
@@ -61,7 +61,7 @@ else
 end
 
 support.describe("live/safety: the secret is not even in the URL")
-local dsn = require("neogrip.dsn")
+local dsn = require("neogrip.gripd.dsn")
 local url = dsn.build(pg)
 check("the url has no password", url:find(vim.env[support.PASSWORD_ENV] or "@@none@@", 1, true), nil)
 check(
@@ -115,7 +115,7 @@ support.describe("live/safety: cancellation reaches the server")
 if not support.reachable(pg) then
 	note("skipped")
 else
-	local runner = require("neogrip.runner")
+	local runner = require("neogrip.gripd.runner")
 	local outcome = nil
 	local handle = runner.run(
 		{ connection = pg, sql = "select pg_sleep(30)", mode = "query", limit = 1 },
@@ -142,7 +142,7 @@ end
 support.describe("live/safety: gripd refuses a write of its own accord")
 do
 	local gripd = require("neogrip.gripd")
-	local protocol = require("neogrip.rpc.protocol")
+	local protocol = require("neogrip.gripd.protocol")
 	local connections_module = require("neogrip.connections")
 	-- One DuckDB file takes one writer, so the read-only connection cannot share the suite's.
 	local file = vim.fs.normalize(vim.fn.tempname() .. "-readonly.duckdb")
@@ -180,7 +180,7 @@ else
 	vim.bo[bufnr].filetype = "sql"
 	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "delete from torture where id = 1;" })
 	vim.api.nvim_set_current_buf(bufnr)
-	require("neogrip.resolve").bind(bufnr, readonly.id)
+	require("neogrip.connections.resolve").bind(bufnr, readonly.id)
 
 	local messages = {}
 	local prompted = false

@@ -1,7 +1,7 @@
 -- Reading what the runner says about a failure, and deciding where to mark it.
 local support = require("tests.support")
 local check = support.check
-local errors = require("neogrip.errors")
+local errors = require("neogrip.gripd.errors")
 
 support.describe("errors: a JDBC failure")
 local parsed = errors.from_rpc({

@@ -124,7 +124,7 @@ end
 
 --- Attached via pcall: the port grows in phases and resolve must not fail while a module is unported.
 local function attach_services(bufnr, connection)
-	local dialect_ok, dialect = pcall(require, "neogrip.dialect")
+	local dialect_ok, dialect = pcall(require, "neogrip.ui.syntax")
 	if dialect_ok then
 		dialect.attach(bufnr, connection.driver)
 	end

@@ -1,11 +1,11 @@
-local resolve = require("neogrip.resolve")
+local resolve = require("neogrip.connections.resolve")
 
 local M = {}
 
 local scratch_count = 0
 
 local function attach_services(bufnr, connection)
-	local dialect_ok, dialect = pcall(require, "neogrip.dialect")
+	local dialect_ok, dialect = pcall(require, "neogrip.ui.syntax")
 	if dialect_ok then
 		dialect.attach(bufnr, connection.driver)
 	end
@@ -68,7 +68,7 @@ function M.status()
 	if filetype ~= "sql" and filetype ~= "mongodb" and filetype ~= "neogrip-grid" then
 		return ""
 	end
-	local running = #require("neogrip.runner").active() > 0
+	local running = #require("neogrip.gripd.runner").active() > 0
 	local connection = resolve.for_buf(bufnr)
 	if not connection then
 		return running and "neogrip: running" or "neogrip: no connection"

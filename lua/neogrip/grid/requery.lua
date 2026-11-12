@@ -45,7 +45,7 @@ CREATE OR REPLACE VIEW %s AS
 CREATE OR REPLACE VIEW last AS SELECT * FROM %s;
 ]]):format(view, csv_path, export.null_marker, view)
 
-	require("neogrip.runner").run({
+	require("neogrip.gripd.runner").run({
 		connection = M.connection(),
 		sql = sql,
 		mode = "exec",
@@ -70,7 +70,7 @@ function M.query_csv(csv_path, callback)
 			return
 		end
 		local bufnr =
-			require("neogrip.buffer").new_query(M.connection(), ("SELECT * FROM %s LIMIT 100;"):format(view))
+			require("neogrip.ui.buffer").new_query(M.connection(), ("SELECT * FROM %s LIMIT 100;"):format(view))
 		if callback then
 			callback(bufnr, nil)
 		end
@@ -95,7 +95,7 @@ function M.materialise(bufnr)
 			return neogrip.notify(("could not register the result: %s"):format(err), vim.log.levels.ERROR)
 		end
 		neogrip.notify(("%d rows available as %s (and as 'last')"):format(#state.rows, view))
-		require("neogrip.buffer").new_query(M.connection(), ("SELECT * FROM %s LIMIT 100;"):format(view))
+		require("neogrip.ui.buffer").new_query(M.connection(), ("SELECT * FROM %s LIMIT 100;"):format(view))
 	end)
 end
 

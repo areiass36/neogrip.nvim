@@ -2,7 +2,7 @@
 
 The contract between the Lua plugin and gripd, its Java daemon. This document is the source of truth: a change
 here bumps `protocolVersion`, is recorded in an ADR first, and lands in the same commit as both
-implementations (`lua/neogrip/rpc/` and `java/app/neogrip/gripd/`).
+implementations (`lua/neogrip/gripd/` and `java/app/neogrip/gripd/`).
 
 Current `protocolVersion`: **5**.
 

@@ -1,10 +1,10 @@
 -- The self test runs a query through the whole path (JDK, driver jar, gripd, connection),
 -- so a broken link shows up on a new machine instead of inside a real query.
 local connections = require("neogrip.connections")
-local jdbc = require("neogrip.bootstrap.jdbc")
-local jdk = require("neogrip.bootstrap.jdk")
+local jdbc = require("neogrip.gripd.bootstrap.jdbc")
+local jdk = require("neogrip.gripd.bootstrap.jdk")
 local gripd = require("neogrip.gripd")
-local runner = require("neogrip.runner")
+local runner = require("neogrip.gripd.runner")
 
 local M = {}
 

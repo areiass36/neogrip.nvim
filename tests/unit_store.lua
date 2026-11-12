@@ -2,8 +2,8 @@
 -- no Java process, no driver.
 local support = require("tests.support")
 local check = support.check
-local store = require("neogrip.schema.store")
-local schema = require("neogrip.schema")
+local store = require("neogrip.catalog.store")
+local schema = require("neogrip.catalog")
 
 -- Ids no real connection can have: the suite deletes every catalog file under them.
 local CONNECTION = { id = "__test_store__", driver = "postgres" }
@@ -116,7 +116,7 @@ check(
 )
 
 local details = store.details(CONNECTION, CATALOG, "public", "users")
--- neogrip/render.lua renders details.rows, so the column list arrives under that name.
+-- catalog/ddl.lua renders details.rows, so the column list arrives under that name.
 check("a definition carries its column list as rows", #details.rows, 2)
 check("the primary key is spelled out", details.primary_key, { "id" })
 check("the indexes come with it", details.indexes[1].name, "users_pkey")

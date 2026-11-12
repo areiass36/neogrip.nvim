@@ -115,7 +115,7 @@ vim.api.nvim_create_autocmd("FileType", {
 Result tabs are drawn in the result window's own `'winbar'`, in the native tab bar's colours: one
 cell per query, labelled by the start of its SQL, present from the first query on.
 
-A statusline component is available too: `require("neogrip.statusline").component()` renders
+A statusline component is available too: `require("neogrip.ui.statusline").component()` renders
 `replica [RO][PROD]` for the current buffer — `[PROD]` being the one effect `production: true` has.
 
 ## What this is not

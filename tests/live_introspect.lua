@@ -10,9 +10,9 @@ if not support.has_jdk() then
 end
 support.seed_secrets()
 local gripd = require("neogrip.gripd")
-local schema = require("neogrip.schema")
-local store = require("neogrip.schema.store")
-local tree = require("neogrip.tree")
+local schema = require("neogrip.catalog")
+local store = require("neogrip.catalog.store")
+local tree = require("neogrip.catalog.tree")
 
 local ENGINES = {
 	{
@@ -49,11 +49,11 @@ local ENGINES = {
 	},
 }
 
-local java = require("neogrip.bootstrap.jdk").java()
+local java = require("neogrip.gripd.bootstrap.jdk").java()
 
 for _, engine in ipairs(ENGINES) do
 	support.describe("live/introspect: " .. engine.driver)
-	local jar = require("neogrip.bootstrap.jdbc").jar(engine.driver)
+	local jar = require("neogrip.gripd.bootstrap.jdbc").jar(engine.driver)
 	if not java or not jar then
 		note("skipped: no JDK or no driver yet (both download on first use)")
 	else
@@ -164,7 +164,7 @@ for _, engine in ipairs(ENGINES) do
 					true
 				)
 			else
-				-- Nothing to report is an answer, which render.lua writes rather than omits.
+				-- Nothing to report is an answer, which catalog/ddl.lua writes rather than omits.
 				note(
 					("this driver reports %d keys, %d indexes, %d foreign keys"):format(
 						#(details.primary_key or {}),

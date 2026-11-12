@@ -1,7 +1,7 @@
 -- The checksum discipline without a network: curl reads file:// urls, so the
 -- "download" is local.
 local support = require("tests.support")
-local download = require("neogrip.bootstrap.download")
+local download = require("neogrip.gripd.bootstrap.download")
 
 support.describe("bootstrap download")
 
@@ -40,8 +40,8 @@ support.describe("bootstrap jdk: a JDK is detected by presence, not an +x bit")
 
 -- A deliberately non-executable file stands in for a fresh java/javac, because
 -- vim.fn.executable() transiently reports 0 for a real new .exe on Windows.
-local jdk = require("neogrip.bootstrap.jdk")
-local platform = require("neogrip.bootstrap.platform")
+local jdk = require("neogrip.gripd.bootstrap.jdk")
+local platform = require("neogrip.gripd.bootstrap.platform")
 local fake_jdk = temp_root .. "/fake-jdk"
 vim.fn.mkdir(fake_jdk .. "/bin", "p")
 for _, name in ipairs({ "java", "javac" }) do

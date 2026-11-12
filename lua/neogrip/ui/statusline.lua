@@ -1,5 +1,5 @@
 -- Nothing is installed anywhere: the user calls component() from their own statusline.
-local resolve = require("neogrip.resolve")
+local resolve = require("neogrip.connections.resolve")
 
 local M = {}
 
@@ -17,7 +17,7 @@ function M.status(bufnr)
 	if not connection then
 		return nil
 	end
-	local runner = require("neogrip.runner")
+	local runner = require("neogrip.gripd.runner")
 	return {
 		name = connection.name,
 		driver = connection.driver,

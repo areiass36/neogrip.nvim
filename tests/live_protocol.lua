@@ -1,10 +1,10 @@
 -- The real gripd, no database: compile, launch, shake hands, and walk the
 -- contract's edges. Skips - never fails - without a JDK.
 local support = require("tests.support")
-local jdk = require("neogrip.bootstrap.jdk")
+local jdk = require("neogrip.gripd.bootstrap.jdk")
 local gripd = require("neogrip.gripd")
-local client = require("neogrip.rpc.client")
-local protocol = require("neogrip.rpc.protocol")
+local client = require("neogrip.gripd.client")
+local protocol = require("neogrip.gripd.protocol")
 
 support.describe("gripd protocol (live)")
 

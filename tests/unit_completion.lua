@@ -2,11 +2,11 @@
 -- The source used to miss the sweep file entirely and wait on the server instead.
 local support = require("tests.support")
 local check = support.check
-local completion = require("neogrip.completion")
+local completion = require("neogrip.lsp.completion")
 local connections = require("neogrip.connections")
-local resolve = require("neogrip.resolve")
-local schema = require("neogrip.schema")
-local store = require("neogrip.schema.store")
+local resolve = require("neogrip.connections.resolve")
+local schema = require("neogrip.catalog")
+local store = require("neogrip.catalog.store")
 
 local connection = connections.register({
 	id = "__test_completion__",

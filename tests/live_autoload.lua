@@ -19,8 +19,8 @@ end
 local config = require("neogrip.config")
 local execute = require("neogrip.execute")
 local grid = require("neogrip.grid")
-local resolve = require("neogrip.resolve")
-local runner = require("neogrip.runner")
+local resolve = require("neogrip.connections.resolve")
+local runner = require("neogrip.gripd.runner")
 local connections_module = require("neogrip.connections")
 
 connections_module.register(pg)

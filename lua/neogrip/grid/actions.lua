@@ -1,7 +1,7 @@
 -- Every yank and export reads the stored value, never the screen text, which may be truncated.
 local neogrip = require("neogrip")
 local grid = require("neogrip.grid")
-local value_module = require("neogrip.value")
+local value_module = require("neogrip.codec.value")
 
 local M = {}
 
@@ -181,7 +181,7 @@ function M.follow_fk(bufnr)
 	if not state then
 		return
 	end
-	local schema_ok, schema = pcall(require, "neogrip.schema")
+	local schema_ok, schema = pcall(require, "neogrip.catalog")
 	if not schema_ok then
 		return neogrip.notify("the catalog layer has not landed yet", vim.log.levels.WARN)
 	end
@@ -249,7 +249,7 @@ function M.follow_fk(bufnr)
 	else
 		text = ("%s LIMIT %d;"):format(statement, limit)
 	end
-	return require("neogrip.buffer").new_query(connection, text)
+	return require("neogrip.ui.buffer").new_query(connection, text)
 end
 
 --- Sort by re-running the statement with an ORDER BY, so the order covers every page.

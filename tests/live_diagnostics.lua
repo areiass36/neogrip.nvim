@@ -47,7 +47,7 @@ for _, driver in ipairs({ "postgres", "mysql", "mariadb", "mssql", "sqlite", "du
 			("  from %s;"):format(table_name),
 		})
 		vim.api.nvim_set_current_buf(bufnr)
-		require("neogrip.resolve").bind(bufnr, connection.id)
+		require("neogrip.connections.resolve").bind(bufnr, connection.id)
 
 		diagnostics.validate({ bufnr = bufnr })
 		support.wait(function()
@@ -105,7 +105,7 @@ if support.reachable(pg) then
 	vim.bo[bufnr].filetype = "sql"
 	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "select nosuchcol from torture;" })
 	vim.api.nvim_set_current_buf(bufnr)
-	require("neogrip.resolve").bind(bufnr, production.id)
+	require("neogrip.connections.resolve").bind(bufnr, production.id)
 
 	diagnostics.validate({ bufnr = bufnr })
 	vim.wait(2000, function()

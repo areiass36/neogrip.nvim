@@ -3,11 +3,11 @@
 local support = require("tests.support")
 local check = support.check
 local connections = require("neogrip.connections")
-local render = require("neogrip.render")
-local document = require("neogrip.document")
+local ddl = require("neogrip.catalog.ddl")
+local document = require("neogrip.ui.document")
 local lsp = require("neogrip.lsp")
-local schema = require("neogrip.schema")
-local store = require("neogrip.schema.store")
+local schema = require("neogrip.catalog")
+local store = require("neogrip.catalog.store")
 
 local KIND = vim.lsp.protocol.SymbolKind
 
@@ -246,7 +246,7 @@ check("with the schema document", schema_at, {
 
 -- Read off the rendered text as the server does: the renderer may leave a column out.
 local rendered =
-	render.details(connection, "sales", "customers", store.details(connection, CATALOG, "sales", "customers"))
+	ddl.details(connection, "sales", "customers", store.details(connection, CATALOG, "sales", "customers"))
 local email_line = document.column_line(rendered, "email")
 check("the column has a line in its table's definition", email_line ~= nil, true)
 

@@ -3,7 +3,7 @@
 local neogrip = require("neogrip")
 local highlight = require("neogrip.grid.highlight")
 local layout = require("neogrip.grid.layout")
-local value_module = require("neogrip.value")
+local value_module = require("neogrip.codec.value")
 
 local M = {}
 
@@ -557,7 +557,7 @@ end
 local function release_replaced(state, result)
 	local stale = state and state.result and state.result.hash
 	if stale and stale ~= result.hash and state.result.connection then
-		require("neogrip.runner").release(state.result.connection, stale)
+		require("neogrip.gripd.runner").release(state.result.connection, stale)
 	end
 end
 
@@ -863,12 +863,12 @@ function forget(bufnr)
 	-- otherwise hold its cursor until the idle sweep an hour later.
 	local result = state and state.result
 	if result and result.hash and result.connection then
-		require("neogrip.runner").release(result.connection, result.hash)
+		require("neogrip.gripd.runner").release(result.connection, result.hash)
 	end
 	-- A tab dismissed before it answered takes its request with it.
 	local entry = waiting[bufnr]
 	if entry and entry.handle then
-		require("neogrip.runner").cancel(entry.handle)
+		require("neogrip.gripd.runner").cancel(entry.handle)
 	end
 	waiting[bufnr] = nil
 	states[bufnr] = nil

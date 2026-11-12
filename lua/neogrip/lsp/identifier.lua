@@ -1,9 +1,9 @@
 -- Scoped to the statement, not the buffer: an alias bound in one statement says nothing about the
 -- same letter in another. Nothing asks the server - answers come from the swept catalog, so
 -- resolving is safe inside an LSP request.
-local dialect = require("neogrip.dialect")
-local resolve = require("neogrip.resolve")
-local schema = require("neogrip.schema")
+local syntax = require("neogrip.ui.syntax")
+local resolve = require("neogrip.connections.resolve")
+local schema = require("neogrip.catalog")
 local split = require("neogrip.sql.split")
 
 local M = {}
@@ -534,7 +534,7 @@ function M.resolve(bufnr, text, line, col)
 	-- Prose in a string or comment is not an identifier; probe before a quoted name, because
 	-- asking about its own opening quote would answer yes for every quoted identifier.
 	local probe = part.quoted and math.max(0, part.from - 2) or part.from - 1
-	local asked, hidden = pcall(dialect.in_string_or_comment, bufnr, line - 1, probe)
+	local asked, hidden = pcall(syntax.in_string_or_comment, bufnr, line - 1, probe)
 	if asked and hidden then
 		return nil
 	end

@@ -2,8 +2,8 @@
 -- a function of what we know rather than of what a server answers.
 local support = require("tests.support")
 local check = support.check
-local tree = require("neogrip.tree")
-local statement = require("neogrip.sql.statement")
+local tree = require("neogrip.catalog.tree")
+local statement = require("neogrip.catalog.statement")
 
 support.describe("tree: the shape of every engine")
 
@@ -477,7 +477,7 @@ support.describe("tree: collapsing a row listing hands its cursor back")
 
 -- A node collapsed after its page arrived used to leave the cursor open, and
 -- nothing evicts one any more (ADR-0041).
-local runner_module = require("neogrip.runner")
+local runner_module = require("neogrip.gripd.runner")
 local released = {}
 local saved_release = runner_module.release
 local saved_run = runner_module.run

@@ -26,7 +26,7 @@ if not created then
 end
 local execute = require("neogrip.execute")
 local grid = require("neogrip.grid")
-local resolve = require("neogrip.resolve")
+local resolve = require("neogrip.connections.resolve")
 local actions = require("neogrip.grid.actions")
 local bufnr = vim.api.nvim_create_buf(false, true)
 vim.bo[bufnr].filetype = "sql"
@@ -128,7 +128,7 @@ vim.fn.delete(standalone)
 support.describe("live/requery: a materialised result is queried through its own connection")
 local view_connection = requery.connection()
 check("the scratch connection is registered", connections_module.get(view_connection.id) ~= nil, true)
-local scratch_query = require("neogrip.buffer").new_query(view_connection, "select 1 as a;")
+local scratch_query = require("neogrip.ui.buffer").new_query(view_connection, "select 1 as a;")
 check("a buffer opened on it resolves to it", resolve.for_buf(scratch_query).id, view_connection.id)
 check("and not to the project's database", resolve.for_buf(scratch_query).driver, "duckdb")
 support.describe("live/requery: the full export streams from gripd")
@@ -139,7 +139,7 @@ end, 90000)
 state = grid.state(grid.current_buf())
 local full = ("%s/full.csv"):format(export.results_dir())
 local exported = support.sync(function(done)
-	require("neogrip.runner").run({
+	require("neogrip.gripd.runner").run({
 		connection = duck,
 		sql = state.result.sql,
 		mode = "export",
@@ -157,7 +157,7 @@ check("with gripd's own header", full_lines[1], "id,s_comma,s_null,cjk")
 check("a comma quoted, a null marked", full_lines[2], '1,"a,b",\\N,日本語')
 local bad_path = ("%s/full.xlsx"):format(export.results_dir())
 local _, refused = support.sync(function(done)
-	require("neogrip.runner").run({
+	require("neogrip.gripd.runner").run({
 		connection = duck,
 		sql = state.result.sql,
 		mode = "export",
@@ -170,7 +170,7 @@ check("a format nothing writes is refused", refused and refused.message:find("xl
 check("and no file is left behind", vim.fn.filereadable(bad_path), 0)
 
 local exported_json = support.sync(function(done)
-	require("neogrip.runner").run({
+	require("neogrip.gripd.runner").run({
 		connection = duck,
 		sql = state.result.sql,
 		mode = "export",

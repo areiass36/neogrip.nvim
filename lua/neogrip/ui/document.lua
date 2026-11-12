@@ -1,7 +1,7 @@
 -- A table or a schema as a document you can :edit: a neogrip:// name is read
 -- by a BufReadCmd, every segment percent-encoded, empty where the engine has no catalog or schema.
-local icons = require("neogrip.icons")
-local schema = require("neogrip.schema")
+local icons = require("neogrip.ui.icons")
+local schema = require("neogrip.catalog")
 
 local M = {}
 
@@ -251,16 +251,16 @@ local function dress(bufnr, parsed)
 	local connection = parsed and parsed.connection
 	if connection then
 		-- Without the dialect layer, engine functions highlight as generic ANSI SQL.
-		pcall(require("neogrip.dialect").attach, bufnr, connection.driver)
-		pcall(require("neogrip.resolve").bind, bufnr, connection.id)
+		pcall(require("neogrip.ui.syntax").attach, bufnr, connection.driver)
+		pcall(require("neogrip.connections.resolve").bind, bufnr, connection.id)
 	end
 end
 
---- The definition as neogrip/render.lua writes it; required late to keep the
+--- The definition as catalog/ddl.lua writes it; required late to keep the
 --- dependency one-way.
 local function definition(parsed, details)
 	local ok, lines =
-		pcall(require("neogrip.render").details, parsed.connection, parsed.schema, parsed.table, details)
+		pcall(require("neogrip.catalog.ddl").details, parsed.connection, parsed.schema, parsed.table, details)
 	if ok and type(lines) == "table" then
 		return lines
 	end

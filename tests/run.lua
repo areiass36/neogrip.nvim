@@ -18,7 +18,7 @@ local UNIT = {
 	"unit_cursor",
 	"unit_autoload",
 	"unit_identifier",
-	"unit_dialect",
+	"unit_syntax",
 	"unit_store",
 	"unit_completion",
 	"unit_lsp",

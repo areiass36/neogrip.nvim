@@ -1,8 +1,8 @@
 -- A Temurin JDK of the plugin's own, never the PATH java; a JDK, not a JRE, because gripd is
 -- compiled on first use. Checksums taken from the Adoptium API on 2026-10-29, because "latest"
 -- cannot be checksummed; bump url and sha256 together.
-local platform = require("neogrip.bootstrap.platform")
-local download = require("neogrip.bootstrap.download")
+local platform = require("neogrip.gripd.bootstrap.platform")
+local download = require("neogrip.gripd.bootstrap.download")
 local neogrip = require("neogrip")
 
 local GITHUB = "https://github.com/adoptium/temurin21-binaries/releases/download"

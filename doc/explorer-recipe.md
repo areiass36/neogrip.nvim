@@ -10,7 +10,7 @@ is documented under `:help neogrip-tree`.
 ## What the tree gives you
 
 ```lua
-local tree = require("neogrip.tree")
+local tree = require("neogrip.catalog.tree")
 
 tree.shape(connection)        --> the walk this connection has, with labels
 tree.children(node, opts, cb) --> the next level; nil node = your connections
@@ -31,8 +31,8 @@ renderer.
 Expand with `<CR>`, open a SELECT with `s`, copy the qualified name with `y`.
 
 ```lua
-local tree = require("neogrip.tree")
-local icons = require("neogrip.icons") -- or your own, or none
+local tree = require("neogrip.catalog.tree")
+local icons = require("neogrip.ui.icons") -- or your own, or none
 
 local state = { lines = {}, nodes = {}, open = {}, bufnr = nil }
 
@@ -115,7 +115,7 @@ local function open_select()
       return vim.notify(tostring(err), vim.log.levels.WARN)
     end
     local connection = require("neogrip.connections").get(entry.node.ref.server)
-    require("neogrip.buffer").new_query(connection, text)
+    require("neogrip.ui.buffer").new_query(connection, text)
   end)
 end
 
@@ -130,7 +130,7 @@ end
 
 function OpenNeogripTree()
   state = { lines = {}, nodes = {}, open = {}, bufnr = vim.api.nvim_create_buf(false, true) }
-  vim.bo[state.bufnr].filetype = "neogrip-tree"
+  vim.bo[state.bufnr].filetype = "neogrip.catalog.tree"
   vim.api.nvim_set_current_buf(state.bufnr)
   vim.keymap.set("n", "<CR>", toggle, { buffer = state.bufnr })
   vim.keymap.set("n", "s", open_select, { buffer = state.bufnr })
@@ -234,6 +234,6 @@ reaches it — an hour by default.
 `tree.sweep(namespace_ref, ...)` to re-read one schema, or `tree.forget(ref)`
 to drop what is cached and ask the server again.
 
-**A definition buffer.** `require("neogrip.render").details(connection,
+**A definition buffer.** `require("neogrip.catalog.ddl").details(connection,
 namespace, set, details)` gives the lines the plugin used to draw, and
 `:edit db://table/<conn>/<catalog>/<schema>/<table>` opens one by name.

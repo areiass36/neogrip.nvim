@@ -1,6 +1,6 @@
 -- Builds statement text only. Nothing produced here is runnable: values are
 -- named placeholders, so a rewrite cannot run by accident.
-local schema = require("neogrip.schema")
+local schema = require("neogrip.catalog")
 
 local M = {}
 

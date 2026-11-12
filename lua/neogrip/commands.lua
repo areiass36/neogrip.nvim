@@ -1,6 +1,6 @@
 local connections = require("neogrip.connections")
 local neogrip = require("neogrip")
-local resolve = require("neogrip.resolve")
+local resolve = require("neogrip.connections.resolve")
 
 local M = {}
 
@@ -116,7 +116,7 @@ function M.setup()
 	command("NGripNewQuery", function()
 		local connection = current_connection()
 		if connection then
-			require("neogrip.buffer").new_query(connection, "")
+			require("neogrip.ui.buffer").new_query(connection, "")
 		end
 	end, { desc = "Open a query buffer against this buffer's connection" })
 
@@ -126,7 +126,7 @@ function M.setup()
 		if not connection then
 			return
 		end
-		require("neogrip.schema").invalidate(connection)
+		require("neogrip.catalog").invalidate(connection)
 		neogrip.notify(("%s: cached catalog cleared"):format(connection.name))
 	end, { desc = "Clear the cached catalog for this buffer's connection" })
 
@@ -135,7 +135,7 @@ function M.setup()
 		if not connection then
 			return
 		end
-		local schema = require("neogrip.schema")
+		local schema = require("neogrip.catalog")
 		-- Sweep the catalog the tree would open on, so what is swept is what a client reads.
 		local catalog = schema.catalog_of(connection)
 		if args.args ~= "" then

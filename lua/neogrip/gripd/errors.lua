@@ -1,6 +1,6 @@
 -- An error the editor can point at. Hunting for an identifier in the message is only a
 -- fallback for drivers that report no structured position.
-local dsn = require("neogrip.dsn")
+local dsn = require("neogrip.gripd.dsn")
 
 local M = {}
 
@@ -40,7 +40,7 @@ end
 --- @return neogrip.QueryError
 function M.from_rpc(err, context)
 	context = context or {}
-	local protocol = require("neogrip.rpc.protocol")
+	local protocol = require("neogrip.gripd.protocol")
 	local data = type(err.data) == "table" and err.data or {}
 	local message = dsn.redact(err.message or "error", context.password)
 	-- Drivers append their own position line; the structured field already carries it.

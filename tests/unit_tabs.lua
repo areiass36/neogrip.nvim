@@ -4,8 +4,8 @@ local support = require("tests.support")
 local check = support.check
 local execute = require("neogrip.execute")
 local grid = require("neogrip.grid")
-local runner = require("neogrip.runner")
-local resolve = require("neogrip.resolve")
+local runner = require("neogrip.gripd.runner")
+local resolve = require("neogrip.connections.resolve")
 
 local connection = { id = "__tabs_probe__", name = "probe", driver = "postgres", readonly = false }
 

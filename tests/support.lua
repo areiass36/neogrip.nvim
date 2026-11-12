@@ -157,7 +157,7 @@ end
 
 --- Live suites need a JVM; without one they skip rather than fail.
 function M.has_jdk()
-	return require("neogrip.bootstrap.jdk").javac() ~= nil
+	return require("neogrip.gripd.bootstrap.jdk").javac() ~= nil
 end
 
 local seeded = {}
@@ -236,7 +236,7 @@ function M.run(connection, sql, opts)
 		limit = opts.limit or 0,
 	}, opts)
 	return M.sync(function(done)
-		require("neogrip.runner").run(request, function(result, err)
+		require("neogrip.gripd.runner").run(request, function(result, err)
 			done(result, err)
 		end)
 	end, opts.timeout)
@@ -252,7 +252,7 @@ function M.next_batch(connection, hash, limit, opts)
 		limit = limit or 0,
 	}, opts)
 	return M.sync(function(done)
-		require("neogrip.runner").run(request, function(result, err)
+		require("neogrip.gripd.runner").run(request, function(result, err)
 			done(result, err)
 		end)
 	end, opts.timeout)

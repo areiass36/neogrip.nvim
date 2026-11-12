@@ -8,7 +8,7 @@ if not support.has_jdk() then
 	return
 end
 support.seed_secrets()
-local schema = require("neogrip.schema")
+local schema = require("neogrip.catalog")
 
 local connections = support.connections()
 local targets = {

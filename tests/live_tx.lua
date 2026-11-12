@@ -11,7 +11,7 @@ end
 support.seed_secrets()
 
 local duck = support.connections().duckdb
-local runner = require("neogrip.runner")
+local runner = require("neogrip.gripd.runner")
 require("neogrip.connections").register(duck)
 
 support.run(duck, "create or replace table ledger(amount int)", { mode = "exec", timeout = 90000 })
