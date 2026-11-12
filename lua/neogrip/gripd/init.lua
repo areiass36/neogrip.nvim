@@ -9,9 +9,9 @@ local paths = require("neogrip.paths")
 
 local M = {}
 
--- This file's own path locates the shipped sources; a plugin cannot know
--- where a manager cloned it.
-local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h")
+-- This file's own path locates the shipped sources; a plugin cannot know where a manager
+-- cloned it. Four heads up from lua/neogrip/gripd/init.lua is the repository root.
+local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h:h")
 M.sources_dir = plugin_root .. "/java"
 M.classes_dir = paths.data_dir .. "/classes"
 
