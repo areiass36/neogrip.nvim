@@ -1,15 +1,3 @@
--- Connections come from two files and never contain a secret.
---
---   global:  stdpath("state")/neogrip/connections.json
---   project: <root>/.nvim/database.json, which also maps folders and globs to
---            a connection and names the project default
---
--- A project entry wins over a global one with the same id. Every secret is a
--- kvstore.nvim key name (ADR-0007): the file stores { "kvstore": "<key>" }
--- and a literal value is a hard error, so the file stays inert data.
---
--- Schema version 2 (ADR-0008): auth as an object, ssl as a block, catalog and
--- schema split from database, options passed through to the driver.
 local neogrip = require("neogrip")
 
 local M = {}
@@ -25,8 +13,7 @@ local DRIVERS = {
 	trino = true,
 }
 
--- Driver spellings people reasonably write, mapped to the canonical one.
--- Azure SQL is the mssql driver; its difference is the auth mode.
+-- Azure SQL is the mssql driver; the difference is the auth mode.
 local DRIVER_ALIASES = {
 	postgresql = "postgres",
 	pg = "postgres",
@@ -48,8 +35,7 @@ local AUTH_TYPES = {
 	token = true,
 }
 
--- The fields of an auth object that hold a secret; each must be a kvstore
--- reference, never a literal.
+-- Auth fields that hold a secret; each must be a kvstore reference, never a literal.
 local SECRET_FIELDS = { "password", "client_secret", "token", "passphrase" }
 
 local PROJECT_FILE = ".nvim/database.json"
@@ -58,9 +44,7 @@ local DEPRECATED_PROJECT_FILE = ".nvim/databases.json"
 
 local cache = nil
 local warned = {}
--- Connections that exist only for this session, such as the DuckDB scratch a
--- materialised result is queried through. They are not in any file, but a
--- buffer still has to be able to resolve one by id.
+-- Session-only connections (e.g. the DuckDB scratch) that a buffer must still resolve by id.
 local ephemeral = {}
 
 local function warn_once(key, message)
@@ -99,11 +83,8 @@ end
 
 function M.project_root()
 	local cwd = vim.fs.normalize(vim.fn.getcwd())
-	-- A connection file outranks a .git, and is looked for above it: someone
-	-- put it there on purpose. A workspace holding several repositories side
-	-- by side - with no repository above them - can then declare its databases
-	-- once, at the top; with the git root alone, opening nvim inside one of
-	-- those repositories would look for the file there and find nothing.
+	-- A connection file outranks .git, so a workspace of side-by-side repositories can
+	-- declare its databases once at the top.
 	return declared_root(cwd) or vim.fs.root(cwd, ".git") or cwd
 end
 
@@ -130,8 +111,7 @@ local function read_json(path)
 	return data
 end
 
---- Expand a path the way a shell would, and resolve a relative one against the
---- project root so a project file can say "file": "db/app.sqlite".
+--- Expand a path and resolve a relative one against the project root.
 local function resolve_file(path)
 	if not path or path == "" then
 		return nil
@@ -147,9 +127,7 @@ local function resolve_file(path)
 	return vim.fs.normalize(M.project_root() .. "/" .. expanded)
 end
 
---- A secret field is a kvstore key reference and nothing else. A literal would
---- turn the file into a credential store, which is exactly what ADR-0007
---- forbids.
+--- A secret field is a kvstore key reference and nothing else; a literal is forbidden (ADR-0007).
 --- @return table|nil reference, string|nil error
 local function normalize_secret(id, field, value)
 	if value == nil then
@@ -216,8 +194,7 @@ local function normalize(entry, scope)
 		return nil, ("connection %q (%s) needs a file"):format(entry.id, driver)
 	end
 
-	-- Decoded JSON is whitelisted field by field into a fresh table, never
-	-- passed through raw.
+	-- Decoded JSON is whitelisted field by field, never passed through raw.
 	return {
 		id = entry.id,
 		name = entry.name or entry.id,
@@ -270,9 +247,7 @@ local function load_file(path, scope, into, order)
 	return data
 end
 
---- Warn when the project file is not ignored by git. It holds hosts, user
---- names and kvstore key names: useful to a reader, and not something to push
---- by accident.
+--- Warn when the project file is not gitignored: it holds hosts, user names and kvstore key names.
 local function check_ignored(path)
 	if vim.fn.filereadable(path) == 0 then
 		return
@@ -281,9 +256,7 @@ local function check_ignored(path)
 		{ "git", "check-ignore", "-q", path },
 		{ cwd = M.project_root() },
 		vim.schedule_wrap(function(result)
-			-- 0 is ignored, 1 is not, anything else means git could not answer
-			-- - usually because this folder is not a repository at all, and
-			-- then there is nothing to commit the file to.
+			-- Only 1 means "not ignored"; other non-zero codes mean this is not a repository.
 			if result.code == 1 then
 				warn_once("gitignore", PROJECT_FILE .. " is not gitignored; add '.nvim/' to .gitignore")
 			end

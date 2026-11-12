@@ -42,24 +42,19 @@ public final class Daemon {
                         ConnectHandler.class,
                         StatementHandlers.class,
                         CatalogHandlers.class)
-                // Every error the wire can carry is translated here and
-                // nowhere else: the code that executes statements throws its
-                // own exceptions and never sees an envelope (ADR-0032).
+                // Every error the wire can carry is translated here and nowhere else (ADR-0032).
                 .mapException(WriteRefused.class, e -> RpcException.of(ErrorCodes.READONLY_REFUSED, e))
                 .mapException(DataAccessException.class, SqlErrors::fromFailure)
                 .mapException(SQLException.class, SqlErrors::toRpcException)
                 .mapException(RequestRefused.class, e -> RpcException.of(JsonRpc.INVALID_REQUEST, e))
                 .mapException(Cancelled.class, e -> RpcException.of(ErrorCodes.CANCELLED, e))
-                // A rejected argument - an export format this build does not
-                // write, say - came from the request, so it answers as a bad
-                // request rather than as an internal error.
+                // A rejected argument came from the request, so it answers as a bad request.
                 .mapException(IllegalArgumentException.class, e -> RpcException.of(JsonRpc.INVALID_REQUEST, e))
                 .drainSeconds(30)
                 .build()
                 .run();
 
-        // The library reports why it stopped and never kills the process
-        // itself; a refused handshake is what this program exits non-zero for.
+        // The library never kills the process; a refused handshake exits non-zero here.
         if (reason != ExitReason.STOPPED) {
             System.exit(reason.code());
         }

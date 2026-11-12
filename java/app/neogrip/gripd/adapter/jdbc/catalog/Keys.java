@@ -18,13 +18,8 @@ public final class Keys {
     private Keys() {}
 
     /**
-     * One column of a key, with the sequence number that is meant to order it.
-     *
-     * JDBC reports a key's columns as rows, and the row order is the driver's
-     * business rather than the key's: KEY_SEQ is the only thing that says
-     * which column comes first. A composite key read in row order renders a
-     * CREATE TABLE whose key is a different key, and lines the wrong pairs up
-     * when it is matched against a foreign key.
+     * One column of a key: the row order is the driver's business, and
+     * KEY_SEQ is the only thing that says which column comes first.
      */
     record KeyColumn(int position, String name) {}
 
@@ -35,11 +30,8 @@ public final class Keys {
     record KeyPair(int position, String here, String there) {}
 
     /**
-     * The names of a key's columns, in the order the key declares.
-     *
-     * The sort is stable, so a driver that reports no sequence numbers at all
-     * leaves the rows in the order it returned them - which is the best guess
-     * there is, and what this did before anyone asked about KEY_SEQ.
+     * The names of a key's columns in the order the key declares; the sort is
+     * stable, so a driver reporting no sequence numbers keeps its row order.
      */
     static Set<String> inOrder(List<KeyColumn> columns) {
         columns.sort(Comparator.comparingInt(KeyColumn::position));
@@ -51,12 +43,8 @@ public final class Keys {
     }
 
     /**
-     * A table's primary key: its columns in order, and the name the server
-     * gave the constraint.
-     *
-     * The name matters because a definition that declares the key anonymously
-     * is not the definition the server has - dropping or recreating the
-     * constraint needs the name the server knows it by.
+     * A table's primary key: its columns in order, and the constraint name -
+     * dropping or recreating the constraint needs the name the server knows it by.
      */
     static final class PrimaryKey {
         static final PrimaryKey NONE = new PrimaryKey(Set.of(), null);
@@ -95,14 +83,10 @@ public final class Keys {
     static final int KEY_FALLBACK_TABLES = 50;
 
     /**
-     * Every primary key in the schema at once, by passing a null table name.
-     *
-     * That is more than getPrimaryKeys promises, so the answer has three
-     * states, not two: a map when the driver answered, and null when it
-     * refused. An empty
-     * map is an answer - Trino reports no keys because it has none - and must
-     * not be mistaken for a refusal, or every Trino schema would pay for a
-     * per-table sweep that can only come back empty.
+     * Every primary key in the schema at once, by passing a null table name -
+     * more than getPrimaryKeys promises, so null means the driver refused,
+     * while an empty map is an answer and must not trigger the per-table
+     * sweep; see doc/internals.md#schema-and-tree.
      */
     static java.util.Map<String, PrimaryKey> schemaPrimaryKeys(
             DatabaseMetaData meta, String catalog, String schema) {
@@ -121,9 +105,7 @@ public final class Keys {
         } catch (SQLException refused) {
             return null;
         }
-        // One sort per table, after the whole schema has arrived: the rows of
-        // two tables' keys can be interleaved, so there is nothing to order
-        // until the last of them has been read.
+        // Sorted only after the whole schema has arrived: two tables' key rows can be interleaved.
         java.util.Map<String, PrimaryKey> keys = new java.util.LinkedHashMap<>();
         for (java.util.Map.Entry<String, List<KeyColumn>> table : columns.entrySet()) {
             keys.put(table.getKey(), new PrimaryKey(inOrder(table.getValue()), names.get(table.getKey())));
@@ -137,15 +119,12 @@ public final class Keys {
         java.util.Map<String, Boolean> unique = new java.util.LinkedHashMap<>();
         java.util.Map<String, String> kinds = new java.util.LinkedHashMap<>();
         java.util.Map<String, String> filters = new java.util.LinkedHashMap<>();
-        // approximate=true: listing index names is not worth asking the server
-        // to refresh its statistics first.
+        // approximate=true: listing index names is not worth a statistics refresh.
         try (ResultSet rows = meta.getIndexInfo(Metadata.orNull(catalog), Metadata.orNull(schema), table, false, true)) {
             while (rows.next()) {
                 int type = Metadata.optionalInt(rows, "TYPE", DatabaseMetaData.tableIndexOther);
-                // A tableIndexStatistic row is the table's own cardinality and
-                // page count rather than an index, and it is dropped on its
-                // type: it usually carries no name or column either, but a
-                // driver that fills those in would otherwise have the editor
+                // A tableIndexStatistic row is the table's cardinality, not an index, and is
+                // dropped on type: a driver that fills in its name would have the editor
                 // render a statistic as something to create.
                 if (type == DatabaseMetaData.tableIndexStatistic) {
                     continue;
@@ -164,22 +143,19 @@ public final class Keys {
                 kinds.putIfAbsent(name, indexKind(type));
                 String filter = Metadata.orNull(Metadata.optionalString(rows, "FILTER_CONDITION"));
                 if (filter != null) {
-                    // A partial index is a different index from the one its
-                    // columns describe, so the condition is not decoration.
+                    // A partial index is a different index from the one its columns describe.
                     filters.putIfAbsent(name, filter);
                 }
             }
         } catch (SQLException ignored) {
-            // Trino and the other query engines have no indexes to report.
+            // Query engines have no indexes to report; see doc/internals.md#schema-and-tree.
         }
         List<Contracts.IndexInfo> list = new ArrayList<>(indexes.size());
         for (java.util.Map.Entry<String, List<IndexColumn>> index : indexes.entrySet()) {
             List<IndexColumn> columns = index.getValue();
             columns.sort(Comparator.comparingInt(IndexColumn::position));
             List<String> names = new ArrayList<>(columns.size());
-            // Kept as a parallel array rather than per column, because the
-            // columns are what a reader that does not care about ordering
-            // already reads: a second array it can ignore beats a shape change.
+            // A parallel array a reader can ignore beats a shape change to the columns.
             List<String> order = new ArrayList<>(columns.size());
             for (IndexColumn column : columns) {
                 names.add(String.valueOf(column.name()));
@@ -197,12 +173,8 @@ public final class Keys {
     }
 
     /**
-     * Which way an index column sorts.
-     *
-     * "unknown" rather than defaulting to ascending, because a driver that
-     * leaves ASC_OR_DESC null has not said the index is ascending - and an
-     * index rendered with the wrong direction is an index that would not be
-     * used by the query it was created for.
+     * "unknown" rather than defaulting to ascending: a driver that leaves
+     * ASC_OR_DESC null has not said the index is ascending.
      */
     static String direction(String ascOrDesc) {
         if ("A".equals(ascOrDesc)) {
@@ -230,11 +202,8 @@ public final class Keys {
      */
     static List<Contracts.KeyInfo> keyInfos(
             DatabaseMetaData meta, String catalog, String schema, String table, boolean imported) {
-        // Both ends of a column are kept as one pair, not as two lists.
-        // Built separately they were ordered separately - by whatever order the
-        // driver returned the rows in, independently for each side - and a
-        // two-column key could come out with its second column pointing at the
-        // first column of the key it references.
+        // Both ends of a column stay one pair: built as two lists they were ordered separately,
+        // and a two-column key could point its second column at the first of the key it references.
         java.util.LinkedHashMap<String, List<KeyPair>> pairs = new java.util.LinkedHashMap<>();
         java.util.LinkedHashMap<String, String[]> target = new java.util.LinkedHashMap<>();
         java.util.Map<String, String> onDelete = new java.util.LinkedHashMap<>();
@@ -291,16 +260,12 @@ public final class Keys {
     }
 
     /**
-     * A referential action, under the name the standard gives it.
+     * A referential action under its standard name; RESTRICT and NO ACTION
+     * stay apart even though JDBC documents them as aliases, because the
+     * servers that accept both do not treat them as the same thing.
      *
-     * RESTRICT and NO ACTION are reported apart, even though JDBC documents
-     * importedKeyRestrict as the same thing as importedKeyNoAction and keeps
-     * it only for ODBC 2: the servers that accept both do not treat them as
-     * the same thing, and this is reporting what the server said.
-     *
-     * @return null where the driver would not say which action it is, since a
-     *         rendered ON DELETE that guessed is worse than no clause at all -
-     *         the default is NO ACTION, and a wrong one reads as deliberate.
+     * @return null where the driver would not say, since a rendered ON DELETE
+     *         that guessed reads as deliberate.
      */
     static String rule(ResultSet rows, String column) {
         int value;

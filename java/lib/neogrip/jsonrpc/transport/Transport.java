@@ -14,14 +14,10 @@ public interface Transport {
     String read() throws IOException;
 
     /**
-     * One frame, on its way out before this returns, because a client is
-     * blocked waiting for it.
-     *
-     * Does not throw: a sink that cannot be written to is a client that has
-     * gone away, and the read that follows reports that by ending. Callers
-     * include notification senders on arbitrary threads, and a checked
-     * exception there would travel all the way into code that has no idea a
-     * wire exists.
+     * One frame, on its way out before this returns because a client is
+     * blocked waiting for it; does not throw - a sink that cannot be written
+     * to is a client that has gone away, and the read that follows reports
+     * that by ending.
      */
     void write(String frame);
 }

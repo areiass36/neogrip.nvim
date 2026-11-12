@@ -9,19 +9,14 @@ import neogrip.gripd.adapter.jdbc.Running;
 import neogrip.gripd.contract.Contracts;
 
 /**
- * The server's own CREATE TABLE, where one statement produces it, or null.
- * Null is a normal answer and not an error: most engines have no such
- * statement, a view is not a table on the ones that do, and the caller renders
- * a definition from the metadata in every one of those cases.
+ * The server's own CREATE TABLE where one statement produces it, or null -
+ * a normal answer, not an error: the caller renders a definition from the
+ * metadata in every null case.
  */
 public final class NativeDdl {
     private final Connection connection;
-    /**
-     * Where a statement this class runs is published, so a cancel reaches it:
-     * the one catalog operation that runs SQL on the main connection.
-     */
+    /** Where a statement is published so a cancel reaches it: the one catalog operation running SQL on the main connection. */
     private final Running running;
-    /** What this process connected with, which names the engine. */
     private final String url;
 
     public NativeDdl(Connection connection, Running running, String url) {
@@ -30,20 +25,14 @@ public final class NativeDdl {
         this.url = url == null ? "" : url;
     }
 
-    /**
-     * A definition is one row out of the server's own catalog; a statement
-     * that has not produced it in this long is not going to.
-     */
+    /** A statement that has not produced one catalog row in this long is not going to. */
     private static final int DDL_TIMEOUT_SECONDS = 15;
 
     /**
-     * Which shape of "show me this table" the server has, if it has one.
-     *
-     * DatabaseMetaData has no concept of a check constraint, and none of a
-     * partition clause, a storage option, a collation or a trigger either - so
-     * a definition rendered from metadata alone is missing whatever the server
-     * would have said. Where the server will say it in one cheap statement,
-     * that text is the better answer.
+     * Which shape of "show me this table" the server has: DatabaseMetaData has
+     * no concept of a check constraint, a partition clause, a collation or a
+     * trigger, so the server's own text is the better answer where one cheap
+     * statement produces it.
      */
     private enum Native {
         /** SHOW CREATE TABLE, which answers with the name first and the DDL second. */
@@ -58,25 +47,13 @@ public final class NativeDdl {
         NONE
     }
 
-    /**
-     * The server's own CREATE TABLE, or null.
-     *
-     * Null is a normal answer and not an error: most engines have no such
-     * statement, a view is not a table on the ones that do, and a server that
-     * refuses is still a server the editor has to show a definition for. The
-     * caller renders one from the metadata in every one of those cases, so
-     * failing here would only take away the better answer when it was
-     * available and leave nothing in its place.
-     */
+    /** The server's own CREATE TABLE, or null - failing would only take away the better answer. */
     public Contracts.Ddl nativeDdl(String catalog, String schema, String table) {
         String ddl = null;
         try {
             ddl = nativeDdlText(catalog, schema, table);
         } catch (SQLException | RuntimeException refused) {
-            // A driver that throws for a missing table, an unsupported
-            // statement or a permission the connection does not have. The
-            // RuntimeException is not defensiveness for its own sake: several
-            // drivers wrap a protocol-level refusal in one.
+            // Several drivers wrap a protocol-level refusal in a RuntimeException.
             ddl = null;
         }
         return new Contracts.Ddl(ddl);
@@ -88,21 +65,17 @@ public final class NativeDdl {
         }
         try {
             return switch (nativeShape()) {
-                // MySQL and MariaDB report their databases as catalogs and
-                // have no schema layer, so the qualifier is whichever of the
-                // two the caller filled in.
+                // Either qualifier serves MySQL and MariaDB; see doc/internals.md#schema-and-tree.
                 case SHOW_CREATE_SECOND -> showCreate(
                         qualified('`', Metadata.orNull(schema) != null ? schema : catalog, table), 2);
-                // Trino's name has three parts, and the connection is pinned to
-                // one catalog - so naming it is a check as much as a qualifier.
+                // Trino's name has three parts, and the connection is pinned to one catalog.
                 case SHOW_CREATE_FIRST -> showCreate(qualified('"', catalog, schema, table), 1);
                 case SQLITE_MASTER -> sqliteSql(table);
                 case PG_CATALOG -> postgresDdl(schema, table);
                 case NONE -> null;
             };
         } finally {
-            // Cleared here rather than in each branch, so a branch that threw
-            // does not leave a closed statement where a cancel would find it.
+            // A branch that threw must not leave a closed statement where a cancel would find it.
             running.clear();
         }
     }
@@ -113,8 +86,7 @@ public final class NativeDdl {
             case "trino", "presto" -> Native.SHOW_CREATE_FIRST;
             case "sqlite" -> Native.SQLITE_MASTER;
             case "postgresql", "postgres" -> Native.PG_CATALOG;
-            // DuckDB, SQL Server and MongoDB, and anything else that turns up:
-            // none of them answers a table's definition in one statement.
+            // Engines with no one-statement DDL; see doc/internals.md#schema-and-tree.
             default -> Native.NONE;
         };
     }
@@ -124,12 +96,8 @@ public final class NativeDdl {
     }
 
     /**
-     * A name a statement can carry, with only the parts that were given.
-     *
-     * Quoting here rather than in Lua because this is the one place in this
-     * file that builds a statement out of a name: the closing character is
-     * doubled inside the name, which is what every one of these engines
-     * accepts, so a table called `order by` or one with a quote in it names
+     * A name a statement can carry: the closing quote is doubled inside the
+     * name, so a table called `order by` or one with a quote in it names
      * itself rather than ending the identifier early.
      */
     private static String qualified(char quote, String... parts) {
@@ -148,9 +116,8 @@ public final class NativeDdl {
     }
 
     /**
-     * A statement where a cancel can find it, with a ceiling on how long it
-     * may run: this runs on the main connection, which is the user's, so a
-     * statement that hangs here is the user's next query hanging too.
+     * A statement where a cancel can find it, with a ceiling: this runs on the
+     * main connection, so a hang here is the user's next query hanging too.
      */
     private void publish(Statement statement) {
         running.set(statement);
@@ -162,9 +129,7 @@ public final class NativeDdl {
     }
 
     /**
-     * @param column which column carries the text: MySQL answers with the
-     *               table's name first and its definition second, Trino with
-     *               the definition alone.
+     * @param column which column carries the text; see doc/internals.md#schema-and-tree.
      */
     private String showCreate(String name, int column) throws SQLException {
         try (Statement statement = connection.createStatement()) {
@@ -176,8 +141,7 @@ public final class NativeDdl {
     }
 
     private String sqliteSql(String table) throws SQLException {
-        // SQLite keeps the statement it was given, so this is not a rendering
-        // of the table but the text that created it, down to the comments.
+        // sqlite_master keeps the verbatim statement; see doc/internals.md#schema-and-tree.
         try (PreparedStatement statement =
                 connection.prepareStatement("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")) {
             publish(statement);
@@ -189,21 +153,14 @@ public final class NativeDdl {
     }
 
     /**
-     * PostgreSQL has no function that answers with a table's definition - what
-     * psql prints it assembles itself out of a dozen queries - so the two
-     * halves worth having are concatenated: the constraints, which is where a
-     * CHECK lives and the reason to ask the server at all, and the indexes
-     * that stand on their own, which pg_get_indexdef renders as statements.
-     *
-     * Each constraint is prefixed with its ALTER TABLE so the result is a
-     * script rather than a list of fragments, and the names are bound as
-     * parameters: a table name is the user's text, and the only thing worse
-     * than not having the DDL is pasting a name into a statement.
+     * PostgreSQL has no function that answers a table's definition, so the two
+     * halves worth having are concatenated: the constraints (where a CHECK
+     * lives) and the standalone indexes pg_get_indexdef renders. The names are
+     * bound as parameters: a table name is the user's text.
      */
     private String postgresDdl(String schema, String table) throws SQLException {
         String name = qualified('"', schema, table);
-        // An unnamed schema means the search path, and public is what that
-        // resolves to on every PostgreSQL this is likely to meet.
+        // An unnamed schema means the search path, which resolves to public in practice.
         String namespace = Metadata.orNull(schema) != null ? schema : "public";
         StringBuilder ddl = new StringBuilder();
 
@@ -234,13 +191,9 @@ public final class NativeDdl {
             }
         }
 
-        // Only the indexes that are not already above. A primary key or a
-        // unique constraint owns an index, and the index listings show that
-        // index like any other - so the constraint pass and this one would
-        // each emit a statement for the same relation, which in a buffer the
-        // user reads and yanks out of is not a duplicate but a mistake. The
-        // oid the exclusion needs is pg_index.indexrelid, which the pg_indexes
-        // view does not expose, so this asks the catalogs underneath it.
+        // Only the indexes not already above: a primary key or unique constraint owns an index
+        // the constraint pass already emitted, and the oid the exclusion needs is
+        // pg_index.indexrelid, which the pg_indexes view does not expose.
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT x.relname, pg_catalog.pg_get_indexdef(i.indexrelid)"
                         + " FROM pg_catalog.pg_index i"
@@ -264,9 +217,7 @@ public final class NativeDdl {
             }
         }
 
-        // A table whose constraints and indexes are all accounted for already
-        // has nothing here the metadata did not have, and an empty string
-        // would have the editor show a heading over nothing.
+        // An empty string would have the editor show a heading over nothing.
         return ddl.length() == 0 ? null : ddl.toString();
     }
 }

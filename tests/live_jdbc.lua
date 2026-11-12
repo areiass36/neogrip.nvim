@@ -22,11 +22,9 @@ for _, driver in ipairs(order) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
-		-- Some databases arrive without a fixture of their own.
 		support.ensure_fixture(connection)
 		if driver == "duckdb" then
-			-- The file has to be created by the same driver that reads it:
-			-- DuckDB refuses a file written by another version.
+			-- DuckDB refuses a file written by another driver version.
 			support.run(
 				connection,
 				"create or replace table torture as select * from "
@@ -69,8 +67,7 @@ for _, driver in ipairs(order) do
 				check("boolean", by_name.flag, true)
 				check("timestamptz is ISO 8601", by_name.ts, "2024-03-05T14:30:00Z")
 				check("emoji", by_name.emoji, "🚀🔥")
-				-- The old client mangled this into replacement characters;
-				-- JDBC knows the column is binary, so it arrives as hex.
+				-- The old client mangled bytea into replacement characters.
 				check("bytea is readable hex", by_name.b, "01020aff")
 				check("and a NULL bytea is still NULL", result.rows[2][9] == neogrip.NULL, true)
 			end
@@ -81,7 +78,6 @@ for _, driver in ipairs(order) do
 			end
 		end
 
-		-- The process is reused, which is the whole point of the daemon.
 		check("the connection is live", gripd.is_connected(connection.id), true)
 		local info = gripd.info(connection.id)
 		note(("server: %s"):format(tostring(info and info.product)))
@@ -95,7 +91,6 @@ for _, driver in ipairs(order) do
 		note(("a second query took %d ms"):format(elapsed))
 		check("the second query does not pay for a new process", elapsed < 3000, true)
 
-		-- An error is an error, with the server's own code.
 		local bad = driver == "mongodb" and "db.orders.find({ $badop: 1 })" or "select nosuchcol from torture"
 		local _, bad_err = support.run(connection, bad)
 		check("a bad query is reported", bad_err ~= nil, true)

@@ -1,24 +1,5 @@
--- A language server for SQL, running in this process.
---
--- There is no SQL language server worth installing here: the ones that exist
--- either want a connection of their own or answer about syntax only, and
--- neither can say what "users" means in this buffer. The thing that can is the
--- catalog :NGripIntrospect already wrote to disk, and a server whose every answer
--- is a table lookup in memory has no business being a process. vim.lsp.start
--- takes a function for `cmd` that returns an in-process client instead -- see
--- lua/servers/jdtls.lua for the same hook used the ordinary way -- which is
--- what this is.
---
--- One client per connection, named after it and shared by every buffer bound
--- to that connection: the catalog is per connection and nothing else here is
--- per buffer. Being in-process it keeps no copy of any document either; a
--- request names a uri, and the buffer behind it is always more current than a
--- synchronised copy would be.
---
--- What it does not advertise matters as much as what it does. Completion stays
--- with the cmp source in db/completion.lua, because two sources would offer
--- every table twice, and semantic tokens would paint at priority 125, over the
--- dialect layer db/dialect.lua draws at 110.
+-- An in-process SQL language server, one client per connection, answering from
+-- the catalog :NGripIntrospect wrote to disk.
 local neogrip = require("neogrip")
 local identifier = require("neogrip.sql.identifier")
 local schema = require("neogrip.schema")
@@ -28,40 +9,34 @@ local M = {}
 
 local KIND = vim.lsp.protocol.SymbolKind
 
+-- Completion is not advertised (the cmp source would offer every table twice),
+-- nor semantic tokens, which would paint over the dialect layer; see doc/internals.md#lsp.
 local CAPABILITIES = {
 	definitionProvider = true,
 	hoverProvider = true,
 	referencesProvider = true,
 	documentSymbolProvider = true,
 	workspaceSymbolProvider = true,
-	-- Byte columns on both sides of the protocol, which is what every other
-	-- module here already measures a line in. The alternative is converting
-	-- every position twice for no reader's benefit.
+	-- Byte columns on both sides, which every other module measures a line in.
 	positionEncoding = "utf-8",
 }
 
--- A column's line is a line of its table's rendered definition, so answering
--- for one means rendering that document, and rendering a table the sweep never
--- reached asks the server. A reply cannot wait on a round trip: whatever has
--- not arrived by here lands on the definition's first line instead.
+-- A reply cannot wait on a round trip: a definition that has not rendered by
+-- here lands on the document's first line instead.
 local RENDER_DEADLINE_MS = 250
 
--- Every table, view and column of a warehouse is not a list anyone reads, and
--- the client holds whatever comes back in memory.
+-- The client holds whatever comes back in memory.
 local SYMBOL_LIMIT = 200
 
--- A statement's name in the outline is its first line, and an outline is only
--- readable while its entries fit on one.
+-- An outline is only readable while its entries fit on one line.
 local NAME_LIMIT = 72
 
--- Enough foreign keys to see the shape of a table, in a window that is still
--- a hover and not a report.
+-- Enough foreign keys to see the shape, in a window that is still a hover.
 local KEY_LIMIT = 8
 
 local NOT_SWEPT = "Not introspected yet -- run `:NGripIntrospect`."
 
---- db/document.lua renders the db:// buffers these answers point at. It is
---- asked for rather than required, because every answer that needs it is
+--- Asked for rather than required: an answer that needs the document module is
 --- better left empty than raised into the LSP loop.
 local function documents()
 	local ok, module = pcall(require, "neogrip.document")
@@ -116,9 +91,8 @@ local function key_target(key, column_name)
 	return name
 end
 
---- What the sweep knows about a table: its snapshot entry, and -- when the
---- detail pass reached it -- the keys and indexes with it. A table the budget
---- skipped still has its columns, which is most of what a hover says.
+--- What the sweep knows about a table; one the detail budget skipped still has
+--- its columns, which is most of what a hover says.
 --- @return table|nil entry, table|nil details
 local function known(connection, target)
 	local entry, details
@@ -307,9 +281,8 @@ handlers["textDocument/hover"] = function(connection, params, answer)
 	})
 end
 
---- What references a table is what its foreign keys say: the tables it points
---- at and the tables that point back at it. Neither is in this buffer, so
---- every answer is a location in another db:// document.
+--- References are what a table's foreign keys say, so every answer is a
+--- location in another document.
 handlers["textDocument/references"] = function(connection, params, answer)
 	local document = documents()
 	local target = target_of(params)
@@ -341,11 +314,7 @@ handlers["textDocument/references"] = function(connection, params, answer)
 	answer(#locations > 0 and locations or nil)
 end
 
---- What the outline calls a statement.
----
---- A statement commonly opens with a comment about itself, and a list of
---- twenty comments is not an outline of a script, so the name is the first
---- line that is not one.
+--- The outline name of a statement: its first line that is not a comment.
 local function statement_name(text)
 	local fallback
 	for line in (text .. "\n"):gmatch("([^\n]*)\n") do
@@ -397,8 +366,7 @@ handlers["textDocument/documentSymbol"] = function(_, params, answer)
 	answer(#symbols > 0 and symbols or nil)
 end
 
---- Every table, view and column the sweep found, which is the search for an
---- object whose schema you cannot remember.
+--- Every table, view and column the sweep found.
 handlers["workspace/symbol"] = function(connection, params, answer)
 	local document = documents()
 	if not document then
@@ -422,8 +390,7 @@ handlers["workspace/symbol"] = function(connection, params, answer)
 		return document.table_uri(connection, catalog, item.schema, item.entry.name)
 	end
 
-	-- Tables before columns: a query matching both is far more likely to have
-	-- meant the table, and the cap is reached by the thousand on a warehouse.
+	-- Tables before columns: a query matching both more likely meant the table.
 	for _, item in ipairs(tables) do
 		if #symbols >= SYMBOL_LIMIT then
 			break
@@ -458,17 +425,12 @@ handlers["workspace/symbol"] = function(connection, params, answer)
 	answer(#symbols > 0 and symbols or nil)
 end
 
---- Answer a request, or answer nothing. Shutdown has nothing to answer with,
---- and a method that was never advertised is still asked about by some
---- clients: an empty answer is what the protocol has for "nothing here", while
---- an error would be read as a broken server.
+--- Answer a request, or answer nothing: an empty answer is the protocol's
+--- "nothing here", while an error reads as a broken server.
 local function dispatch(connection_id, method, params, answer)
 	if method == "initialize" then
-		-- A copy, not the table itself: nothing is serialised between an
-		-- in-process server and its client, so the client resolves the
-		-- capabilities it was handed in place -- it writes a textDocumentSync
-		-- default into them -- and handing it the module's own constant would
-		-- leave every later client reading what the first one was given.
+		-- A copy: the in-process client resolves capabilities in place, and
+		-- the module's own constant would carry one client's edits to the next.
 		return answer({ capabilities = vim.deepcopy(CAPABILITIES), serverInfo = { name = "neogrip" } })
 	end
 	if not handlers[method] then
@@ -482,8 +444,7 @@ local function dispatch(connection_id, method, params, answer)
 end
 
 --- A reply has to arrive exactly once: the client counts a request as pending
---- until its callback runs, and runs the handler on whatever the first call
---- hands over.
+--- until its callback runs.
 local function once(callback)
 	local answered = false
 	return function(result)
@@ -507,8 +468,7 @@ local function in_process(connection_id)
 				return
 			end
 			closing = true
-			-- Nothing else retires a client whose process never reported
-			-- having gone away, and this one has no process to report it.
+			-- Nothing else retires a client with no process to report an exit.
 			vim.schedule(function()
 				if dispatchers and dispatchers.on_exit then
 					pcall(dispatchers.on_exit, 0, 0)
@@ -526,15 +486,12 @@ local function in_process(connection_id)
 					end
 					callback(nil, result, id)
 				end)
-				-- Scheduled without exception, including for an answer this
-				-- process already has: a reply handed back inside the call that
-				-- asked for it runs the client's handler underneath itself.
+				-- Always scheduled: a reply handed back inside the asking call
+				-- would run the client's handler underneath itself.
 				vim.schedule(function()
 					local ok, err = pcall(dispatch, connection_id, method, params, answer)
 					if not ok then
-						-- An unanswered request is a client that waits for
-						-- ever, so the failure is reported and the request is
-						-- closed with nothing.
+						-- An unanswered request is a client that waits forever.
 						neogrip.notify(("%s failed: %s"):format(method, err), vim.log.levels.DEBUG)
 						answer(nil)
 					end
@@ -559,8 +516,7 @@ local function client_name(connection_id)
 	return "neogrip:" .. tostring(connection_id)
 end
 
---- Start the server for this buffer's database, or attach the one already
---- running for it.
+--- Start the server for this buffer's database, or attach the one already running.
 --- @return integer|nil client_id
 function M.start(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
@@ -570,8 +526,7 @@ function M.start(bufnr)
 	end
 	local name = client_name(connection.id)
 
-	-- A buffer pointed at another database must not keep the server that
-	-- answers from the old one's catalog.
+	-- A buffer pointed at another database must not keep the old catalog's server.
 	for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
 		if vim.startswith(client.name, "neogrip:") and client.name ~= name then
 			pcall(vim.lsp.buf_detach_client, bufnr, client.id)
@@ -581,8 +536,7 @@ function M.start(bufnr)
 	local ok, client_id = pcall(vim.lsp.start, {
 		name = name,
 		cmd = in_process(connection.id),
-		-- No root directory: what this server reads is a catalog, not a tree
-		-- of files, so there is nothing for a workspace folder to mean.
+		-- No root directory: this server reads a catalog, not a tree of files.
 	}, {
 		bufnr = bufnr,
 		reuse_client = function(client)
@@ -601,9 +555,8 @@ function M.stop(connection_id)
 	end
 end
 
---- The uri an answer named, which survives the trip through a quickfix item
---- as the item's filename: vim.uri_to_fname leaves a uri it cannot turn into
---- a path alone.
+--- The uri an answer named, surviving the quickfix trip as the item's filename:
+--- vim.uri_to_fname leaves a uri it cannot turn into a path alone.
 local function uri_of(item)
 	local location = item.user_data
 	local uri = location and (location.uri or location.targetUri) or item.filename
@@ -622,9 +575,8 @@ local function open(item)
 	elseif not pcall(document.open, uri) then
 		return
 	end
-	-- A document a round trip away is still a placeholder at this point, and
-	-- the line the server named is not in it yet; landing on its first line is
-	-- what that costs.
+	-- A document a round trip away is still a placeholder here, so the cursor
+	-- may land on its first line.
 	pcall(vim.api.nvim_win_set_cursor, 0, {
 		math.max(1, item.lnum or 1),
 		math.max(0, (item.col or 1) - 1),
@@ -632,11 +584,9 @@ local function open(item)
 	pcall(vim.cmd, "normal! zz")
 end
 
---- One result is opened, several go to the quickfix list.
----
---- gd and gr are mapped globally to the Telescope pickers, whose previewer
---- wants a file on disk and would show a db:// result as an empty window. So
---- the answers from this server are handled here instead.
+--- One result is opened, several go to the quickfix list; the Telescope
+--- previewer would show a neogrip:// result as an empty window, so answers
+--- from this server are handled here instead.
 local function on_list(list)
 	local items = list.items or {}
 	if #items == 0 then
@@ -645,23 +595,18 @@ local function on_list(list)
 	if #items == 1 then
 		return open(items[1])
 	end
-	-- Walked from the quickfix list, where opening an entry is a read of its
-	-- name and db/document.lua answers that itself.
+	-- Opening a quickfix entry is a read of its name, which document.lua answers.
 	vim.fn.setqflist({}, " ", { title = list.title or "neogrip", items = items })
 	vim.cmd("botright copen")
 end
 
---- Jump to the database object under the cursor, routed through the list
---- handler that knows how to open neogrip:// documents. Public because the
---- plugin maps no keys (ADR-0017): `vim.keymap.set("n", "gd", lsp.definition)`
---- is the user's line to write. K and gO need nothing - Neovim maps them on
---- attach for a server that advertises hover and document symbols.
+--- Jump to the database object under the cursor. K and gO need nothing -
+--- Neovim maps them on attach.
 function M.definition()
 	vim.lsp.buf.definition({ on_list = on_list })
 end
 
---- The foreign-key neighbours of the object under the cursor, as a quickfix
---- list.
+--- The foreign-key neighbours of the object under the cursor, as a quickfix list.
 function M.references()
 	vim.lsp.buf.references(nil, { on_list = on_list })
 end

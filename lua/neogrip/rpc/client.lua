@@ -1,10 +1,5 @@
--- The JSON-RPC client: spawns a process, frames one JSON object per line over
--- its stdio, correlates responses to callbacks, and dispatches the messages
--- the process starts on its own (ADR-0002).
---
--- This module is deliberately ignorant of databases. It never logs a frame:
--- the connect request carries secrets (ADR-0009), and the cheapest way to
--- never log those is to never log any payload at all.
+-- The JSON-RPC client. It never logs a frame: any payload can carry a secret,
+-- and never logging anything is the cheapest way to never log one.
 local protocol = require("neogrip.rpc.protocol")
 
 local M = {}
@@ -22,8 +17,7 @@ end
 
 function Client:_dispatch(message)
 	if message.method ~= nil and message.id ~= nil then
-		-- A request from the process. respond() may be called later and from
-		-- any callback; it carries the id so late answers still correlate.
+		-- respond() carries the id, so a late answer from any callback still correlates.
 		local respond = function(result, err)
 			if err then
 				self:_write({ jsonrpc = "2.0", id = message.id, error = err })
@@ -68,8 +62,7 @@ function Client:_consume(data)
 		end
 		local line = self.buffer:sub(1, newline - 1):gsub("\r$", "")
 		self.buffer = self.buffer:sub(newline + 1)
-		-- Anything that is not a JSON object is a driver banner on the wrong
-		-- stream; the protocol says skip it rather than die on it.
+		-- Anything that is not JSON is a driver banner on the wrong stream; the protocol says skip it.
 		local message = decoded(line)
 		if message then
 			self:_dispatch(message)
@@ -78,8 +71,7 @@ function Client:_consume(data)
 end
 
 function Client:_fail_all(err)
-	-- Copy the keys rather than iterating pending directly: a callback may
-	-- issue a new request while we drain.
+	-- Copy the keys: a callback may issue a new request while we drain.
 	local ids = vim.tbl_keys(self.pending)
 	for _, id in ipairs(ids) do
 		local callback = self.pending[id]
@@ -106,8 +98,8 @@ function Client:_write(frame)
 	return ok
 end
 
---- Send a request. callback(result, err) runs exactly once, on the main loop;
---- err is a JSON-RPC error object, synthetic when the process is gone.
+--- Send a request; callback(result, err) runs exactly once on the main loop, err synthetic
+--- when the process is gone.
 function Client:request(method, params, callback)
 	if self.closed or self.exited then
 		vim.schedule(function()
@@ -129,8 +121,7 @@ function Client:notify(method, params)
 	self:_write({ jsonrpc = "2.0", method = method, params = params })
 end
 
---- Close the process's stdin. EOF is the shutdown signal (ADR-0003); callers
---- that need a backstop kill arrange it themselves.
+--- Close stdin: EOF is the shutdown signal (ADR-0003); a backstop kill is the caller's.
 function Client:close()
 	if self.closed then
 		return
@@ -151,9 +142,8 @@ function Client:stderr()
 	return self.stderr_tail or ""
 end
 
---- Spawn cmd and speak the protocol to it. handlers: on_notification(method,
---- params), on_request(method, params, respond), on_exit(code) - all optional,
---- all called on the main loop.
+--- Spawn cmd and speak the protocol to it. handlers: on_notification, on_request, on_exit -
+--- all optional, all called on the main loop.
 function M.start(cmd, handlers)
 	local client = setmetatable({
 		sequence = 0,

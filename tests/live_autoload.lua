@@ -1,8 +1,4 @@
--- The grid loading as the cursor goes down, against a real cursor on a real
--- server (ADR-0040): every row arriving exactly once and in order, the window
--- not jumping when a batch lands, and the idle sweep still closing a result
--- nobody reads - which with no cap on open results is the only automatic
--- reclamation left (ADR-0041).
+-- The grid loading as the cursor goes down, against a real server, plus the idle sweep.
 local support = require("tests.support")
 local check, note = support.check, support.note
 
@@ -29,8 +25,7 @@ local connections_module = require("neogrip.connections")
 
 connections_module.register(pg)
 
--- Past Cursor.WINDOW twice, so the refill gripd does every thousand rows has
--- to stay invisible to a reader scrolling through them (ADR-0031).
+-- Past Cursor.WINDOW twice, so the thousand-row refill must stay invisible (ADR-0031).
 local TOTAL = 2050
 support.run(pg, "drop table if exists autoload_probe", { mode = "exec" })
 support.run(
@@ -59,13 +54,8 @@ local state = grid.state(gb)
 check("the first batch is on screen", state and #state.rows, 10)
 check("and the result stays open", state.result.done, false)
 
--- A real window and a real cursor, with the event delivered by hand.
---
--- Measured here: nvim_win_set_cursor moves the cursor but CursorMoved is not
--- emitted under --headless -l, so waiting for the autocommand to fire on its
--- own waits forever. Firing it explicitly still exercises everything this
--- suite is about - the callback, sync_from_cursor, and maybe_load_more reading
--- the window it was given rather than a line a test made up.
+-- The event is delivered by hand: CursorMoved is not emitted under --headless -l,
+-- so waiting for the autocommand to fire on its own waits forever.
 local winid = vim.fn.bufwinid(gb)
 check("the grid has a window to scroll in", winid ~= -1, true)
 if winid ~= -1 then
@@ -98,8 +88,6 @@ if winid ~= -1 then
 			break
 		end
 	end
-	-- Each row once and in order: a batch appended at the wrong offset, or a
-	-- refill that resumed in the wrong place, shows up here and nowhere else.
 	check("every row arrived once, in order", ordered, true)
 	if not ordered then
 		note(("first wrong row: %s"):format(tostring(missing)))
@@ -111,8 +99,7 @@ if winid ~= -1 then
 	check("the footer counts them", lines[#lines]:find("2050 rows", 1, true) ~= nil, true)
 	check("and stops promising more", lines[#lines]:find("(more)", 1, true), nil)
 
-	-- The cursor must not be moved by a batch arriving, which is the regression
-	-- the whole change is about: goto_page used to put it back on row one.
+	-- The regression guarded: goto_page used to put the cursor back on row one.
 	local held = #grid.state(gb).rows
 	local resting = math.max(held - 3, 1) + 2
 	vim.api.nvim_win_set_cursor(winid, { resting, 0 })
@@ -129,8 +116,7 @@ config.setup({ auto_load_rows = saved })
 
 support.describe("live/autoload: the idle sweep still closes what nobody reads")
 do
-	-- With no cap on open results (ADR-0041) this sweep is the only automatic
-	-- reclamation there is, and it had no live coverage at all.
+	-- The sweep is the only automatic reclamation (ADR-0041) and had no live coverage.
 	local idle = vim.tbl_extend("force", pg, { id = "test-pg-idle" })
 	connections_module.register(idle)
 	config.setup({ cursor_idle_seconds = 1 })

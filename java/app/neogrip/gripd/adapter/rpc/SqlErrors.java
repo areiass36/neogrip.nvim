@@ -8,14 +8,10 @@ import neogrip.jsonrpc.JsonRpc;
 import neogrip.jsonrpc.RpcException;
 
 /**
- * An error the editor can point at.
- *
- * JDBC gives more than a command line client does: a SQLState, the vendor's
- * own code, and - for PostgreSQL - the character position of the problem.
- * Those ride in the JSON-RPC error's data object (doc/protocol.md); this is
- * the exception mapper the server is configured with. The position is read
- * reflectively because reading it properly would mean compiling against every
- * driver.
+ * An error the editor can point at: the SQLState, vendor code and PostgreSQL's
+ * character position ride in the JSON-RPC error's data object
+ * (doc/protocol.md); the position is read reflectively because reading it
+ * properly would mean compiling against every driver.
  */
 public final class SqlErrors {
     private SqlErrors() {}
@@ -28,8 +24,7 @@ public final class SqlErrors {
         if (failure.getCause() instanceof SQLException sql) {
             return toRpcException(sql);
         }
-        // A file the export could not write, say: nothing a SQLState explains,
-        // and the type plus the message is all there is to say.
+        // A file the export could not write, say: nothing a SQLState explains.
         Throwable cause = failure.getCause();
         return new RpcException(
                 JsonRpc.INTERNAL_ERROR, cause.getClass().getSimpleName() + ": " + cause.getMessage());
@@ -52,7 +47,7 @@ public final class SqlErrors {
         return new RpcException(ErrorCodes.SQL_ERROR, message.trim(), data);
     }
 
-    /** PostgreSQL reports the offending character; nothing else does. */
+    /** Only PostgreSQL reports this; see doc/internals.md#jdbc-drivers. */
     private static Integer position(SQLException e) {
         try {
             Object serverError = e.getClass().getMethod("getServerErrorMessage").invoke(e);
@@ -69,7 +64,7 @@ public final class SqlErrors {
         return null;
     }
 
-    /** SQL Server reports a line within the batch. */
+    /** SQL Server's line within the batch; see doc/internals.md#jdbc-drivers. */
     private static Integer line(SQLException e) {
         try {
             Object value = e.getClass().getMethod("getLineNumber").invoke(e);
@@ -79,7 +74,7 @@ public final class SqlErrors {
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             // Not a SQL Server error.
         }
-        // MySQL puts it in the text and nowhere else.
+        // MySQL spells it only in the text; see doc/internals.md#jdbc-drivers.
         String message = e.getMessage();
         if (message != null) {
             java.util.regex.Matcher matcher =

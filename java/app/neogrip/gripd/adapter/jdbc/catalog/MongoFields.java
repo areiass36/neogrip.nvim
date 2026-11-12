@@ -9,10 +9,8 @@ import neogrip.gripd.adapter.jdbc.Drivers;
 import neogrip.gripd.contract.Contracts;
 
 /**
- * A collection has no columns, so the fields of a sample stand in for them. A
- * field that holds different types in different documents is reported once per
- * type, which is the honest answer and the thing worth knowing before writing
- * a query against it.
+ * A collection has no columns, so the fields of a sample stand in for them; a
+ * field that holds different types in different documents is reported once per type.
  */
 public final class MongoFields {
     private MongoFields() {}
@@ -29,38 +27,21 @@ public final class MongoFields {
     static final int WINDOW = 50;
 
     /**
-     * A collection has no columns, so the fields of a sample stand in for
-     * them. A field that holds different types in different documents is
-     * reported once per type, which is the honest answer and the thing worth
-     * knowing before writing a query against it.
-     *
-     * Both ends are read, fifty documents each (ADR-0038). The first hundred
-     * alone biased the answer toward whatever was inserted first, so a field
-     * added to the collection last year was invisible while a field dropped
-     * last year was still reported. A true random sample is available - the
-     * wrapper accepts {@code aggregate([{$sample:{size:n}}])}, which was
-     * measured working - and was deliberately not used: a field list that
-     * differs between two calls is worse in a tree than one biased toward the
-     * two ends, because the user sees nodes appear and vanish without touching
-     * anything.
+     * Both ends are read (ADR-0038) and the sampling is deterministic; see
+     * doc/internals.md#schema-and-tree.
      */
     static Contracts.Rows<Contracts.MongoField> sampleFields(Connection connection, String collection) throws SQLException {
         java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
         java.util.LinkedHashMap<String, Integer> counts = new java.util.LinkedHashMap<>();
 
-        // The oldest documents, then the newest. A collection smaller than one
-        // window is answered twice by the two scripts, so documents are counted
-        // by _id and the second pass skips what the first already saw: without
-        // that, a two-document collection reported every field as appearing in
-        // four documents.
+        // The second pass skips _ids the first saw; see doc/internals.md#schema-and-tree.
         String head = "db." + collection + ".find({}).limit(" + WINDOW + ")";
         String tail = "db." + collection + ".find({}).sort({_id: -1}).limit(" + WINDOW + ")";
         java.util.Set<Object> seen = new java.util.LinkedHashSet<>();
         for (String script : List.of(head, tail)) {
             readInto(connection, script, fields, counts, seen);
         }
-        // How many documents the answer was actually worked out from, which is
-        // what makes "in 1 of 100" a ratio a reader can trust.
+        // The documents actually sampled, which makes "in 1 of 100" a ratio a reader can trust.
         int sampleSize = seen.size();
 
         List<Contracts.MongoField> list = new ArrayList<>(fields.size());
@@ -78,11 +59,9 @@ public final class MongoFields {
     }
 
     /**
-     * One window of documents, folded into the field map.
-     *
-     * A refusal is swallowed: the tail is an improvement on the head and not a
-     * replacement for it, so a wrapper that will not sort still answers with
-     * the fields of the documents it would list (ADR-0029).
+     * One window of documents folded into the field map; a refusal is
+     * swallowed because the tail is an improvement on the head, not a
+     * replacement for it (ADR-0029).
      */
     private static void readInto(
             Connection connection,
@@ -98,9 +77,7 @@ public final class MongoFields {
                     if (!(value instanceof java.util.Map<?, ?> document)) {
                         continue;
                     }
-                    // Every Mongo document has an _id; one without is counted
-                    // rather than dropped, because a field list is still a
-                    // better answer than nothing.
+                    // A document without an _id is counted rather than dropped.
                     Object id = document.get("_id");
                     if (id != null && !seen.add(id)) {
                         continue;
@@ -118,15 +95,13 @@ public final class MongoFields {
                 }
             }
         } catch (SQLException | RuntimeException refused) {
-            // Said above: one window short is still an answer.
+            // One window short is still an answer.
         }
     }
 
     /**
      * Collection names through the wrapper's own script, because its JDBC
-     * getTables is unreliable here: it trips TimSort's contract check, and
-     * past that throws NumberFormatException parsing a null. db.getCollectionNames()
-     * is the statement the doctor already leans on, and it answers plainly.
+     * getTables fails; see doc/internals.md#gripd-process.
      */
     static List<String> collectionNames(Connection connection) throws SQLException {
         List<String> names = new ArrayList<>();

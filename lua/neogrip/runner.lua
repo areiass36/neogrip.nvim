@@ -1,14 +1,4 @@
--- Running one statement, through gripd that owns the connection.
---
--- The process is started on first use and kept (lua/neogrip/gripd.lua), so
--- this layer only has to queue requests, apply timeouts and translate the
--- answer. The heavy lifting - paging without rewriting SQL, converting types,
--- telling NULL from an empty string - is done on the Java side, where JDBC
--- reports the type of every column.
---
--- A query names its result with a hash of its own (ADR-0031), which is what
--- lets the next page be a continuation of the same cursor rather than the
--- statement run again, and what lets a cancel address one result.
+-- Queue requests per connection, apply timeouts, translate gripd's answers.
 local neogrip = require("neogrip")
 local errors = require("neogrip.errors")
 local gripd = require("neogrip.gripd")
@@ -19,27 +9,22 @@ local M = {}
 
 local queues = {}
 local running = {}
--- Live handles by the name of the result they are about, so a frame gripd sends
--- on its own can find the request waiting on it (ADR-0042). Only named results
--- are in here, which is the same set that reports.
+-- Live handles by result name, so a frame gripd sends on its own can find the
+-- request waiting on it (ADR-0042).
 local by_hash = {}
 local sequence = 0
--- Whether a connection's session has an explicit transaction open, from the
--- gripd's own answer to an intercepted BEGIN/COMMIT/ROLLBACK (ADR-0013).
+-- Explicit-transaction state per connection, from gripd's answer to an
+-- intercepted BEGIN/COMMIT/ROLLBACK (ADR-0013).
 local transactions = {}
 
---- The name a result is known by, minted here and never interpreted by the
---- gripd. Random rather than sequential because it is one call either way and
---- nothing should be tempted to do arithmetic on it; a suite that needs a
---- predictable one replaces this function.
+--- Mint the name a result is known by; a suite needing a predictable one replaces this function.
 function M.hash()
 	return (vim.uv.random(6):gsub(".", function(byte)
 		return ("%02x"):format(byte:byte())
 	end))
 end
 
---- Say where a request has got to. Swallowed when nobody asked, which is every
---- caller but the one that opened a window for it.
+--- Report where a request has got to; swallowed when no caller asked.
 local function phase(handle, name)
 	handle.phase = name
 	local sink = handle.request.on_progress
@@ -54,8 +39,7 @@ local function finish(handle, result, err)
 	end
 	handle.done = true
 	running[handle.id] = nil
-	-- Guarded rather than cleared outright: a continuation reuses the hash, so
-	-- an unguarded clear here would evict a handle that is still live.
+	-- A continuation reuses the hash, so an unguarded clear would evict a live handle.
 	if handle.hash and by_hash[handle.hash] == handle then
 		by_hash[handle.hash] = nil
 	end
@@ -75,28 +59,23 @@ local function translate(handle, response)
 		transactions[request.connection.id] = response.transaction == true
 	end
 
-	-- Gripd echoes the name of the result in every batch. A mismatch
-	-- means rows of one result would land in another result's grid, which
-	-- nothing downstream could notice, so it fails loudly here instead.
+	-- A hash mismatch would land one result's rows in another's grid with
+	-- nothing downstream able to notice, so it fails loudly here.
 	if handle.hash and type(response.hash) == "string" and response.hash ~= handle.hash then
 		return finish(handle, nil, {
 			message = ("gripd answered for result %s, not %s"):format(response.hash, handle.hash),
 		})
 	end
 
-	-- A continuation carries no columns: the shape was described when the
-	-- result was opened. The exception is a document result, whose columns are
-	-- discovered as rows are read, so a later batch may bring a longer list.
+	-- A continuation carries no columns, except a document result whose
+	-- columns grow as rows are read.
 	local columns, types, tables, schemas = nil, nil, nil, nil
 	if type(response.columns) == "table" then
 		columns, types, tables, schemas = {}, {}, {}, {}
 		for index, column in ipairs(response.columns) do
 			columns[index] = column.name
 			types[index] = column.type
-			-- Where the column came from, when the driver will say. A column
-			-- computed by an expression, or one coming out of a join of
-			-- subqueries, has no table behind it: the field is then absent and
-			-- stays absent here, so a caller only has to test for nil.
+			-- Absent when the driver cannot name a source table; stays nil here.
 			tables[index] = column.table
 			schemas[index] = column.schema
 		end
@@ -105,12 +84,11 @@ local function translate(handle, response)
 	local rows = {}
 	for _, source in ipairs(type(response.rows) == "table" and response.rows or {}) do
 		local row = {}
-		-- JSON null decodes to vim.NIL rather than nil, so the row gripd
-		-- sent has its own length even when its last cells are empty.
+		-- JSON null decodes to vim.NIL, so the source row keeps its length
+		-- even with trailing nulls.
 		for index = 1, (columns and #columns or #source) do
 			local value = source[index]
-			-- vim.json.decode turns JSON null into vim.NIL; the grid wants the
-			-- sentinel, which is distinct from the empty string.
+			-- The grid wants the NULL sentinel, distinct from the empty string.
 			row[index] = (value == nil or value == vim.NIL) and neogrip.NULL or value
 		end
 		rows[#rows + 1] = row
@@ -122,15 +100,14 @@ local function translate(handle, response)
 		column_tables = tables,
 		column_schemas = schemas,
 		rows = rows,
-		-- Absent means there is nothing to continue, which is the honest answer
-		-- for an exec, an export and a result that fitted in one batch.
+		-- Absent means nothing to continue: an exec, an export, a one-batch result.
 		done = response.done ~= false,
 		hash = handle.hash,
 		elapsed_ms = response.elapsedMs,
 		update_count = response.updateCount,
 		transaction = response.transaction,
-		-- An export answers with how many rows it wrote, under the same name a
-		-- query uses for the rows themselves; the type tells them apart.
+		-- An export reports its row count under the same name a query uses for
+		-- the rows themselves; the type tells them apart.
 		rows_written = type(response.rows) == "number" and response.rows or nil,
 		connection = request.connection,
 		sql = request.sql,
@@ -158,8 +135,7 @@ local function dispatch(handle)
 			timeoutSeconds = timeout_seconds,
 		}
 	elseif request.mode == "next" then
-		-- No sql is what makes this a continuation of the named result rather
-		-- than a new statement (ADR-0031).
+		-- No sql makes this a continuation of the named result (ADR-0031).
 		method = "query"
 		params = { hash = handle.hash, limit = request.limit or 0 }
 	else
@@ -181,17 +157,14 @@ local function dispatch(handle)
 		end
 		translate(handle, result)
 	end)
-	-- Guarded because gripd.request answers synchronously when the process is
-	-- gone: without this, a request that already failed would report "sent"
-	-- afterwards and talk over the error the caller just drew.
+	-- gripd.request answers synchronously when the process is gone; a request
+	-- that already failed must not report "sent" afterwards.
 	if not handle.done then
 		phase(handle, "sent")
 	end
 
-	-- The server-side timeout is the real one; this only catches a process
-	-- that stopped answering. A timeout of 0 means "run as long as it takes"
-	-- (cancel by hand with :NGripCancel), so the watchdog does not arm either -
-	-- otherwise 0 would disable the server timeout but still kill at 10s.
+	-- The watchdog only catches a process that stopped answering, and a timeout
+	-- of 0 must never arm it; see doc/internals.md#runner-and-execute.
 	local timeout_ms = request.timeout_ms or config.get().timeout_ms
 	if timeout_ms > 0 then
 		handle.timer = vim.defer_fn(function()
@@ -234,7 +207,7 @@ local function enqueue(handle)
 		table.insert(queues[id].waiting, index, handle)
 	end
 	-- Said before the pump, which may dispatch this very handle and overwrite
-	-- it with "sent"; the order is what makes a request that waits say so.
+	-- the phase with "sent".
 	if queues[id].active then
 		phase(handle, "queued")
 	end
@@ -252,16 +225,12 @@ function M.run(request, callback)
 		request = request,
 		callback = callback,
 	}
-	-- A query names the result it is about to open; a continuation is given the
-	-- name of the result it continues. Everything else has no result to name -
-	-- including a background query, which is a sample or a probe that nobody
-	-- will ever page, and naming it would leave gripd holding a cursor
-	-- for a result no one can ask about.
+	-- A background query is never paged; naming it would leave gripd holding a
+	-- cursor nobody can ask about.
 	if request.mode == "next" then
 		handle.hash = request.hash
 	elseif (request.mode == nil or request.mode == "query") and not request.background then
-		-- A caller may bring its own name; nothing in the plugin does, but the
-		-- suites need to be able to reuse one on purpose.
+		-- Nothing in the plugin brings its own name, but the suites reuse one on purpose.
 		handle.hash = request.hash or M.hash()
 	end
 	running[handle.id] = handle
@@ -298,12 +267,9 @@ function M.run(request, callback)
 	return handle
 end
 
---- What gripd said about one result on its own (ADR-0042).
----
---- Ignoring an unknown name is the normal case, not a guard against a bug: the
---- catalog tree and the dialect probes open named results too, and nothing is
---- listening for theirs. The connection is checked because a hash is minted per
---- client and two processes could mint the same one.
+--- Route a frame gripd sent on its own to the handle waiting on it (ADR-0042).
+--- An unknown name is normal (probes open named results too); the connection
+--- check covers two clients minting the same hash.
 function M.progress(connection, params)
 	local handle = by_hash[params.hash]
 	if not handle or handle.done or handle.connection_id ~= connection.id then
@@ -312,9 +278,8 @@ function M.progress(connection, params)
 	phase(handle, params.phase)
 end
 
---- Ask the server to stop. Unlike killing a client process, this reaches the
---- database: JDBC's Statement.cancel sends a real cancellation request. With a
---- hash it also closes that result, which is the same intent (ADR-0031).
+--- Ask the server to stop: JDBC's Statement.cancel reaches the database, and
+--- a hash also closes that result (ADR-0031).
 function M.cancel(handle)
 	if not handle or handle.done then
 		return false
@@ -328,9 +293,7 @@ function M.cancel(handle)
 	return true
 end
 
---- Let go of an open result nobody is looking at any more. Fire and forget: the
---- gripd closes it on its own once idle anyway, so a lost answer costs
---- nothing and nothing waits for this.
+--- Release an open result, fire and forget: gripd closes an idle one anyway.
 function M.release(connection, hash)
 	if not hash or not gripd.is_connected(connection.id) then
 		return
@@ -349,8 +312,7 @@ function M.cancel_all()
 	end
 end
 
---- The statusline's [TX] flag: an explicit transaction is open on this
---- connection's session. Dropped with the process, because gripd rolls
+--- The statusline's [TX] flag; dropped with the process, because gripd rolls
 --- back on the way out (ADR-0013).
 function M.in_transaction(connection_id)
 	return transactions[connection_id] == true and gripd.is_connected(connection_id)

@@ -1,15 +1,6 @@
--- The introspected database, on disk.
---
--- Deliberately not the cache in neogrip/schema/init.lua, which answers one question
--- at a time and forgets after an hour: this holds a whole catalog -- every
--- schema, table, column, key and index of it -- and never expires on its own.
--- It is replaced when :NGripIntrospect is run and at no other time, because the
--- point of it is that walking the tree costs nothing after the first time,
--- including across restarts and including with the database unreachable.
---
--- The file is written by the Java side, which sweeps the catalog on several
--- connections at once; this module hands out the path to write to and reads it
--- back. So nothing the size of a catalog crosses the request protocol.
+-- A whole swept catalog on disk, replaced only by :NGripIntrospect and never expiring on its
+-- own, so walking the tree costs nothing across restarts. The Java side writes the file;
+-- nothing the size of a catalog crosses the request protocol.
 local neogrip = require("neogrip")
 
 local M = {}
@@ -22,9 +13,8 @@ local M = {}
 --- @field partial boolean|nil true when the detail pass ran out of its budget
 --- @field schemas table[] { name, tables }
 
--- Decoded snapshots, keyed the way the files are. A catalog is megabytes of
--- JSON; decoding it once a session is the difference between a picker that
--- opens instantly and one that stutters on every keystroke.
+-- A catalog is megabytes of JSON; decoding it once a session is the difference between an
+-- instant picker and one that stutters on every keystroke.
 local loaded = {}
 
 local function key_of(connection, catalog)
@@ -37,10 +27,7 @@ local function dir()
 	return path
 end
 
---- Where this connection's catalog is kept.
----
---- Two hashes rather than one of the pair, so every catalog taken for a
---- connection can still be found by prefix when the lot is dropped.
+--- Two hashes rather than one of the pair, so a connection's catalogs can be found by prefix when dropped.
 function M.path(connection, catalog)
 	return ("%s/%s-%s.json"):format(
 		dir(),
@@ -49,8 +36,7 @@ function M.path(connection, catalog)
 	)
 end
 
---- An index over the schemas, built once per decode. Without it every preview
---- keystroke walks every table in the database.
+--- An index built once per decode; without it every preview keystroke walks every table.
 local function indexed(snapshot)
 	local by_schema = {}
 	local counts = { schemas = 0, tables = 0, columns = 0, details = 0 }
@@ -71,11 +57,7 @@ local function indexed(snapshot)
 	return snapshot
 end
 
---- A snapshot document from disk, or nil when there is nothing readable.
----
---- A half-written or hand-edited file is not worth a traceback: every caller
---- falls back to asking the server, which is what happened before any of this
---- existed.
+--- nil for a half-written or hand-edited file: every caller falls back to asking the server.
 --- @return table|nil
 local function read_snapshot(path)
 	if vim.fn.filereadable(path) ~= 1 then
@@ -100,9 +82,8 @@ function M.load(connection, catalog)
 	local key = key_of(connection, catalog)
 	local cached = loaded[key]
 	if cached ~= nil then
-		-- false is "looked, nothing there": no snapshot is the normal state
-		-- before the first introspect, and it must not send a caller back to
-		-- the filesystem on every keystroke to rediscover that.
+		-- false is "looked, nothing there": the normal pre-introspect state must not send a
+		-- caller back to the filesystem on every keystroke.
 		return cached or nil
 	end
 
@@ -121,8 +102,7 @@ function M.reload(connection, catalog)
 	return M.load(connection, catalog)
 end
 
---- Write one. Only the tests need this -- the Java side writes the real thing
---- straight to M.path -- but a snapshot is a plain document either way.
+--- Only the tests need this; the Java side writes the real thing straight to M.path.
 function M.save(connection, catalog, snapshot)
 	snapshot.at = snapshot.at or os.time()
 	snapshot.catalog = snapshot.catalog or catalog
@@ -130,15 +110,9 @@ function M.save(connection, catalog, snapshot)
 	return pcall(vim.fn.writefile, { vim.json.encode(snapshot) }, M.path(connection, catalog))
 end
 
---- Fold a snapshot of one schema into the one already taken (ADR-0038).
----
---- A manual re-introspection of a single namespace writes its own file, which
---- is merged here rather than replacing the catalog: re-reading one schema
---- after a migration must not throw away the other forty. With nothing taken
---- yet, the part becomes the whole of what is known.
----
---- The index is dropped before writing because it is derived - it is rebuilt on
---- the next load, and persisting it would double the file.
+--- Fold a one-schema snapshot into the catalog (ADR-0038): re-reading one schema after a
+--- migration must not throw away the other forty. The derived index is dropped before
+--- writing; persisting it would double the file.
 --- @return boolean, string|nil
 function M.merge_from(connection, catalog, path, schema_name)
 	local partial = read_snapshot(path)
@@ -165,8 +139,7 @@ function M.merge_from(connection, catalog, path, schema_name)
 			kept[#kept + 1] = schema
 		end
 	end
-	-- A schema the sweep found nothing for is dropped rather than left stale:
-	-- the name matching nothing is how a dropped schema reports itself.
+	-- A schema the sweep found nothing for is dropped: that is how a dropped schema reports itself.
 	if body then
 		kept[#kept + 1] = body
 	end
@@ -251,14 +224,9 @@ local function table_of(connection, catalog, schema_name, table_name)
 	return schema and schema.by_table[tostring(table_name or "")] or nil
 end
 
---- The columns the sweep recorded, or nil when it recorded none.
----
---- An empty list is not an answer: a table always has a column, so zero of
---- them means the sweep never filled this entry in - which is exactly what a
---- MongoDB collection gets, because the snapshot lists collections with no
---- columns and their fields come from sampling instead. Returning the empty
---- list made that sampling unreachable, and the editor blamed the wrapper for
---- declining (ADR-0029) when it had never been asked.
+--- An empty list is not an answer: zero columns means the sweep never filled the entry in
+--- (a MongoDB collection's fields come from sampling), and returning the empty list once
+--- made that sampling unreachable (ADR-0029).
 --- @return table[]|nil
 function M.columns(connection, catalog, schema_name, table_name)
 	local entry = table_of(connection, catalog, schema_name, table_name)
@@ -269,11 +237,8 @@ function M.columns(connection, catalog, schema_name, table_name)
 	return nil
 end
 
---- One table, in the shape schema.details answers with.
----
---- nil when the sweep's detail pass never reached this table, which happens on
---- a database big enough to spend its budget first. The caller then asks the
---- server, and this stays the one place that decides what counts as known.
+--- One table, in the shape schema.details answers with; nil when the sweep's detail pass
+--- spent its budget before reaching this table, and the caller then asks the server.
 --- @return table|nil { rows, primary_key, indexes, foreign_keys, referenced_by }
 function M.details(connection, catalog, schema_name, table_name)
 	local entry = table_of(connection, catalog, schema_name, table_name)
@@ -291,8 +256,7 @@ function M.details(connection, catalog, schema_name, table_name)
 	}
 end
 
---- Fold a table's freshly fetched details into the snapshot held in memory, so
---- a table the budget skipped is asked for once rather than once per preview.
+--- Fold freshly fetched details into memory, so a skipped table is asked for once, not once per preview.
 function M.merge_details(connection, catalog, schema_name, table_name, details)
 	local entry = table_of(connection, catalog, schema_name, table_name)
 	if not entry or not details then

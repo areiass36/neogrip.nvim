@@ -80,16 +80,13 @@ check("mssql with order by", classify.wrappable("select * from t order by id", "
 check("mssql without order by", classify.wrappable("select * from t", "mssql"), true)
 
 support.describe("sql/classify: wrappable is only used for the write guards now")
--- Paging stopped rewriting SQL when the client became JDBC: the driver caps
--- the rows with setMaxRows and the runner skips the offset, so nothing is
--- spliced into the statement and no dialect needs a LIMIT spelled out.
+-- Paging stopped rewriting SQL when the client became JDBC (setMaxRows caps the rows).
 check("a select is still recognised", classify.kind("select * from t"), "select")
 check("and a write still is", classify.kind("delete from t where id = 1"), "dml")
 
 support.describe("sql/split: a backslash is only an escape in mysql")
 
--- A long bracket so the backslash below is one literal character, with no
--- escaping to reason about in the test itself.
+-- A long bracket so the backslash is one literal character.
 local BS = [[\]]
 
 check(

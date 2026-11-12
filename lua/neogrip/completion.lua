@@ -1,10 +1,5 @@
--- Table and column completion from the schema cache, as an nvim-cmp source.
---
--- cmp is optional: setup() registers the source when cmp is around and does
--- nothing otherwise, and it never touches the user's source lists -
--- cmp.setup.filetype replaces them, which is not a plugin's call to make. The
--- README documents adding { name = "neogrip" } where wanted; is_available
--- keeps the source quiet outside SQL buffers either way.
+-- An optional nvim-cmp source; the user's source lists are never touched, because
+-- cmp.setup.filetype replaces them, which is not a plugin's call to make.
 local resolve = require("neogrip.resolve")
 local schema = require("neogrip.schema")
 
@@ -25,8 +20,7 @@ function source.get_debug_name(_self)
 	return "neogrip"
 end
 
---- An alias before the dot tells us which table's columns to offer.
---- "select u.| from users u" -> users
+--- The alias before the dot names which table's columns to offer: "select u.| from users u" -> users.
 local function table_for_alias(bufnr, alias)
 	local text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
 	local pattern = ('[Ff][Rr][Oo][Mm]%%s+([%%w_%%."`%%[%%]]+)%%s+%%f[%%w]%s%%f[^%%w]'):format(alias)
@@ -38,7 +32,6 @@ local function table_for_alias(bufnr, alias)
 	if not found then
 		return nil
 	end
-	-- Strip quoting and any schema qualifier.
 	return (found:gsub('["`%[%]]', ""):gsub(".*%.", ""))
 end
 
@@ -56,9 +49,7 @@ function source.complete(_self, request, callback)
 		callback({ items = items, isIncomplete = false })
 	end
 
-	-- The catalog the sweep was keyed by, and the schema that actually holds
-	-- the table. Asking with neither -- which is what this did -- means every
-	-- keystroke misses the swept catalog entirely and waits on the server for
+	-- Asking with no catalog missed the swept catalog entirely and waited on the server for
 	-- an answer that was already on disk.
 	local catalog = schema.catalog_of(connection)
 	local function schema_of(table_name)
@@ -83,8 +74,7 @@ function source.complete(_self, request, callback)
 		end, catalog)
 	end
 
-	-- Every schema the sweep found, not just the configured one: an
-	-- unqualified name in a statement is resolved against all of them.
+	-- Every schema the sweep found: an unqualified name is resolved against all of them.
 	local listed = {}
 	local swept = schema.schemas_known(connection, catalog)
 	if swept then
@@ -117,8 +107,7 @@ function source.complete(_self, request, callback)
 	end, catalog)
 end
 
---- Exposed so the tests can ask it for completions without standing up cmp,
---- the same way neogrip.tree exposes its levels.
+--- Exposed so the tests can ask for completions without standing up cmp.
 M.source = source
 
 function M.setup()

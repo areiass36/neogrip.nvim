@@ -27,9 +27,7 @@ import neogrip.gripd.domain.error.RequestRefused;
 /**
  * The whole catalog, written to a file instead of answered through the
  * protocol (ADR-0010): a warehouse's catalog runs to hundreds of megabytes of
- * JSON, and a line that long is not a protocol message. Every schema is swept
- * once, on connections of the sweep's own, and the editor reads the file -
- * which also survives a restart, and a server that has since gone away.
+ * JSON, and a line that long is not a protocol message.
  */
 public final class Introspect {
     private final Connection connection;
@@ -46,19 +44,7 @@ public final class Introspect {
         this.properties = properties == null ? new Properties() : properties;
     }
 
-    /**
-     * The whole catalog, written to a file instead of answered through the
-     * protocol.
-     *
-     * The snapshot above fixed the walking for one schema; a database has
-     * hundreds of them, and the explorer cannot ask for one per keystroke. So
-     * every schema is swept once, written to disk, and read from there - which
-     * also survives a restart, and a server that has since gone away.
-     *
-     * The answer is a path rather than the catalog itself because a warehouse's
-     * catalog runs to hundreds of megabytes of JSON, and a line that long is
-     * not a protocol message.
-     */
+    /** The whole catalog, written to a file instead of answered through the protocol. */
     public Contracts.IntrospectSummary introspect(
             String catalog,
             String scope,
@@ -68,33 +54,24 @@ public final class Introspect {
             boolean wantDetails)
             throws SQLException, IOException {
         long start = System.currentTimeMillis();
-        // No budget at all rather than one that has already run out: a caller
-        // that asks for nothing wants the whole catalog, not an empty pass.
+        // A caller that asks for no budget wants the whole catalog, not an empty pass.
         long deadline = deadlineMs > 0 ? start + deadlineMs : Long.MAX_VALUE;
-        // The flag is shared with the statement the worker may be running, so
-        // a cancel sent before this request must not end it on sight.
+        // The flag is shared, so a cancel sent before this request must not end it on sight.
         cancelled.set(false);
 
         if (outFile == null || outFile.isEmpty()) {
             throw new RequestRefused("introspect needs a file to write the catalog to");
         }
         if (MongoFields.isMongo(connection)) {
-            // getColumns wants the Atlas SQL schema a plain mongod does not
-            // have, and a snapshot of collections without fields would answer
-            // "no fields" where the explorer has to sample documents instead.
+            // getColumns wants the Atlas SQL schema a plain mongod does not have.
             throw new RequestRefused(
                     "a collection catalog cannot be swept; the explorer samples documents instead");
         }
 
         DatabaseMetaData meta = connection.getMetaData();
         List<Snapshot.SchemaBody> schemas = Snapshot.schemaBodies(meta, catalog);
-        // A scope of one namespace (ADR-0038). The whole machinery below is
-        // unchanged - the pool, the budget, the cancel flag, the atomic write -
-        // and what it sweeps is one schema, so what it writes is a snapshot
-        // holding one schema that the editor merges into what it already has.
-        // A name nothing matches sweeps nothing and says so through the counts,
-        // which is a better answer than a refusal: the schema may have been
-        // dropped since the client last looked.
+        // A scope of one namespace (ADR-0038); a name nothing matches sweeps nothing and says so
+        // through the counts rather than refusing - the schema may have been dropped since.
         String only = Metadata.orNull(scope);
         if (only != null) {
             List<Snapshot.SchemaBody> scoped = new ArrayList<>(1);
@@ -117,8 +94,7 @@ public final class Introspect {
         boolean written = false;
         int detailed = 0;
         try {
-            // One schema has no concurrency in it to find, so this stage is
-            // sized by how many there are.
+            // One schema has no concurrency in it to find, so this stage is sized by how many there are.
             pool = SiblingPool.openSiblings(meta, url, properties, schemas.size(), parallelism, null);
             threads = SiblingPool.sweepThreads(pool);
             if (pool != null) {
@@ -131,17 +107,11 @@ public final class Introspect {
                 for (Snapshot.SchemaBody schema : schemas) {
                     walk += schema.kinds.size();
                 }
-                // This stage is per table, and that is where a database with
-                // everything in one schema has its concurrency: MySQL has one
-                // schema by definition, SQLite has none, and the common
-                // Postgres database never left public - while any of them can
-                // have hundreds of tables, each wanting four metadata calls.
-                // Sizing this by schemas would leave all three sequential.
+                // Sized per table, not per schema; see doc/internals.md#schema-and-tree.
                 int before = pool == null ? 0 : pool.size();
                 pool = SiblingPool.openSiblings(meta, url, properties, walk, parallelism, pool);
                 if (pool != null && pool.size() != before) {
-                    // The sweeps are done with the old threads, and there are
-                    // now more connections than there were of them.
+                    // There are now more connections than the old threads can drive.
                     if (threads != null) {
                         threads.shutdown();
                     }
@@ -179,18 +149,15 @@ public final class Introspect {
                 pool.closeAll();
             }
             if (temp != null) {
-                // The write failed or was cancelled. Nothing may be left
-                // where the editor reads a finished snapshot.
+                // Nothing may be left where the editor reads a finished snapshot.
                 try {
                     Files.deleteIfExists(temp);
                 } catch (IOException ignored) {
-                    // A file in the cache directory that nobody will read.
                 }
             }
         }
 
-        // A snapshot that reached its place is an answer even if a cancel
-        // arrived a moment later; nothing else can get this far unwritten.
+        // A snapshot that reached its place is an answer even if a cancel arrived a moment later.
         if (!written) {
             throw new Cancelled("the catalog sweep was cancelled");
         }
@@ -225,10 +192,8 @@ public final class Introspect {
                 }
                 Connection held = pool == null ? connection : pool.take();
                 try {
-                    // Neither sweep is capped. The caps the snapshot operation
-                    // uses are there because its answer has to fit on one
-                    // line; this one writes to a file, so a cap would only
-                    // hide tables the explorer could have had.
+                    // Uncapped: the snapshot operation's caps exist so its answer fits on one
+                    // line, and this one writes to a file.
                     Snapshot.sweepSchema(schema, held.getMetaData(), catalog, Integer.MAX_VALUE, Integer.MAX_VALUE);
                 } finally {
                     if (pool != null) {
@@ -256,10 +221,7 @@ public final class Introspect {
                     if (cancelled.get()) {
                         return null;
                     }
-                    // The sweeps always finish, because a snapshot without
-                    // columns is worth nothing. The budget is spent here
-                    // instead, where running out costs one table's definition
-                    // and not the file.
+                    // The budget is spent here, where running out costs one table's definition and not the file.
                     if (System.currentTimeMillis() > deadline) {
                         ranOut.set(true);
                         return null;
@@ -276,8 +238,7 @@ public final class Introspect {
                                         schema.keys.getOrDefault(table, Keys.PrimaryKey.NONE)));
                         done.incrementAndGet();
                     } catch (SQLException refused) {
-                        // One table the engine will not describe is no reason
-                        // to lose the other ten thousand.
+                        // One table the engine will not describe is no reason to lose the rest.
                     } finally {
                         if (pool != null) {
                             pool.release(held);
@@ -295,7 +256,6 @@ public final class Introspect {
         try {
             return meta.getDatabaseProductName() + " " + meta.getDatabaseProductVersion();
         } catch (SQLException ignored) {
-            // A driver that cannot describe itself still has a catalog.
             return "";
         }
     }
@@ -305,18 +265,13 @@ public final class Introspect {
             String current = connection.getCatalog();
             return current == null ? "" : current;
         } catch (SQLException ignored) {
-            // Not every driver has catalogs to be in one of.
             return "";
         }
     }
 
     /**
-     * The snapshot, straight into the file.
-     *
-     * Nothing bigger than one table is ever held as a single string: the
-     * per-schema buffers are appended to the stream in the order the schemas
-     * were listed, so a catalog larger than this process's heap still gets
-     * written.
+     * The snapshot, streamed: nothing bigger than one table is held as a
+     * single string, so a catalog larger than the heap still gets written.
      *
      * @return false when a cancel arrived mid-write, which leaves the file for
      *         the caller to delete instead of moving it into place.
@@ -357,17 +312,11 @@ public final class Introspect {
     }
 
     /**
-     * One table, in the shape the table view's renderers already read.
-     *
-     * The index and key arrays are written empty rather than left out when the
-     * detail pass did not reach this table, so a reader never has to tell a
-     * missing field from a table that has no indexes: the details flag is what
-     * says which of the two it is.
-     *
-     * Where the detail pass ran, its primary key and its columns are the ones
-     * written: it asked per table, and the schema sweep's single call for all
-     * of them is the one that can come back empty on an engine that does not
-     * support it.
+     * One table, in the shape the table view's renderers already read. The
+     * index and key arrays are written empty rather than left out, with the
+     * details flag telling a missing pass from a table that has no indexes;
+     * where the detail pass ran, its per-table key and columns win over the
+     * schema sweep's, whose whole-schema call can come back empty.
      */
     private static void writeTable(JsonWriter out, Snapshot.SchemaBody schema, String table, String kind) {
         Details.DetailParts details = schema.details.get(table);
@@ -403,9 +352,8 @@ public final class Introspect {
     }
 
     /**
-     * A snapshot is only ever read whole, so it is written beside its target
-     * and moved onto it at the end: a crash, a cancel or a full disk then
-     * leaves the previous snapshot in place instead of half of a new one.
+     * Written beside the target and moved onto it at the end, so a crash, a
+     * cancel or a full disk leaves the previous snapshot in place.
      */
     private static Path tempBeside(Path target) throws IOException {
         Path parent = target.getParent();

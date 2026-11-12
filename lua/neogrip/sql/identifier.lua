@@ -1,15 +1,6 @@
--- Which database object the cursor is on.
---
--- Scoped to the statement the cursor is in rather than to the buffer: a script
--- holds twenty statements, each with its own FROM, and an alias bound in one of
--- them says nothing about the same letter in another. db/completion.lua reads
--- the whole buffer for a FROM naming the alias, which is why "select u." in a
--- file that also joins unit_prices somewhere below can answer with the wrong
--- table's columns.
---
--- Nothing here asks the server. Every answer comes out of the catalog
--- :NGripIntrospect already wrote (neogrip/schema/store.lua), so resolving a name costs
--- a handful of table lookups and is safe to do from inside an LSP request.
+-- Scoped to the statement, not the buffer: an alias bound in one statement says nothing about the
+-- same letter in another. Nothing asks the server - answers come from the swept catalog, so
+-- resolving is safe inside an LSP request.
 local dialect = require("neogrip.dialect")
 local resolve = require("neogrip.resolve")
 local schema = require("neogrip.schema")
@@ -17,10 +8,8 @@ local split = require("neogrip.sql.split")
 
 local M = {}
 
--- The quoting each engine's identifiers come in, which is db/schema.lua's
--- M.quote read backwards: what that function writes is what this has to
--- accept. A driver with no entry gets the SQL standard's own quote, and
--- MongoDB has no quoted identifiers at all.
+-- schema.lua's M.quote read backwards: what that writes is what this must accept; no entry
+-- means the SQL standard quote, and MongoDB has no quoted identifiers at all.
 local QUOTES = {
 	mysql = { "`", "`" },
 	mariadb = { "`", "`" },
@@ -28,7 +17,6 @@ local QUOTES = {
 	mongodb = {},
 }
 
--- Words that follow a table reference without being its alias.
 local NOT_AN_ALIAS = {}
 for _, word in ipairs({
 	"as",
@@ -79,8 +67,7 @@ local function quoting(bufnr)
 	return '"', '"'
 end
 
---- A quoted identifier starting at `index`, where a doubled closing character
---- is a literal one.
+--- A quoted identifier starting at `index`; a doubled closing character is a literal one.
 --- @return integer|nil to 1-based index of the closing character
 --- @return string|nil name
 local function read_quoted(text, index, _open, close)
@@ -144,8 +131,7 @@ local function read_chain(text, index, open, close)
 	return last, names
 end
 
---- Every dotted chain on one line, each part with the extent it occupies, so
---- the part the cursor sits in can be found and reported back.
+--- Every dotted chain on one line, each part with the extent it occupies.
 --- @return table[][] chains of { name, from, to, quoted }, all 1-based
 local function chains_of(line, open, close)
 	local chains, current, previous = {}, nil, nil
@@ -163,7 +149,6 @@ local function chains_of(line, open, close)
 			previous = to
 			index = to + 1
 		else
-			-- Only a dot continues a chain; anything else ends it.
 			if line:sub(index, index) ~= "." then
 				current, previous = nil, nil
 			end
@@ -187,8 +172,7 @@ local function part_at(line, col, open, close)
 	return nil
 end
 
---- The statement a line belongs to. db/sql/split.lua answers this for a
---- window; an LSP request has a position and no window to ask.
+--- The statement a line belongs to; an LSP request has a position and no window to ask.
 --- @return db.Statement|nil
 local function statement_at(text, driver, line)
 	local statements = split.statements(text, driver)
@@ -227,8 +211,7 @@ local function read_reference(text, index, open, close)
 		return reference
 	end
 	if word:lower() == "as" then
-		-- AS is optional in every one of these engines, and whatever follows
-		-- it is the alias however it is spelled.
+		-- AS is optional in every one of these engines; whatever follows it is the alias.
 		after = text:find("%S", word_to + 1)
 		word_to, word = nil, nil
 		if after then
@@ -245,15 +228,9 @@ local function read_reference(text, index, open, close)
 	return reference
 end
 
---- The statement with its string literals and comments blanked out, exactly
---- as long as it was so every position still points where it did.
----
---- The alias scan below looks for the words FROM and JOIN, and a statement that
---- builds SQL in a string -- or a comment quoting one -- has those words in it
---- without binding anything. Left in, "select col from t where q = 'from users
---- u'" binds u to users, and a u.something later in the statement resolves to
---- the wrong table. Identifier quotes are deliberately untouched: a table may
---- well be called "my table", and that name has to stay readable.
+--- Blank string literals and comments, keeping the length so every position still points where
+--- it did: left in, "where q = 'from users u'" binds u to the wrong table. Identifier quotes
+--- stay untouched, because a table may well be called "my table".
 local function without_literals(text)
 	local length = #text
 	local bytes = {}
@@ -306,10 +283,7 @@ local function without_literals(text)
 	return table.concat(bytes)
 end
 
---- The tables a statement names, by alias and in the order they appear.
----
---- FROM and JOIN are the two places an alias is bound, and the comma form of a
---- join ("from users u, orders o") binds one per item.
+--- The tables a statement names: FROM and JOIN bind aliases, the comma form one per item.
 --- @return table { by_alias: table<string, table>, list: table[] }
 local function references_of(text, open, close)
 	local by_alias, list = {}, {}
@@ -330,9 +304,8 @@ local function references_of(text, open, close)
 		end
 	end
 
-	-- The keywords are looked for in the masked copy and the references read
-	-- out of the real text: the two are the same length, so a position found in
-	-- one is the same position in the other.
+	-- Keywords are found in the masked copy and references read from the real text; the two
+	-- are the same length, so positions transfer.
 	for position, word in without_literals(text):gmatch("()([%a_][%w_]*)") do
 		local lowered = word:lower()
 		if lowered == "from" or lowered == "join" then
@@ -352,10 +325,8 @@ local function references_of(text, open, close)
 	return { by_alias = by_alias, list = list }
 end
 
---- An unquoted identifier is case insensitive in every one of these engines,
---- while the snapshot holds whatever the server itself spells. The exact match
---- is tried first, so a database that really does have both "Users" and
---- "users" still answers for each.
+--- Unquoted identifiers are case insensitive while the snapshot holds the server's spelling;
+--- the exact match is tried first so a database holding both "Users" and "users" answers for each.
 local function same(left, right)
 	if left == right then
 		return true
@@ -374,9 +345,7 @@ local function schema_named(connection, catalog, name)
 	return nil
 end
 
---- Where an unqualified name is looked for, most likely first: the schema the
---- connection names, then the one a Postgres search path starts with, then
---- every schema the sweep found.
+--- Where an unqualified name is looked for, most likely schema first.
 local function search_order(connection, catalog)
 	local order, seen = {}, {}
 	local function add(name)
@@ -422,8 +391,7 @@ local function column_entry(entry, name)
 	return nil
 end
 
---- What a dotted chain means, read against the statement's own FROM list and
---- the swept catalog.
+--- What a dotted chain means, read against the statement's FROM list and the swept catalog.
 --- @param names string[] the chain, outermost first
 --- @param order integer which of them the cursor is on
 --- @return table|nil { kind, schema, table, column }
@@ -433,10 +401,7 @@ local function lookup(connection, catalog, references, names, order)
 	end
 
 	if #names == 1 then
-		-- One name is an alias, a table, a schema, or a column of a table the
-		-- statement already names -- in that order, because an alias shadows
-		-- everything and a column is the only one of them that needs the
-		-- statement's help to be found.
+		-- Alias, table, schema, then column of a named table: an alias shadows everything.
 		local alias = references.by_alias[names[1]:lower()]
 		if alias then
 			local owner, entry = table_entry(connection, catalog, alias.schema, alias.table)
@@ -497,8 +462,7 @@ local function lookup(connection, catalog, references, names, order)
 		return { kind = "table", schema = owner, table = entry.name }
 	end
 
-	-- Three names are either schema.table.column or catalog.schema.table, and
-	-- the snapshot is the only thing that can tell them apart.
+	-- Three names are schema.table.column or catalog.schema.table; only the snapshot can tell.
 	local schema_name = schema_named(connection, catalog, names[1])
 	if schema_name then
 		local owner, entry = table_entry(connection, catalog, schema_name, names[2])
@@ -518,9 +482,7 @@ local function lookup(connection, catalog, references, names, order)
 			}
 		end
 	end
-	-- Only the catalog the snapshot was taken for can be answered for: there
-	-- is no second catalog on disk to read, and the cursor on the catalog
-	-- itself has nothing to go to.
+	-- Only the snapshot's own catalog can be answered: there is no second catalog on disk.
 	if order == 1 or not same(names[1], catalog) then
 		return nil
 	end
@@ -547,8 +509,7 @@ end
 --- @field column string|nil only for a column
 --- @field range table { line (1-based), from, to } 0-based byte columns, end exclusive
 
---- The object a position names, resolved without a window so a request for a
---- buffer nobody is looking at is answered the same way.
+--- The object a position names, resolved without a window.
 --- @param text string the whole buffer, lines joined with newlines
 --- @param line integer 1-based
 --- @param col integer 0-based byte column
@@ -570,10 +531,8 @@ function M.resolve(bufnr, text, line, col)
 	end
 	local part = chain[order]
 
-	-- A word in a string or a comment is prose, not an identifier. The
-	-- question is asked about the character before a quoted name, because its
-	-- own opening quote is what a string starts with and asking about that
-	-- would answer yes for every quoted identifier there is.
+	-- Prose in a string or comment is not an identifier; probe before a quoted name, because
+	-- asking about its own opening quote would answer yes for every quoted identifier.
 	local probe = part.quoted and math.max(0, part.from - 2) or part.from - 1
 	local asked, hidden = pcall(dialect.in_string_or_comment, bufnr, line - 1, probe)
 	if asked and hidden then
@@ -595,8 +554,7 @@ function M.resolve(bufnr, text, line, col)
 
 	found.connection = connection
 	found.catalog = catalog
-	-- The extent the scanner measured, which is this identifier and not the
-	-- qualified name around it: on "u.id" the answer is "id".
+	-- This identifier only, not the qualified name around it: on "u.id" the answer is "id".
 	found.range = { line = line, from = part.from - 1, to = part.to }
 	return found
 end

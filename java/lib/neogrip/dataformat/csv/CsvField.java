@@ -5,12 +5,9 @@ public final class CsvField {
     private CsvField() {}
 
     /**
-     * One field, quoted when it has to be.
-     *
-     * The delimiter is a parameter rather than a comma on sight, because the
-     * character the writer separates fields with and the character that forces
-     * a field to be quoted are the same character, and a quoting rule that
-     * disagreed with the separator would write a file nothing can read back.
+     * One field, quoted when it has to be; the delimiter is a parameter
+     * because a quoting rule that disagreed with the separator would write a
+     * file nothing can read back.
      */
     public static String field(String value, String nullMarker, char delimiter) {
         if (value == null) {

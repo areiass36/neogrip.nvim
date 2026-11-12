@@ -4,14 +4,10 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 
 /**
- * A structured JSON writer over any Appendable: a StringBuilder for an in-band
- * response, a BufferedWriter for a file a program streams into. Commas,
- * quoting and escaping live here and nowhere else - the hand-counted braces
- * this library replaced were a steady source of almost-bugs.
- *
- * Escaping rules carried over from the previous writer: control characters are
- * escaped, and a lone surrogate is replaced rather than passed through,
- * because it would make the decoder on the other side fail.
+ * A structured JSON writer over any Appendable; commas, quoting and escaping
+ * live here and nowhere else - the hand-counted braces this library replaced
+ * were a steady source of almost-bugs - and a lone surrogate is replaced
+ * rather than passed through, because it would fail the decoder on the other side.
  */
 public final class JsonWriter {
     private static final byte TOP = 0;

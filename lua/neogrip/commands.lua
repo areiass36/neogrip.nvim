@@ -1,6 +1,3 @@
--- Every :NGrip command in one place (ADR-0024). Commands land here as their
--- phases do; the tree, introspection and requery ones follow their
--- modules.
 local connections = require("neogrip.connections")
 local neogrip = require("neogrip")
 local resolve = require("neogrip.resolve")
@@ -124,8 +121,7 @@ function M.setup()
 	end, { desc = "Open a query buffer against this buffer's connection" })
 
 	command("NGripSchemaReload", function()
-		-- Only this buffer's connection. Passing nil would clear every
-		-- connection's catalog, which is not what "reload" asks for.
+		-- Only this buffer's connection: passing nil would clear every connection's catalog.
 		local connection = current_connection()
 		if not connection then
 			return
@@ -140,8 +136,7 @@ function M.setup()
 			return
 		end
 		local schema = require("neogrip.schema")
-		-- The catalog the tree would open on, so what is swept is what a
-		-- client then reads. An argument overrides it.
+		-- Sweep the catalog the tree would open on, so what is swept is what a client reads.
 		local catalog = schema.catalog_of(connection)
 		if args.args ~= "" then
 			catalog = args.args
@@ -151,8 +146,7 @@ function M.setup()
 			if not schema.introspecting(connection, catalog) then
 				return neogrip.notify("nothing is being introspected")
 			end
-			-- The same cancel the runner uses: it reaches the sweep's own
-			-- threads as well as a running statement.
+			-- The same cancel the runner uses; it reaches the sweep's own threads too.
 			require("neogrip.gripd").request(connection, "cancel", {}, function() end)
 			return neogrip.notify("cancelling the introspect")
 		end
@@ -186,8 +180,7 @@ function M.setup()
 		if not bufnr then
 			return neogrip.notify("no result yet")
 		end
-		-- Said here rather than letting requery answer "no rows to
-		-- materialise", which is true and tells the reader the wrong thing.
+		-- Said here: requery would answer "no rows to materialise", which misleads.
 		if grid.is_pending(bufnr) then
 			return neogrip.notify("this tab is still running")
 		end
@@ -241,8 +234,8 @@ function M.setup()
 	end, { desc = "Check gripd, drivers and connections" })
 end
 
---- Write a starter project file, but only once .gitignore covers it: the file
---- holds hosts, user names and kvstore key names.
+--- Write a starter project file only once .gitignore covers it: it holds hosts, user names
+--- and kvstore key names.
 function M.init_project()
 	local root = connections.project_root()
 	local path = connections.project_file()
@@ -254,9 +247,7 @@ function M.init_project()
 		{ "git", "check-ignore", "-q", ".nvim/database.json" },
 		{ cwd = root },
 		vim.schedule_wrap(function(result)
-			-- Only when git says "not ignored" (1). Any other code means it
-			-- could not answer, and a folder that is not a repository cannot
-			-- commit the file anywhere.
+			-- Only 1 means "not ignored"; other non-zero codes mean this is not a repository.
 			if result.code == 1 then
 				local answer = vim.fn.confirm(
 					".nvim/database.json is not gitignored. Add '.nvim/' to .gitignore?",

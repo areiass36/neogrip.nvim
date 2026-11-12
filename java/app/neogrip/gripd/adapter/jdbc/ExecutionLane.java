@@ -7,14 +7,10 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 /**
- * The one lane onto the shared connection: requests arrive each on its own
- * thread (ADR-0028), and this is what puts them through one at a time.
- *
- * The lock is fair, so queued statements keep their arrival order rather than
- * whichever thread the scheduler favours. Cancellation deliberately does not
- * go through here: it reaches a running statement through {@link Running} and
- * a catalog sweep through a flag, because a cancel that waited for the lock
- * would be waiting for the thing it was sent to stop.
+ * The one lane onto the shared connection (ADR-0028): the lock is fair so
+ * statements keep arrival order, and cancellation deliberately bypasses it -
+ * through {@link Running} or the sweep flag - because a cancel that queued
+ * would wait for the thing it was sent to stop.
  */
 public final class ExecutionLane {
     private final ReentrantLock lock = new ReentrantLock(true);

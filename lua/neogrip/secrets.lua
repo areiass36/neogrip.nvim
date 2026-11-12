@@ -1,15 +1,8 @@
--- Where a secret comes from, and nowhere it goes.
---
--- Every secret is read from kvstore.nvim and from nowhere else (ADR-0007):
--- the connection file stores key names, this module turns them into values at
--- connect time, and the values ride to gripd inside the connect request
--- (ADR-0009). Nothing is cached here: kvstore's own vault is the cache, its
--- read is synchronous, and connects are rare.
+-- Secrets are read from kvstore.nvim at connect time and handed over; nothing is cached here.
 local M = {}
 
---- Resolve the kvstore references in a connection's auth object into an auth
---- table ready for the connect request. The callback shape stays asynchronous
---- so the runner never has to know the read is synchronous today.
+--- Resolve kvstore references into an auth table for the connect request; the callback shape
+--- stays asynchronous so the runner never has to know the read is synchronous today.
 --- @param connection table
 --- @param callback fun(auth: table|nil, err: string|nil)
 function M.resolve(connection, callback)

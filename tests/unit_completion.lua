@@ -1,8 +1,5 @@
--- What the completion source offers, answered entirely from a swept catalog on
--- disk: no cmp, no server, no Java process. The point of these is that the
--- source reads the sweep at all -- it used to ask every question with no
--- catalog and no schema, so it missed the file it was supposed to be instant
--- because of and waited on the server instead.
+-- The completion source answered from a swept catalog on disk: no cmp, no server.
+-- The source used to miss the sweep file entirely and wait on the server instead.
 local support = require("tests.support")
 local check = support.check
 local completion = require("neogrip.completion")
@@ -54,8 +51,7 @@ vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "select c.id from sales.custom
 vim.api.nvim_set_current_buf(bufnr)
 resolve.bind(bufnr, connection.id)
 
---- The source answers synchronously when the sweep covers the question, which
---- is the whole claim: a callback that never fired would hang this.
+--- The source answers synchronously when the sweep covers the question, which is the claim.
 local function offered(before_line)
 	local items, called = nil, false
 	completion.source:complete({ context = { cursor_before_line = before_line } }, function(answer)
@@ -106,8 +102,6 @@ check("with that table's columns", labels(columns), { "email", "id" })
 check("as fields", columns[1].kind, vim.lsp.protocol.CompletionItemKind.Field)
 check("carrying the type, which is what you are checking", columns[1].detail ~= "", true)
 
--- The alias is resolved against the statement, so a table named directly works
--- the same way as one behind an alias.
 local direct_called, direct = offered("select customers.")
 check("a table named in full needs no alias", direct_called, true)
 check("and offers the same columns", labels(direct), { "email", "id" })

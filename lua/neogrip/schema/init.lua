@@ -1,16 +1,6 @@
--- The catalog, asked of the driver.
---
--- This used to be six files of hand-written SQL - pg_catalog, information_
--- schema, sys.objects, sqlite_master, duckdb_tables() and a Mongo aggregation
--- - each with its own quirks. JDBC's DatabaseMetaData answers all of it, so
--- the Java side does the asking and this is only a cache in front of it.
---
--- Two caches, with different jobs. neogrip/schema/store.lua holds a whole
--- catalog as swept once by :NGripIntrospect, and is asked first because an
--- answer from it costs nothing and survives a restart. What is left here is
--- the per-question cache that fills in as you walk: it answers for a database
--- nobody has introspected yet, and for a table the sweep's budget did not
--- reach.
+-- The Java side asks JDBC's DatabaseMetaData; this is only a cache in front of it. store.lua
+-- holds a whole swept catalog and is asked first; what is left here is the per-question cache
+-- that fills in as you walk.
 local config = require("neogrip.config")
 local neogrip = require("neogrip")
 local gripd = require("neogrip.gripd")
@@ -43,25 +33,14 @@ function M.quote(driver, name)
 	return '"' .. tostring(name):gsub('"', '""') .. '"'
 end
 
---- Does a query on this engine name the catalog, or does the connection pin it?
----
---- A SQL name has at most three parts and they are the tree's
---- instance.namespace.set (ADR-0039). PostgreSQL cannot query across databases
---- at all, so walking into another one reopens the connection and two parts are
---- the whole name; MySQL reports its database as a catalog and has no schema
---- layer, so the database already travels in the namespace slot. Trino is the
---- one engine that addresses catalogs in SQL and queries across them in one
---- session - which is why it exists - so there the catalog is part of the name
---- and nowhere else.
+--- Only Trino addresses catalogs in SQL and queries across them in one session (ADR-0039);
+--- PostgreSQL cannot query across databases and MySQL's database travels in the namespace slot.
 local function catalog_in_name(driver)
 	return driver == "trino"
 end
 
---- schema.table, quoted, for a generated statement.
----
---- `catalog` is optional and last so that the callers which rebuild SQL from a
---- result rather than from a ref are unchanged; absent, the connection's own
---- catalog stands in.
+--- schema.table, quoted; `catalog` is optional and last so callers that rebuild SQL from a
+--- result are unchanged, and absent, the connection's own catalog stands in.
 function M.qualify(connection, schema, table_name, catalog)
 	if connection.driver == "mongodb" then
 		return tostring(table_name)
@@ -82,14 +61,9 @@ function M.qualify(connection, schema, table_name, catalog)
 	return quoted
 end
 
---- The catalog a connection means - and so the key its swept catalog is kept
---- under on disk.
----
---- One definition, because three callers have to agree about it: the tree
---- opens on it, :NGripIntrospect sweeps it, and the store keys its file by it.
---- They did not agree in the predecessor: completion asked every question with
---- no catalog at all and therefore never once read the sweep it was supposed
---- to be instant because of.
+--- The catalog a connection means, and the key its swept catalog is kept under: one definition
+--- because the tree, the sweep and the store must agree - in the predecessor, completion asked
+--- with no catalog and never once read the sweep.
 --- @return string|nil
 function M.catalog_of(connection)
 	local driver = connection.driver
@@ -100,11 +74,9 @@ function M.catalog_of(connection)
 		or driver == "mariadb"
 		or driver == "mongodb"
 	then
-		-- Their one database is a schema as far as the metadata calls are
-		-- concerned; the catalog argument is not what filters them.
+		-- Their one database is a schema to the metadata calls; catalog is not what filters them.
 		return nil
 	end
-	-- Trino's catalog field, or the database the connection names.
 	if connection.catalog and connection.catalog ~= "" then
 		return connection.catalog
 	end
@@ -149,9 +121,8 @@ local function cache_put(connection, key, value)
 	pcall(vim.fn.writefile, { vim.json.encode(memory[connection.id]) }, cache_path(connection))
 end
 
---- Forget everything cached for a connection, the swept catalog included:
---- "reload the schema" has to mean all of it, or the stale half keeps
---- answering.
+--- Forget everything, the swept catalog included: "reload" must mean all of it, or the stale
+--- half keeps answering.
 function M.invalidate(connection)
 	if connection then
 		memory[connection.id] = nil
@@ -163,12 +134,8 @@ function M.invalidate(connection)
 	store.clear(connection)
 end
 
---- Make sure the connection's process is up, then carry on.
----
---- A catalog question is sent to the process directly rather than queued as a
---- statement, so something has to open the process first: a trivial query is
---- the cheapest way, and it is what the runner would do anyway. A connection
---- re-pointed at another database or catalog counts as not connected.
+--- Ensure the process is up: a catalog question bypasses the statement queue, so a trivial
+--- query opens the process first; re-pointed at another database counts as not connected.
 --- @param callback fun(err: string|nil)
 local function connected(connection, callback)
 	if gripd.is_connected_to(connection) then
@@ -188,11 +155,7 @@ local function connected(connection, callback)
 	end)
 end
 
---- Ask gripd a catalog question.
----
---- `whole` keeps the entire answer instead of just its rows: the details
---- method reports a primary key, indexes and foreign keys alongside the
---- columns, and those do not fit the rows shape.
+--- Ask gripd a catalog question; `whole` keeps the entire answer, because details do not fit the rows shape.
 local function ask(connection, method, params, key, callback, whole)
 	if key then
 		local cached = cache_get(connection, key)
@@ -208,11 +171,8 @@ local function ask(connection, method, params, key, callback, whole)
 			end
 			local value
 			if whole then
-				-- Named rather than copied wholesale so a stray protocol
-				-- field cannot become editor state, but every field the
-				-- renderer draws has to be here: a constraint name or a
-				-- table's comment left out is a definition that silently
-				-- renders as less than the server reported.
+				-- Named rather than copied wholesale so a stray protocol field cannot become
+				-- editor state; every field the renderer draws has to be here.
 				value = {
 					rows = result.rows or {},
 					primary_key = result.primary_key or {},
@@ -262,12 +222,8 @@ local function snapshot_key(catalog, schema)
 	return ("snapshot:%s.%s"):format(tostring(catalog), tostring(schema))
 end
 
---- A whole schema at once: every table with every one of its columns.
----
---- One round trip instead of one per level and one more per table the cursor
---- touches, which is where the explorer's waiting used to go. M.tables and
---- M.columns are both served from this, so after it lands the walk down to a
---- column asks the server nothing.
+--- A whole schema in one round trip instead of one per level, which is where the explorer's
+--- waiting used to go; M.tables and M.columns are both served from this.
 function M.snapshot(connection, catalog, schema, callback)
 	ask(
 		connection,
@@ -278,8 +234,7 @@ function M.snapshot(connection, catalog, schema, callback)
 	)
 end
 
---- Fill the cache for a schema without waiting for it, and without disturbing
---- whatever is on screen. Used when walking into a catalog.
+--- Fill the cache for a schema without waiting for it; used when walking into a catalog.
 function M.warm(connection, catalog, schema)
 	if store.tables(connection, catalog, schema) then
 		return
@@ -296,8 +251,7 @@ function M.tables(connection, schema, pattern, callback, catalog)
 		if known then
 			return callback(known, nil)
 		end
-		-- The snapshot already carries name and kind for every table, which is
-		-- all this level shows.
+		-- The snapshot already carries name and kind, which is all this level shows.
 		return M.snapshot(connection, catalog, schema, callback)
 	end
 	-- A pattern is a server-side search, and not worth caching.
@@ -318,8 +272,7 @@ local function cached_columns(connection, catalog, schema, table_name)
 	end
 	for _, record in ipairs(snapshot) do
 		if tostring(record.name) == tostring(table_name) then
-			-- Empty is not an answer; see store.columns for why a collection
-			-- arrives that way and what it costs to believe it.
+			-- Empty is not an answer; see store.columns for why.
 			if record.columns and #record.columns > 0 then
 				return record.columns
 			end
@@ -347,11 +300,7 @@ function M.columns(connection, schema, table_name, callback, catalog)
 	)
 end
 
---- What the sweep found, synchronously, or nil when nothing has been swept.
----
---- M.schemas and M.tables are the asynchronous pair that fall back to the
---- server; these are for a caller that cannot wait for a round trip, such as
---- completion answering a keystroke or a previewer drawing a pane.
+--- What the sweep found, synchronously, for a caller that cannot wait for a round trip.
 function M.schemas_known(connection, catalog)
 	return store.schemas(connection, catalog)
 end
@@ -360,12 +309,8 @@ function M.tables_known(connection, catalog, schema_name)
 	return store.tables(connection, catalog, schema_name)
 end
 
---- Which schema holds this table, according to the sweep.
----
---- An unqualified name in a statement is not enough to ask the server about -
---- that would need the search path, which is a session property and not a
---- catalog one. The swept catalog does know every schema, so here the answer
---- is a lookup. nil means nothing was swept, or there is no such table.
+--- Which schema holds this table, per the sweep: the server cannot be asked without the
+--- search path, which is a session property; nil means nothing swept or no such table.
 --- @return string|nil
 function M.locate_table(connection, catalog, table_name)
 	local schemas = store.schemas(connection, catalog)
@@ -380,16 +325,13 @@ function M.locate_table(connection, catalog, table_name)
 	return nil
 end
 
---- Everything the table view draws, when it is already known and without
---- asking anyone: what the previewer needs to draw a definition while the
---- cursor is still moving. nil means it would take a round trip.
+--- Everything the table view draws, when already known; nil means it would take a round trip.
 --- @return table|nil { rows, primary_key, indexes, foreign_keys, referenced_by }
 function M.details_ready(connection, catalog, schema, table_name)
 	return store.details(connection, catalog, schema, table_name)
 end
 
---- Everything the table view draws: columns, primary key, indexes, the foreign
---- keys the table declares and the ones pointing back at it.
+--- Everything the table view draws: columns, keys, indexes, foreign keys both ways.
 function M.details(connection, schema, table_name, callback, catalog)
 	local known = store.details(connection, catalog, schema, table_name)
 	if known then
@@ -402,8 +344,7 @@ function M.details(connection, schema, table_name, callback, catalog)
 		("details:%s.%s.%s"):format(tostring(catalog), tostring(schema), tostring(table_name)),
 		function(details, err)
 			if details then
-				-- Fold it into the swept catalog, so a table the budget did not
-				-- reach costs one round trip and not one per preview.
+				-- Fold into the swept catalog, so a skipped table costs one round trip, not one per preview.
 				store.merge_details(connection, catalog, schema, table_name, details)
 			end
 			callback(details, err)
@@ -412,20 +353,14 @@ function M.details(connection, schema, table_name, callback, catalog)
 	)
 end
 
---- The engine's own CREATE TABLE, for the engines that have one statement
---- that produces it.
----
---- JDBC has no concept of a check constraint, so a definition rendered from
---- DatabaseMetaData is never the whole truth. This is the server's own text
---- where it can be had cheaply - and nil is a perfectly normal answer, not an
---- error: most engines have nothing of the kind to ask for.
+--- The engine's own CREATE TABLE where it can be had: JDBC has no check constraints, so a
+--- metadata definition is never the whole truth; nil is a normal answer, not an error.
 --- @param callback fun(ddl: string|nil, err: string|nil)
 function M.native_ddl(connection, schema, table_name, callback, catalog)
 	local key = ("native_ddl:%s.%s.%s"):format(tostring(catalog), tostring(schema), tostring(table_name))
 	local cached = cache_get(connection, key)
 	if cached ~= nil then
-		-- Cached as a table because the cache cannot tell "no DDL" from "not
-		-- asked yet" if it stores a bare nil.
+		-- Cached as a table: a bare nil cannot tell "no DDL" from "not asked yet".
 		return callback(cached.ddl, nil)
 	end
 
@@ -459,20 +394,9 @@ function M.introspecting(connection, catalog)
 	return running_sweeps[sweep_key(connection, catalog)] == true
 end
 
---- Sweep the whole catalog - every schema, table, column, key and index - and
---- keep it in the store.
----
---- The work happens on the Java side, on connections of its own: the process
---- has one worker and one connection for statements, and a sweep that took
---- them would make every query wait behind it. It writes straight to the
---- store's file (ADR-0010), so a catalog the size of a warehouse never travels
---- through the request protocol.
----
---- A scope of one schema (opts.schema) sweeps only that namespace and folds
---- the result into what is already known, for a manual re-introspection after
---- a migration (ADR-0038). Without one, the whole catalog is swept and written
---- straight to the store's file as before.
----
+--- Sweep the whole catalog on the Java side, on connections of its own so no query waits
+--- behind it; it writes straight to the store's file (ADR-0010), so a warehouse-sized catalog
+--- never travels through the protocol. opts.schema sweeps one namespace and folds it in (ADR-0038).
 --- @param opts table|nil { parallelism, timeout_ms, details, schema }
 --- @param callback fun(summary: table|nil, err: string|nil)|nil
 function M.introspect(connection, catalog, opts, callback)
@@ -485,8 +409,7 @@ function M.introspect(connection, catalog, opts, callback)
 
 	local settings = config.get()
 	local scoped = opts.schema
-	-- A scoped sweep must not land on the store's own file: it holds one
-	-- schema, and writing it there would be throwing the catalog away.
+	-- A scoped sweep must not land on the store's own file: that would throw the catalog away.
 	local path = scoped and (vim.fn.tempname() .. ".json") or store.path(connection, catalog)
 	local details = opts.details
 	if details == nil then
@@ -514,8 +437,7 @@ function M.introspect(connection, catalog, opts, callback)
 			if err then
 				return finish(nil, err.message or "introspect failed")
 			end
-			-- The file is the answer: drop the decoded copy so the next
-			-- question reads the one that was just written.
+			-- The file is the answer: drop the decoded copy so the next question reads the new one.
 			if scoped then
 				local merged, merge_err = store.merge_from(connection, catalog, path, scoped)
 				pcall(vim.fn.delete, path)
@@ -546,10 +468,8 @@ function M.snapshot_stat(connection, catalog)
 	return store.stat(connection, catalog)
 end
 
---- The SELECT a client starts from for a set.
----
---- No column rewriting: the Java side renders a binary column as hex because
---- JDBC tells it the column is binary, so "select *" is safe.
+--- The SELECT a client starts from; no column rewriting, because the Java side renders binary
+--- as hex, so "select *" is safe.
 function M.select_statement(connection, schema, table_name, _columns, catalog)
 	if connection.driver == "mongodb" then
 		return ("db.%s.find({})"):format(table_name)
@@ -563,8 +483,7 @@ function M.sample(connection, schema, table_name, count, callback)
 	if connection.driver == "mongodb" then
 		sql = ("db.%s.find({})"):format(table_name)
 	else
-		-- The row cap is applied by the driver (setMaxRows), so no dialect
-		-- needs a LIMIT spelled out here.
+		-- The row cap is applied by the driver (setMaxRows), so no dialect needs a LIMIT here.
 		sql = ("SELECT * FROM %s"):format(M.qualify(connection, schema, table_name))
 	end
 	runner.run({

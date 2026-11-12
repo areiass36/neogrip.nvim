@@ -7,14 +7,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The wire name to Java method map, built once at startup by reading the
- * annotations off the handler instances.
- *
- * Everything that can be wrong about a method is wrong here rather than when
- * the first request for it arrives: an unsupported parameter type, a build
- * without {@code -parameters}, a name claimed twice, a name the server
- * reserves. A typo in a handler should cost a failed startup with the
- * offender's name in it, not a method that silently never answers.
+ * The wire name to Java method map, built once at startup; everything that
+ * can be wrong about a method - a build without {@code -parameters} included -
+ * fails here with the offender's name, not when the first request arrives.
  */
 public final class Registry {
     /** One registered method: the instance to call it on, and the method. */

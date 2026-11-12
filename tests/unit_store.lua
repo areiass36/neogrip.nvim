@@ -1,13 +1,11 @@
--- The swept catalog, on disk and read back. No server, no Java process and no
--- driver: every answer below comes out of a file this suite writes itself, in
--- the shape the Java side writes it.
+-- The swept catalog on disk, in the shape the Java side writes it: no server,
+-- no Java process, no driver.
 local support = require("tests.support")
 local check = support.check
 local store = require("neogrip.schema.store")
 local schema = require("neogrip.schema")
 
--- Ids no real connection can have, because the suite deletes every catalog
--- file it finds under them and those sit next to a developer's own snapshots.
+-- Ids no real connection can have: the suite deletes every catalog file under them.
 local CONNECTION = { id = "__test_store__", driver = "postgres" }
 local OTHER = { id = "__test_store_other__", driver = "postgres" }
 local CATALOG = "appdb"
@@ -51,8 +49,7 @@ local function snapshot()
 						indexes = {},
 						foreign_keys = {},
 						referenced_by = {},
-						-- The detail pass spent its budget before reaching this
-						-- one, which is what `partial` above records.
+						-- Unreached by the detail pass, which is what `partial` above records.
 						details = false,
 					},
 				},
@@ -62,7 +59,6 @@ local function snapshot()
 	}
 end
 
---- A fresh snapshot on disk, with nothing remembered from an earlier group.
 local function saved()
 	store.clear(CONNECTION)
 	return (store.save(CONNECTION, CATALOG, snapshot()))
@@ -94,8 +90,7 @@ check("and reads back with both of its schemas", reread and #reread.schemas, 2)
 check("the server's own version string survives", reread.product, "PostgreSQL 16.2")
 check("so does the catalog it was taken for", reread.catalog, CATALOG)
 
--- Decoding a catalog is megabytes of JSON, so the decoded copy is kept for the
--- session: deleting the file underneath it must not change any answer.
+-- Decoding a catalog is megabytes of JSON, so the decoded copy is kept for the session.
 vim.fn.delete(store.path(CONNECTION, CATALOG))
 check("a second load does not go back to the file", store.load(CONNECTION, CATALOG) ~= nil, true)
 check("only reload does, and then there is nothing there", store.reload(CONNECTION, CATALOG), nil)
@@ -121,8 +116,7 @@ check(
 )
 
 local details = store.details(CONNECTION, CATALOG, "public", "users")
--- neogrip/render.lua renders details.rows, so the column list has to arrive
--- under that name rather than as `columns`.
+-- neogrip/render.lua renders details.rows, so the column list arrives under that name.
 check("a definition carries its column list as rows", #details.rows, 2)
 check("the primary key is spelled out", details.primary_key, { "id" })
 check("the indexes come with it", details.indexes[1].name, "users_pkey")
@@ -169,9 +163,8 @@ check(
 
 support.describe("store: an engine with no schemas")
 
--- SQLite and DuckDB have no schema level, so the sweep writes one nameless
--- schema and the caller asks for tables without naming one. Both sides have to
--- land on the same key or nothing is ever found.
+-- SQLite and DuckDB have no schema level: the sweep writes one nameless schema
+-- and the caller must land on the same key.
 store.clear(OTHER)
 store.save(OTHER, nil, {
 	at = os.time(),
@@ -229,8 +222,7 @@ store.clear(OTHER)
 
 support.describe("store: a file that is not a snapshot")
 
--- A half-written or hand-edited file is not worth a traceback: the caller
--- falls back to asking the server, which is what it did before any of this.
+-- A half-written file is not worth a traceback: the caller falls back to the server.
 local path = store.path(CONNECTION, CATALOG)
 vim.fn.writefile({ "this is not json, it is a sentence" }, path)
 check("a file that will not decode reads as no snapshot", store.reload(CONNECTION, CATALOG), nil)
@@ -241,8 +233,8 @@ support.describe("store: db.schema answers from the snapshot without a server")
 
 saved()
 
---- Drive one of db.schema's callback functions and insist it answered before it
---- returned. A round trip would reach db.jvm, which has no process here.
+--- Insists the callback answered before returning: a round trip would reach a JVM
+--- that has no process here.
 local function answered(start)
 	local records, failure, called = nil, nil, false
 	start(function(list, err)

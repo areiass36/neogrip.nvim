@@ -1,8 +1,5 @@
--- A fake gripd speaking the wire protocol, run as:
---   nvim --clean -l tests/mock_gripd.lua
--- It implements just enough of doc/protocol.md for the rpc client's unit
--- suite: handshake, correlation, errors, server-initiated traffic, garbage on
--- stdout and a payload big enough to split across pipe chunks.
+-- A fake gripd implementing just enough of doc/protocol.md for the rpc unit suite.
+-- Run as: nvim --clean -l tests/mock_gripd.lua
 local function send(object)
 	io.stdout:write(vim.json.encode(object) .. "\n")
 	io.stdout:flush()
@@ -16,8 +13,7 @@ local function respond_error(id, code, message, data)
 	send({ jsonrpc = "2.0", id = id, error = { code = code, message = message, data = data } })
 end
 
--- Kept in step with lua/neogrip/rpc/protocol.lua by hand: this script runs
--- under nvim --clean, with the plugin nowhere on its path.
+-- Kept in step with lua/neogrip/rpc/protocol.lua by hand: nvim --clean has no plugin path.
 local VERSION = 5
 local initialized = false
 
@@ -49,8 +45,6 @@ for line in io.lines() do
 			send({ jsonrpc = "2.0", method = "status", params = { message = "hello" } })
 			respond(id, vim.empty_dict())
 		elseif method == "ask" then
-			-- A server-initiated request: ask the client for a value, wait for
-			-- its answer, then fold it into the original response.
 			send({ jsonrpc = "2.0", id = "sv-1", method = "input", params = { prompt = "value?" } })
 			local answer = nil
 			for reply_line in io.lines() do

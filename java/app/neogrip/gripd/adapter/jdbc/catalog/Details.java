@@ -10,10 +10,8 @@ import java.util.List;
 import neogrip.gripd.contract.Contracts;
 
 /**
- * Everything the table view draws: the columns, the primary key, the indexes,
- * the foreign keys this table declares and the ones pointing back at it. Five
- * metadata calls, and unlike the snapshot they are per table - affordable
- * because this only runs for a table someone opened.
+ * Everything the table view draws, in five per-table metadata calls -
+ * affordable because this only runs for a table someone opened.
  */
 public final class Details {
     private final Connection connection;
@@ -33,14 +31,6 @@ public final class Details {
         List<Contracts.ColumnRow> columns;
     }
 
-    /**
-     * Everything the table view draws: the columns, the primary key, the
-     * indexes, the foreign keys this table declares and the ones pointing back
-     * at it.
-     *
-     * Five metadata calls, and unlike the snapshot they are per table - which
-     * is affordable because this only runs for a table someone opened.
-     */
     public Object details(String catalog, String schema, String table) throws SQLException {
         if (MongoFields.isMongo(connection)) {
             // A collection has no indexes or keys to speak of through JDBC.
@@ -72,10 +62,9 @@ public final class Details {
     }
 
     /**
-     * There is no portable "show me the DDL": JDBC does not have one. What it
-     * does have is every piece one is written from, which is what details
-     * answers with - the rendering happens in Lua, where the dialect's quoting
-     * rules already live.
+     * JDBC has no portable "show me the DDL", so this answers with the pieces
+     * one is written from; the rendering happens in Lua, where the dialect's
+     * quoting rules already live.
      */
     public Object ddl(String catalog, String schema, String table) throws SQLException {
         return details(catalog, schema, table);
@@ -83,19 +72,8 @@ public final class Details {
 
     /**
      * The primary key, index and foreign key pass for one table, each call
-     * left to fail on its own.
-     *
-     * Trino throws on getIndexInfo because it has no indexes at all, so a
-     * sweep of ten thousand of its tables has to finish cheaply rather than
-     * fail on the first one.
-     *
-     * The key is asked for again here, per table, even though the schema sweep
-     * already asked for all of them at once. DuckDB answers a whole-schema
-     * getPrimaryKeys with an empty result rather than refusing, so the sweep
-     * takes "this schema has no keys" for an answer and its per-table fallback
-     * never runs - and a definition cached without its PRIMARY KEY is wrong
-     * rather than merely slow. This pass is already paying for per-table
-     * metadata, so one more call costs little and settles it.
+     * left to fail on its own, and the key asked for again per table; see
+     * doc/internals.md#schema-and-tree.
      *
      * @param swept the key the schema sweep found, which stands when the
      *              per-table call finds nothing of its own.
@@ -105,18 +83,13 @@ public final class Details {
         DetailParts details = new DetailParts();
         Keys.PrimaryKey primaryKey = Keys.primaryKeyOf(meta, catalog, schema, table);
         if (primaryKey.isEmpty()) {
-            // A table with no key, or a driver that would not say: either way
-            // the sweep's answer is the only one there is, and believing an
-            // empty answer over it would be how keys get lost.
+            // Believing an empty per-table answer over the sweep's is how keys get lost.
             details.primaryKey = swept;
         } else {
             details.primaryKey = primaryKey;
-            // Which columns, not in which order: the flags only say whether a
-            // column is in the key, so a key the sweep found in another order
-            // is not a reason to ask the server for the columns again.
+            // The sweep's columns carry is_pk flags from its key, so a different key means rebuilding them;
+            // order alone does not, since the flags only say whether a column is in the key.
             if (!primaryKey.columns.equals(swept.columns)) {
-                // The columns were built with their is_pk flags taken from
-                // the key the sweep found, so they have to be built again.
                 details.columns = columnsOf(meta, catalog, schema, table, primaryKey.columns);
             }
         }
@@ -130,9 +103,8 @@ public final class Details {
      * One table's columns, for the pass that found a primary key the schema
      * sweep had not.
      *
-     * @return null when the driver will not answer per table, which leaves the
-     *         sweep's columns in place: is_pk flags that are missing a key beat
-     *         a table with no columns at all.
+     * @return null when the driver will not answer per table: is_pk flags
+     *         missing a key beat a table with no columns at all.
      */
     static List<Contracts.ColumnRow> columnsOf(
             DatabaseMetaData meta, String catalog, String schema, String table, Set<String> primaryKeys) {

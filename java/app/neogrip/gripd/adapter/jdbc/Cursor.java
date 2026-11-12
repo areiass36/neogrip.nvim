@@ -13,25 +13,11 @@ import neogrip.gripd.contract.Contracts.QueryPage;
 /**
  * One open result: the statement, its ResultSet and everything needed to hand
  * out the next batch of rows without running the query again (ADR-0031).
- *
- * The window is why this stays bounded. With autocommit on - the default,
- * ADR-0013 - every driver in play either materialises the whole result inside
- * the driver before executeQuery returns (PostgreSQL, MySQL) or buffers it as
- * it is read, so the row count handed to the statement before execution is the
- * only lever over how much memory arrives. 1001 is 1000 rows to hand out plus
- * one that reveals the table has more; when that drains, refill() re-executes
- * and skips what was already delivered, which is the whole of ADR-0014 paging
- * reduced to a once-per-window event - five pages at the default limit of 200.
- *
- * Whether the opening execution takes the window depends on whether the client
- * named the result. A named one can be continued, so it opens with the window
- * and the next pages come out of the rows already in hand. An unnamed one - a
- * table preview, a completion sample, a probe - asks for the batch and one row
- * more, exactly as before, because pulling 1000 rows to show 5 would be a
- * straight loss.
- *
- * Not thread-safe by design: every call arrives under the session lock
- * Database holds, because reading a ResultSet is touching the connection.
+ * With autocommit on (ADR-0013) every driver in play materialises or buffers
+ * the whole result, so the row count handed to the statement before execution
+ * is the only lever over memory; when the window drains, refill() re-executes
+ * and skips what was delivered - ADR-0014 paging, once per window. Not
+ * thread-safe by design: every call arrives under the session lock Database holds.
  */
 final class Cursor {
     /** Rows handed out per execution before a refill is needed. */
@@ -100,19 +86,13 @@ final class Cursor {
                 connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
         cursor.statement = statement;
         running.set(statement);
-        // A result that can be continued opens with the whole window, because
-        // the alternative was measured and is much worse: asking for the batch
-        // and one row more made the second page drain the execution and refill,
-        // so an expensive statement was paid twice. On a Trino GROUP BY over a
-        // Delta table: first page 226s, second page 236s. Opening with the
-        // window instead, the same second page costs 4ms. One that cannot be
-        // continued - a preview, a sample, a probe - keeps the narrow cap, so
-        // nothing pulls a thousand rows to show five.
+        // A continuable result opens with the whole window; see doc/internals.md#runner-and-execute.
+        // A result that cannot be continued keeps the narrow cap, so nothing pulls a thousand
+        // rows to show five.
         int opening = limit <= 0 ? 0 : continuable ? Math.max(limit, WINDOW) + 1 : limit + 1;
         cursor.prepare(statement, opening, opening);
 
-        // The last thing before the call that blocks: everything above is
-        // setup, and the clock the reader watches starts here (ADR-0042).
+        // The clock the reader watches starts here, last before the blocking call (ADR-0042).
         started.now();
         if (statement.execute(sql)) {
             cursor.hasRows = true;
@@ -145,8 +125,7 @@ final class Cursor {
             Drivers.tolerate(() -> target.setQueryTimeout(timeoutSeconds));
         }
         if (maxRows > 0) {
-            // The driver asks the server for this many and no more, which beats
-            // rewriting the statement with a LIMIT the dialect may spell
+            // setMaxRows beats rewriting the statement with a LIMIT the dialect may spell
             // differently (ADR-0014).
             Drivers.tolerate(() -> target.setMaxRows(maxRows));
         }
@@ -157,8 +136,7 @@ final class Cursor {
         meta = rows.getMetaData();
         columnCount = meta.getColumnCount();
 
-        // The MongoDB driver answers with a single column holding a document;
-        // the grid wants one column per field.
+        // The MongoDB driver answers one document column; see doc/internals.md#jdbc-drivers.
         documents = Documents.detect(meta, columnCount);
         if (documents != null) {
             return;
@@ -167,10 +145,8 @@ final class Cursor {
             final int column = i;
             names.add(meta.getColumnLabel(i));
             types.add(Values.typeName(meta, i));
-            // Where each column came from, which is what lets a cell be
-            // followed back to the row it belongs to: a foreign key in a
-            // result is only useful if the editor knows which table the value
-            // is a key into. A document result has no tables to name.
+            // Where each column came from: a foreign key in a result is only useful if the
+            // editor knows which table the value is a key into.
             tables.add(optional(() -> meta.getTableName(column)));
             schemas.add(optional(() -> meta.getSchemaName(column)));
         }
@@ -197,8 +173,7 @@ final class Cursor {
 
             boolean done = limit <= 0 || !peek();
             if (documents != null) {
-                // A field missing from an earlier document has to be filled in
-                // once the later ones have revealed it.
+                // A field missing from an earlier document is filled in once later ones reveal it.
                 documents.pad(collected, names.size());
             }
             return new QueryPage(hash, announce(), collected, done, System.currentTimeMillis() - start);
@@ -232,10 +207,8 @@ final class Cursor {
     }
 
     /**
-     * Move onto the next row, crossing into another execution when this one
-     * has handed out its whole window. Refilling here rather than only at the
-     * end of a batch is what keeps the batch that straddles the window a full
-     * one instead of the single row left over from the old execution.
+     * Move onto the next row, refilling mid-batch so the batch that straddles
+     * the window stays full instead of carrying the old execution's leftover row.
      *
      * @return false when there is no next row anywhere
      */
@@ -244,9 +217,7 @@ final class Cursor {
             fetched++;
             return true;
         }
-        // The result set ran out. Short of what this execution was allowed,
-        // that is the end of the table; at the cap, only the end of this
-        // execution, and the next one is given the window.
+        // Short of the cap the table is over; at the cap, only this execution is.
         if (cap <= 0 || fetched < cap) {
             return false;
         }
@@ -269,12 +240,9 @@ final class Cursor {
     }
 
     /**
-     * Run the same statement again, skipping what was already delivered, and
-     * leave it positioned on the first row past the skip. This is ADR-0014
-     * paging, now paid once per window instead of once per page.
-     *
-     * Only ever called with nothing pending, which is what makes `delivered`
-     * the right number to skip: every row read so far has been handed out.
+     * Run the same statement again, skipping what was already delivered
+     * (ADR-0014 paging, paid once per window); only ever called with nothing
+     * pending, which is what makes `delivered` the right number to skip.
      *
      * @return whether the re-execution still had rows to hand out
      */
@@ -284,15 +252,12 @@ final class Cursor {
         statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
         running.set(statement);
         prepare(statement, (int) Math.min(Integer.MAX_VALUE, skip + WINDOW + 1), WINDOW + 1);
-        // Another execution of the same statement, and the slowest thing a
-        // reader waits on, so it is announced like the first (ADR-0042).
+        // Another execution of the same statement, announced like the first (ADR-0042).
         started.now();
         rows = statement.executeQuery(sql);
         for (long i = 0; i < skip; i++) {
             if (!rows.next()) {
-                // The table lost rows between the two executions, which
-                // ADR-0014 already documents as the cost of not holding one
-                // cursor across the whole result.
+                // The table lost rows between the two executions - the cost ADR-0014 documents.
                 return false;
             }
         }
@@ -344,12 +309,7 @@ final class Cursor {
     }
 
     /**
-     * Read something JDBC describes as optional, and treat it as optional.
-     *
-     * getTableName and getSchemaName are the cases this exists for: DuckDB
-     * answers both with an empty string, SQLite names the table but has no
-     * schema layer to name, an expression has no table to come from on any
-     * engine, and some drivers throw rather than say so.
+     * Read something JDBC describes as optional; see doc/internals.md#jdbc-drivers.
      *
      * @return null for a value that is absent, empty or unreadable, so the
      *         record leaves the field out instead of carrying an empty name

@@ -20,18 +20,11 @@ import neogrip.gripd.domain.error.RequestRefused;
 import neogrip.jsonrpc.RpcLifecycle;
 
 /**
- * What the handlers ask to have something done on the database.
- *
- * It owns no mechanism of its own any more: the {@link ExecutionLane} puts
- * requests through the shared connection one at a time, a
- * {@link ConnectionScope} holds everything bound to that connection, and this
- * class is what picks the one out of the other. What is left here is the
- * one-sweep-at-a-time rule and the end of the connection's life; the idle
- * transaction and the abandoned result are the watchdog's business.
- *
- * Reading the scope before taking the lane means a request that arrives before
- * connect is refused at once instead of queueing behind a statement it has
- * nothing to do with.
+ * What the handlers ask to have something done on the database: the
+ * {@link ExecutionLane} serializes the shared connection, a
+ * {@link ConnectionScope} holds everything bound to it, and this class picks
+ * the one out of the other. Reading the scope before taking the lane refuses
+ * a pre-connect request at once instead of queueing it behind a statement.
  */
 public final class Database implements RpcLifecycle {
     private final Session session;
@@ -52,12 +45,8 @@ public final class Database implements RpcLifecycle {
     }
 
     /**
-     * Open the connection and bind everything that runs on it.
-     *
-     * The two steps live together so they cannot be done in the wrong order,
-     * or one of them forgotten: a scope without a connection has nothing to
-     * execute on, and a connection without a scope is what the lazy bind this
-     * replaced existed to paper over.
+     * Open the connection and bind everything that runs on it; the two steps
+     * live together so neither can be forgotten or done in the wrong order.
      */
     public Contracts.ConnectResult open(
             String url,
@@ -83,12 +72,8 @@ public final class Database implements RpcLifecycle {
     }
 
     /**
-     * Work on the connection, with the driver's exception translated on the
-     * way out.
-     *
-     * Everything below this line speaks JDBC and nothing above it has to: this
-     * is the one place a SQLException becomes something the rest of the
-     * program can carry without declaring it (ADR-0032).
+     * The one place a SQLException becomes something the rest of the program
+     * can carry without declaring it (ADR-0032).
      */
     private <T> T onConnection(ExecutionLane.SqlCall<T> call) {
         try {
@@ -106,8 +91,6 @@ public final class Database implements RpcLifecycle {
             throw new DataAccessException(e);
         }
     }
-
-    // --- statements -------------------------------------------------------
 
     public Optional<Contracts.TxState> intercept(String sql) {
         Transactions transactions = scope().transactions();
@@ -144,13 +127,10 @@ public final class Database implements RpcLifecycle {
     }
 
     /**
-     * Stop and close one open result (ADR-0031).
-     *
-     * The cancel itself takes no lock - Statement.cancel is the one JDBC call
-     * defined as safe from another thread - and only the close that follows
-     * waits for the connection to be free, because closing a ResultSet is
-     * touching it. Waiting here costs nothing structural: every request runs on
-     * its own virtual thread (ADR-0028), so the read loop is never what waits.
+     * Stop and close one open result (ADR-0031): the cancel takes no lock -
+     * Statement.cancel is safe from another thread - and only the close that
+     * follows waits for the connection, which costs nothing since every
+     * request runs on its own virtual thread (ADR-0028).
      */
     public boolean cancel(String hash) {
         if (hash == null || hash.isEmpty()) {
@@ -178,8 +158,6 @@ public final class Database implements RpcLifecycle {
         lane.sweepCancelled().set(true);
         return lane.running().cancel();
     }
-
-    // --- catalog ----------------------------------------------------------
 
     public Contracts.Rows<Contracts.Named> catalogs(String after, int limit) {
         Listings listings = scope().listings();
@@ -240,11 +218,9 @@ public final class Database implements RpcLifecycle {
             throw new RequestRefused("a catalog sweep is already running on this connection");
         }
         try {
-            // The flag is shared with a running statement's cancel, so a cancel
-            // sent before this sweep must not end it on sight. The sweep runs
-            // outside the lane on purpose: it opens sibling connections of its
-            // own, and holding the lock for minutes would queue every statement
-            // behind it - the exact thing it exists to avoid.
+            // A cancel sent before this sweep must not end it on sight; the sweep runs outside
+            // the lane on purpose, since holding the lock for minutes would queue every
+            // statement behind it.
             lane.sweepCancelled().set(false);
             return sweep.introspect(catalogName, schema, path, parallelism, budgetMs, details);
         } catch (SQLException | IOException e) {
@@ -261,12 +237,11 @@ public final class Database implements RpcLifecycle {
             return;
         }
 
-        // Every open result goes before the connection does, which is the
-        // other reason this hook has to run before the Session one.
+        // Every open result goes before the connection does.
         current.closeAllCursors();
 
-        // Never commit on the way out (ADR-0013); this runs before the Session
-        // closes the connection, because shutdown hooks fire in reverse order.
+        // Never commit on the way out (ADR-0013); this runs before the Session closes the
+        // connection, because shutdown hooks fire in reverse order.
         if (current.inTransaction()) {
             current.rollbackQuietly();
         }

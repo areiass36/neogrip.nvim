@@ -1,6 +1,5 @@
--- A result is a cursor the client names (ADR-0031): what goes on the wire to
--- open and to continue one, and the paging that never reaches a server because
--- the pages already fetched never left the editor.
+-- The wire shapes for opening and continuing a result cursor, and the paging
+-- over pages already fetched.
 local support = require("tests.support")
 local check = support.check
 local execute = require("neogrip.execute")
@@ -35,8 +34,7 @@ gripd.request = function(_, method, params, callback)
 	sent[#sent + 1] = { method = method, params = params }
 	local answer = table.remove(answers, 1)
 	if answer then
-		-- Gripd echoes the name of the result in every batch, so the
-		-- fake does too unless a case is deliberately breaking that.
+		-- The fake echoes the hash as gripd does, unless a case deliberately breaks that.
 		if answer.hash == nil and params and params.hash then
 			answer.hash = params.hash
 		end
@@ -126,8 +124,7 @@ check("recorded by where it landed", state.batches[1], { first = 1, last = 2 })
 check("the footer counts the rows it holds", footer_of(bufnr):find("2 rows", 1, true) ~= nil, true)
 check("and says there is more", footer_of(bufnr):find("(more)", 1, true) ~= nil, true)
 
--- The regression this whole change is about: a batch arriving must not move
--- the reader. goto_page used to reset the row to 1 and re-focus the cell.
+-- The regression guarded: goto_page used to reset the row to 1 when a batch arrived.
 state.row = 2
 grid.add_page(bufnr, { rows = { { 3 }, { 4 } }, done = true, elapsed_ms = 1 })
 check("a batch arriving leaves the cursor where it was", grid.state(bufnr).row, 2)
@@ -138,8 +135,7 @@ check("by where it landed", state.batches[2], { first = 3, last = 4 })
 check("the footer counts all of them", footer_of(bufnr):find("4 rows", 1, true) ~= nil, true)
 check("and stops promising more", footer_of(bufnr):find("(more)", 1, true), nil)
 
--- Header, rule, four rows, a blank and the footer: both batches are drawn, not
--- just the one that arrived last.
+-- Eight lines: header, rule, four rows, a blank and the footer.
 local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 check("every row is on screen", #lines, 8)
 check("the first batch included", lines[3]:find("1", 1, true) ~= nil, true)
@@ -161,8 +157,7 @@ grid.add_page(bufnr, {
 })
 check("the longer column list wins", grid.state(bufnr).columns, { "n", "extra" })
 check("and is drawn", vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1]:find("extra") ~= nil, true)
--- The rows from before the widening were a separate page once; a careless
--- append would have dropped them when the shape changed.
+-- A careless append would have dropped the earlier page when the shape changed.
 check(
 	"the rows from before it are still there",
 	vim.api.nvim_buf_get_lines(bufnr, 2, 3, false)[1]:find("1", 1, true) ~= nil,
@@ -204,14 +199,12 @@ notices = {}
 execute.page(grid.state(bufnr), -1)
 check("the first batch has nothing before it", last_notice(), "[neogrip] already on the first page")
 
--- A finished result has nothing to continue, and must not be asked.
 grid.goto_page(bufnr, #grid.state(bufnr).batches)
 notices, requests = {}, {}
 execute.page(grid.state(bufnr), 1)
 check("a finished result is not asked for more", #requests, 0)
 check("the grid says so", last_notice(), "[neogrip] no further rows")
 
--- An open one is, as a continuation of the same cursor.
 grid.state(bufnr).result.done = false
 notices, requests = {}, {}
 local before = #grid.state(bufnr).rows

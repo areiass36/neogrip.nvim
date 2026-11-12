@@ -1,7 +1,5 @@
--- A result is a cursor the client names (ADR-0031), against real servers: the
--- open-continue-finish cycle on every engine, the window refill that crosses
--- two executions, and the lifetime rules that keep a forgotten result from
--- living forever.
+-- The result cursor against real servers: open-continue-finish on every
+-- engine, the window refill, and the lifetime rules.
 local support = require("tests.support")
 local check, note = support.check, support.note
 local gripd = require("neogrip.gripd")
@@ -23,11 +21,9 @@ for _, driver in ipairs(order) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
-		-- Some databases arrive without a fixture of their own.
 		support.ensure_fixture(connection)
 		if driver == "duckdb" then
-			-- The file has to be written by the driver that reads it, so the
-			-- fixture is created here rather than by tests/containers.sh.
+			-- DuckDB refuses a file written by another driver version.
 			support.run(
 				connection,
 				"create or replace table torture as select * from " .. "(values (1,'a'),(2,'b')) t(id,s)",
@@ -54,8 +50,7 @@ for _, driver in ipairs(order) do
 				check("the second batch is the next row", #second.rows, 1)
 				check("a different row", second.rows[1][1] ~= first.rows[1][1], true)
 				check("the fixtures have two, so it is finished", second.done, true)
-				-- The shape was described when the result was opened; only a
-				-- document result that grew its own columns sends it again.
+				-- Only a document result that grew its columns re-sends the shape.
 				check("and the shape is not repeated", second.columns, nil)
 			end
 
@@ -75,18 +70,9 @@ end
 
 support.describe("live/cursor: the window refills without the client noticing")
 
--- More rows than one execution is allowed to hand out, with a batch smaller
--- than the window so several batches come out of each execution: 2050 rows in
--- batches of 300 crosses the 1000-row window twice. The opening execution asks
--- for the batch and one row more; the window arrives with the first
--- continuation, and the re-executions behind it leave no mark on the rows or
--- the batch sizes - which is the property under test (ADR-0031).
---
--- They do announce themselves, which is what the progress counter below is
--- for: protocol 5 says a notification precedes every execution of a statement,
--- refills included, and more than one for the same hash is the only direct
--- proof that the emission sits inside Cursor and not in Statements.query
--- (ADR-0042).
+-- 2050 rows in batches of 300 cross the 1000-row window twice, and the refills must
+-- leave no mark on the rows or the batch sizes (ADR-0031). More than one progress
+-- frame for the same hash is the only direct proof the emission sits inside Cursor (ADR-0042).
 local TOTAL, PAGE = 2050, 300
 local executions = 0
 local function count_executing(event)
@@ -119,9 +105,7 @@ else
 			end
 			expected = expected + 1
 		end
-		-- Every batch but the last is full: a batch that straddles the window
-		-- must refill mid-collection, not stop at the row the old execution
-		-- had left over.
+		-- A batch straddling the window must refill mid-collection, not come up short.
 		if not batch.done and #batch.rows ~= PAGE then
 			full = false
 		end
@@ -142,26 +126,18 @@ else
 
 	check("every row arrived exactly once, in order", ok, true)
 	check("all of them", expected - 1, TOTAL)
-	-- The batch sizes depend only on the page size, never on the window: that
-	-- is what "the refill is invisible" means.
 	check("every batch but the last was full", full, true)
 	check("so the count is the page size and nothing else", batches, math.ceil(TOTAL / PAGE))
 	check("and the last one carries the remainder", #batch.rows, TOTAL % PAGE)
-	-- Three executions for 2050 rows over a 1000-row window: the opening one
-	-- and two refills. Asserted as "more than one" rather than exactly three,
-	-- so the check is about the refill reporting at all and not about where
-	-- the window happens to fall.
+	-- "More than one" rather than exactly three, so the check is about the refill
+	-- reporting at all and not about where the window falls.
 	check("every execution announced itself, refills included", executions > 1, true)
 end
 
 support.describe("live/cursor: a continuation does not run the statement again")
 
--- The only way to prove it from outside is to change the table between two
--- pages: a row inserted after the result was opened cannot appear in a later
--- batch of the same cursor, and would appear if the page had re-executed with
--- a skip. This is a regression test with a measurement behind it - opening a
--- continuable result with only `limit + 1` rows made the second page drain the
--- execution and refill, which cost a 226s Trino aggregate a second full run.
+-- A row inserted between pages is the only outside proof of no re-execution; the
+-- regression behind it cost a 226s Trino aggregate a second full run.
 support.run(pg, "drop table if exists continuity_probe", { mode = "exec" })
 support.run(pg, "create table continuity_probe as select generate_series(2, 9) * 10 as n", { mode = "exec" })
 
@@ -170,8 +146,7 @@ check("the first page is the lowest three", opened.rows, { { 20 }, { 30 }, { 40 
 support.run(pg, "insert into continuity_probe values (25)", { mode = "exec" })
 local continued = support.next_batch(pg, opened.hash, 3)
 check("the second page continues past them", continued.rows, { { 50 }, { 60 }, { 70 } })
--- A re-execution would have sorted 25 into third place and handed back
--- 30, 40, 50 instead.
+-- A re-execution would have sorted 25 into third place and handed back 30, 40, 50.
 check("and never sees the row inserted meanwhile", continued.rows[1][1] ~= 30, true)
 support.run(pg, "drop table if exists continuity_probe", { mode = "exec" })
 
@@ -190,8 +165,7 @@ check("and the result is gone", after_cancel ~= nil, true)
 local _, unknown = support.next_batch(pg, "000000000000", 10)
 check("a name nobody opened is refused", unknown ~= nil, true)
 
--- Opening a second result under a live name is a client bug, and the refusal
--- must not cost the result that already holds the name.
+-- The refusal of a duplicate name must not cost the result that already holds it.
 local held = support.run(pg, sql, { limit = 10 })
 local _, duplicate = support.sync(function(done)
 	require("neogrip.runner").run({
@@ -208,9 +182,7 @@ check("a name already in use is refused", duplicate ~= nil, true)
 local survivor = support.next_batch(pg, held.hash, 10)
 check("and the result that holds it is untouched", survivor ~= nil and #survivor.rows, 10)
 
--- No cap on live results any more (ADR-0041). Ten at once, and the first is
--- still answering: what reclaims one is a cancel, the idle sweep, the client
--- replacing it, or shutdown - nothing evicts on the client's behalf.
+-- No cap on live results any more: nothing evicts on the client's behalf (ADR-0041).
 local hashes = {}
 for index = 1, 10 do
 	local extra = support.run(pg, sql, { limit = 1 })
@@ -222,8 +194,7 @@ check("and still answering", oldest ~= nil and #oldest.rows, 1)
 local newest = support.next_batch(pg, hashes[10], 1)
 check("so is the tenth", newest ~= nil and #newest.rows, 1)
 
--- Closed by hand, because eviction used to do it for this suite: ten cursors
--- left open with an hour-long idle window would outlive the whole run.
+-- Closed by hand: ten cursors on an hour-long idle window would outlive the run.
 local runner_module = require("neogrip.runner")
 for _, hash in ipairs(hashes) do
 	runner_module.release(pg, hash)

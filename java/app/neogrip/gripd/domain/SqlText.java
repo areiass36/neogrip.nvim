@@ -1,11 +1,9 @@
 package neogrip.gripd.domain;
 
 /**
- * Reading the shape of a statement without parsing it.
- *
- * Two different rules need the same first step - the readonly check and the
- * transaction interception both look at the first keyword - and a statement
- * that opens with a comment would hide that keyword from both of them.
+ * Reading the shape of a statement without parsing it: the readonly check and
+ * the transaction interception both look at the first keyword, which a leading
+ * comment would hide.
  */
 public final class SqlText {
     private SqlText() {}

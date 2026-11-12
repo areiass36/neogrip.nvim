@@ -4,15 +4,9 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * BEGIN, COMMIT and ROLLBACK, recognised but not executed.
- *
- * They are mapped to the JDBC calls rather than passed through as text
- * (ADR-0013), because passing them through desynchronises the driver's view of
- * the transaction state. Only the plain spellings count: BEGIN TRY, savepoints
- * and anything else are statements like any other and pass untouched.
- *
- * Which spellings those are is a fact about SQL, not about JDBC, so it lives
- * here where nothing has to be open to ask.
+ * BEGIN, COMMIT and ROLLBACK, mapped to the JDBC calls rather than passed
+ * through as text (ADR-0013), because passing them through desynchronises the
+ * driver's view of the transaction state; only the plain spellings count.
  */
 public enum TransactionCommand {
     BEGIN(Set.of("begin", "begin work", "begin tran", "begin transaction", "start transaction")),

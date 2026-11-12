@@ -12,10 +12,10 @@ import neogrip.jsonrpc.RpcMethod;
 import neogrip.jsonrpc.RpcNamespace;
 
 /**
- * The catalog, through DatabaseMetaData. The introspect sweep runs one at a
- * time and outside the session lock, on sibling connections of its own: a
- * sweep of a warehouse takes minutes, and either it waits behind a query or
- * the next query waits behind it.
+ * The catalog, through DatabaseMetaData; the introspect sweep runs outside the
+ * session lock on sibling connections of its own, because a warehouse sweep
+ * takes minutes and either it waits behind a query or the next query waits
+ * behind it.
  */
 @RpcNamespace("catalog")
 public final class CatalogHandlers {

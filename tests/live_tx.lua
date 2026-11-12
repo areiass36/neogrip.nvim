@@ -1,6 +1,5 @@
--- Transactions through the interceptor (ADR-0013): BEGIN pins the session,
--- ROLLBACK undoes, COMMIT keeps, and the state is visible to the statusline.
--- DuckDB supports all of it and needs no server.
+-- Transactions through the interceptor, on DuckDB because it supports all
+-- of it and needs no server.
 local support = require("tests.support")
 local check, note = support.check, support.note
 
@@ -37,7 +36,6 @@ local committed = support.run(duck, "COMMIT;", { mode = "exec" })
 check("COMMIT closes the transaction", committed and committed.transaction, false)
 check("and the write stays", support.scalar(duck, "select count(*) from ledger"), 2)
 
--- Spellings the interceptor must leave alone.
 local through = support.run(duck, "select 'begin' as word", { limit = 1 })
 check("a statement that merely contains the word passes through", through.rows[1][1], "begin")
 

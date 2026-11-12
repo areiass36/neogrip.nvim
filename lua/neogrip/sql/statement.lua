@@ -1,13 +1,5 @@
--- A statement to start from, as text and nothing else.
---
--- This was inside the explorer, which built the text and then opened a buffer
--- with it. The text is the useful half and it is not UI (ADR-0037): the client
--- decides where it goes - a buffer, the register, a floating window, straight
--- into a prompt.
---
--- Nothing produced here is runnable on purpose. The values are named
--- placeholders, so a statement that would rewrite a table cannot be executed
--- by accident: it is a statement you finish.
+-- Builds statement text only. Nothing produced here is runnable: values are
+-- named placeholders, so a rewrite cannot run by accident.
 local schema = require("neogrip.schema")
 
 local M = {}

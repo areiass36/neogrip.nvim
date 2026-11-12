@@ -1,8 +1,5 @@
--- What kind of statement is this?
---
--- The answer decides three things: whether the result can be wrapped in a
--- LIMIT, how it can be validated without running it (a server validates DML and
--- DDL by different means), and whether a read-only connection must refuse it.
+-- The kind decides whether a result can be LIMIT-wrapped, how to validate without running,
+-- and whether a read-only connection must refuse the statement.
 local M = {}
 
 local KIND_BY_VERB = {
@@ -83,9 +80,7 @@ function M.kind(sql)
 	end
 	verb = verb:lower()
 
-	-- A CTE can end in INSERT/UPDATE/DELETE, which writes despite starting
-	-- with WITH. Checking for the keyword after the closing parenthesis is
-	-- brittle, so look for the verb at the top level of the text instead.
+	-- A CTE can end in INSERT/UPDATE/DELETE, which writes despite starting with WITH.
 	if verb == "with" then
 		local lowered = text:lower()
 		if
@@ -106,8 +101,7 @@ function M.kind(sql)
 	return KIND_BY_VERB[verb] or "other"
 end
 
---- True when the statement already limits its own rows, so wrapping it would
---- change what the author asked for.
+--- True when the statement already limits its own rows; wrapping would change what was asked.
 function M.has_limit(sql, dialect)
 	local lowered = (sql or ""):lower()
 	if dialect == "mssql" then

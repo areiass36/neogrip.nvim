@@ -44,9 +44,7 @@ check(
 
 support.describe("execute: timeout_ms = 0 runs without arming the watchdog")
 
--- With a zero timeout the runner must not schedule the stopped-process
--- watchdog; otherwise 0 would still kill the query at ~10s. A mock gripd
--- that never answers lets us prove nothing fires.
+-- A stub that never answers proves a zero timeout arms no watchdog.
 local runner = require("neogrip.runner")
 local config = require("neogrip.config")
 local gripd = require("neogrip.gripd")
@@ -72,7 +70,7 @@ runner.run({
 }, function(_, err)
 	fired = err or {}
 end)
--- The old watchdog would fire at ~10s (0 + 10000). Wait past that.
+-- The old watchdog fired at ~10s (0 + 10000), so the wait reaches past that.
 vim.wait(11000, function()
 	return fired ~= nil
 end, 100)
@@ -85,9 +83,7 @@ config.setup({})
 
 support.describe("execute: a visual selection of several statements runs them in sequence")
 
--- A selection can hold more than one statement; the driver takes one per call
--- (Trino rejects even two separated by ';'). The selection must therefore be
--- split and run in order, each statement carrying no terminator.
+-- The driver takes one statement per call: Trino rejects even two separated by ';'.
 local resolve = require("neogrip.resolve")
 local grid = require("neogrip.grid")
 

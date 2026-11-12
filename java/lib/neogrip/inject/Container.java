@@ -7,19 +7,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Classes in, singletons out: each class is instantiated once, with every
- * constructor parameter resolved by type from what is already built.
- *
- * Micro-injection, not a framework - no annotations, no scopes, no proxies -
- * because what the callers needed was to stop writing {@code new Handler(dep)}
- * chains in main. Everything that can be wrong is wrong at construction time
- * and names the offender: a missing dependency, a cycle, two components of one
- * type, a class with more than one constructor.
- *
- * Resolution is by assignability, so an interface parameter finds the one
- * instance that implements it. Construction order is dependency order, and
- * {@link #construct} returns it, because a caller that runs lifecycle hooks
- * needs to know who came first.
+ * Classes in, singletons out: each class instantiated once, constructor
+ * parameters resolved by assignability from what is already built; everything
+ * wrong is wrong at construction time and names the offender, and
+ * {@link #construct} returns construction order because a caller running
+ * lifecycle hooks needs to know who came first.
  */
 public final class Container {
     private final Map<Class<?>, Object> instances = new LinkedHashMap<>();
@@ -52,8 +44,7 @@ public final class Container {
                 }
             }
             if (!progressed) {
-                // Everything left wants something nothing provides, or wants
-                // each other; the names are what makes that findable.
+                // Everything left wants something nothing provides, or wants each other.
                 List<String> names = remaining.stream().map(Class::getName).toList();
                 throw new IllegalStateException("cannot construct " + names + ": missing dependency or a cycle");
             }

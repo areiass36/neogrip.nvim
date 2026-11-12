@@ -20,8 +20,7 @@ parsed = errors.from_rpc({
 	data = { state = "42S22", vendorCode = 1054 },
 })
 check("a vendor code", parsed.code, 1054)
--- The envelope's code travels separately: a refusal and a failed statement are
--- different answers, and only the envelope can tell them apart.
+-- Only the envelope's code can tell a refusal from a failed statement.
 check("and the envelope's code beside it", parsed.rpc_code, -32010)
 check("with no position", parsed.position, nil)
 check("the token is found", parsed.token, "nosuchcol")
@@ -61,7 +60,6 @@ check(
 	"nosuchcol"
 )
 
--- An offset past the first line is carried onto the right one.
 line = errors.locate({ position = 23 }, statement, bufnr)
 check("an offset on the second line", line, 2)
 
@@ -75,7 +73,6 @@ check("a reported line is relative to the statement", line, 2)
 line = errors.locate({}, statement, bufnr)
 check("with nothing to go on, the statement's first line", line, 1)
 
--- A name that also appears above the statement must not drag the mark up.
 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
 	"-- nosuchcol in a comment",
 	"select nosuchcol from t;",

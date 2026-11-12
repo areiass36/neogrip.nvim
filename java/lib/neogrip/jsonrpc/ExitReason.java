@@ -1,11 +1,8 @@
 package neogrip.jsonrpc;
 
 /**
- * Why the read loop ended, for the program that has to pick an exit code.
- *
- * The library does not call System.exit: killing the host process is not a
- * library's decision, and a server embedded in something larger would be
- * killing its host. It reports, and {@code main} decides.
+ * Why the read loop ended; the library never calls System.exit - it reports,
+ * and {@code main} decides.
  */
 public enum ExitReason {
     /** Stdin reached EOF, or the client asked the server to stop. */

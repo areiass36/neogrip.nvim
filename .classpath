@@ -1,13 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  The two source roots of ADR-0032, and nothing else: every import in this tree
-  is either from the JDK or from one of these two roots, so the JRE container
-  is the whole classpath. Driver jars are downloaded at runtime (ADR-0006) and
-  no source compiles against one on purpose.
-
-  The output folder is the language server's own, kept apart from the build/
-  tree a manual javac writes so neither can hand the other a half-written class.
--->
+<!-- See doc/internals.md#java-tooling. -->
 <classpath>
 	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
 	<classpathentry kind="src" path="java/lib"/>

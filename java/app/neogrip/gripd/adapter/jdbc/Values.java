@@ -12,21 +12,11 @@ import java.time.temporal.Temporal;
 import java.util.HexFormat;
 
 /**
- * Turning a JDBC value into something the editor can show without lying about
- * it.
- *
- * The rules come from what actually goes wrong:
- *
- *   NULL        must stay distinct from the empty string, so it is JSON null
- *               and nothing else is.
- *   DECIMAL     keeps every digit, as text: a double would round 8.90 and
- *               money is exactly where that matters.
- *   BIGINT      above 2^53 also goes out as text, because the decoder on the
- *               other side is Lua, whose numbers are doubles.
- *   binary      becomes hex. The bytes are not text and pretending otherwise
- *               is how a bytea column turns into replacement characters.
- *   dates       ISO 8601, from the driver's own object rather than its
- *               toString, which is locale-dependent.
+ * Turn a JDBC value into something the editor can show without lying: NULL
+ * stays JSON null, DECIMAL goes out as text so money keeps every digit, a
+ * BIGINT too big for the Lua decoder's doubles goes out as text (see
+ * doc/internals.md#protocol), binary becomes hex, and dates are ISO 8601
+ * from the driver's object rather than its locale-dependent toString.
  */
 public final class Values {
     private Values() {}
@@ -40,8 +30,7 @@ public final class Values {
     public static Object read(ResultSet rows, ResultSetMetaData meta, int column) throws SQLException {
         int type = meta.getColumnType(column);
 
-        // getObject first, then wasNull: for a primitive getter the value would
-        // already have been coerced to 0 or false.
+        // getObject before wasNull: a primitive getter would already have coerced the value to 0 or false.
         Object value = rows.getObject(column);
         if (rows.wasNull() || value == null) {
             return null;

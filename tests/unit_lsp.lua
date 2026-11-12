@@ -1,10 +1,5 @@
--- The SQL language server, asked directly.
---
--- It runs in this process -- vim.lsp.start takes a function for `cmd`, and
--- db/lsp.lua returns an in-process client from one -- so the server object can
--- be built and questioned with no RPC, no client and no catalog but the
--- fixture below. That is the whole point of these: every answer the server has
--- is a handful of table lookups, and a test of them should be the same.
+-- The SQL language server, asked directly: it runs in this process, so it is
+-- questioned with no RPC, no client and no catalog but the fixture below.
 local support = require("tests.support")
 local check = support.check
 local connections = require("neogrip.connections")
@@ -16,8 +11,7 @@ local store = require("neogrip.schema.store")
 
 local KIND = vim.lsp.protocol.SymbolKind
 
--- An id no real connection can have: the snapshot below is written next to a
--- developer's own and deleted again at the end.
+-- An id no real connection can have: the snapshot lands next to a developer's own.
 local connection = connections.register({
 	id = "__test_lsp__",
 	name = "lsp test",
@@ -29,9 +23,7 @@ local connection = connections.register({
 })
 local CATALOG = "appdb"
 
--- Two keys of sales.orders point at the one table, which is what the
--- references answer has to notice: a neighbour named twice is still one place
--- to go to.
+-- Two keys of sales.orders point at the one table, which the references answer must fold.
 store.save(connection, CATALOG, {
 	product = "fixture",
 	schemas = {
@@ -126,8 +118,7 @@ store.save(connection, CATALOG, {
 	},
 })
 
--- Three statements, the first of them opening with a comment about itself,
--- which is what the outline has to see past.
+-- The first statement opens with a comment the outline has to see past.
 local LINES = {
 	"-- customers, as a word in a comment",
 	"select c.id, c.email, c.nosuch",
@@ -140,21 +131,16 @@ local LINES = {
 local bufnr = vim.api.nvim_create_buf(true, false)
 vim.api.nvim_buf_set_name(bufnr, vim.fn.stdpath("state") .. "/db/lsp-test.sql")
 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, LINES)
--- Bound through the buffer variable rather than db.resolve.bind, which would
--- write the binding into a developer's own state directory.
+-- Bound through the buffer variable: resolve.bind would write into a developer's state dir.
 vim.b[bufnr].neogrip_connection = connection.id
 local URI = vim.uri_from_bufnr(bufnr)
 
--- The definition of a column is a line of its table's rendered document, and
--- rendering one appends the server's own DDL when the driver has it. That is a
--- round trip, which here would start a Java process, and no answer below reads
--- it.
+-- Stubbed because rendering a document fetches native DDL, a round trip that
+-- would start a Java process here.
 local real_ddl = schema.native_ddl
 schema.native_ddl = function() end
 
--- The server object is what M.start hands to vim.lsp.start as `cmd`, and
--- nothing exports it. Stubbing that one call is how to reach it without a real
--- client attaching to the buffer and asking these questions of its own.
+-- Nothing exports the server object, so it is captured off the vim.lsp.start call.
 local captured = nil
 local real_start = vim.lsp.start
 vim.lsp.start = function(config)
@@ -164,8 +150,7 @@ end
 local client_id = lsp.start(bufnr)
 vim.lsp.start = real_start
 
--- Dispatchers are how a client is told about what it did not ask for. Nothing
--- here notifies, exits or fails, so they only have to exist.
+-- Nothing here notifies, exits or fails, so the dispatchers only have to exist.
 local server = captured.cmd({
 	notification = function() end,
 	server_request = function() end,
@@ -173,14 +158,8 @@ local server = captured.cmd({
 	on_error = function() end,
 })
 
---- One request, answered.
----
---- Every reply is scheduled, even one the process already has, so an answer
---- still has to come back through the event loop. The wait is bounded, so a
---- server that never answers fails the check rather than hanging the suite.
---- @param settle integer|nil keep listening this long instead of stopping at
---- the first reply, for a request whose second answer would arrive late
---- @return integer calls, any reply, any failure
+--- Replies are scheduled, so the bounded wait lets them through the event loop;
+--- `settle` keeps listening past the first reply to catch a late second answer.
 local function ask(method, params, settle)
 	local calls, reply, failure = 0, nil, nil
 	server.request(method, params, function(err, result)
@@ -193,7 +172,6 @@ local function ask(method, params, settle)
 end
 
 --- A position in the test buffer, as the protocol spells one.
---- @param offset integer|nil how far into `needle` the cursor sits
 local function at(line, needle, offset)
 	local column = LINES[line]:find(needle, 1, true)
 	if not column then
@@ -228,10 +206,8 @@ local calls, initialized = ask("initialize", {})
 check("initialize is answered exactly once", calls, 1)
 
 local advertised = initialized.capabilities
--- Read as the set of providers rather than compared whole: the server answers
--- with its own capabilities table, and a client that attaches normalizes the
--- table it is handed in place, so any client started earlier in the suite
--- leaves a textDocumentSync in it.
+-- Read as the set of providers rather than compared whole: an attaching client
+-- normalizes the capabilities table in place.
 local providers = {}
 for name in pairs(advertised) do
 	if name:match("Provider$") then
@@ -246,10 +222,7 @@ check("exactly five answers are advertised", providers, {
 	"referencesProvider",
 	"workspaceSymbolProvider",
 })
--- Both absences are load-bearing, so they are said again on their own:
--- semantic tokens paint at priority 125, over the dialect layer
--- db/dialect.lua draws at 110, and completion would offer every table twice
--- next to the cmp source.
+-- Semantic tokens paint at priority 125, over the dialect layer's 110.
 check("no semantic tokens, which would paint over the dialect layer", advertised.semanticTokensProvider, nil)
 check("and no completion, which the cmp source already offers", advertised.completionProvider, nil)
 check("positions are measured in bytes, as these modules do", advertised.positionEncoding, "utf-8")
@@ -271,17 +244,13 @@ check("with the schema document", schema_at, {
 	range = at_line(0),
 })
 
--- Read off the rendered text rather than counted, which is what the server
--- does: the renderer is free to leave a column out, and a jump that lands a
--- line off is worse than one that does not land at all.
+-- Read off the rendered text as the server does: the renderer may leave a column out.
 local rendered =
 	render.details(connection, "sales", "customers", store.details(connection, CATALOG, "sales", "customers"))
 local email_line = document.column_line(rendered, "email")
 check("the column has a line in its table's definition", email_line ~= nil, true)
 
--- Waited out past the 250ms deadline the handler arms before it renders: a
--- server that answered from both would break the client, and a check that only
--- read the reply would never see it.
+-- Waited past the 250ms deadline the handler arms, to catch a double answer.
 local column_calls, column_at = ask("textDocument/definition", at(2, "c.email", 2), 400)
 check("a column is answered exactly once, deadline and render both", column_calls, 1)
 check("on the line of its table's definition it is defined on", column_at, {
@@ -396,8 +365,7 @@ check("with nothing", nothing, nil)
 
 support.describe("lsp: a method it never advertised")
 
--- Some clients ask anyway, and an empty answer is what the protocol has for
--- "nothing here" -- an error would be read as a broken server.
+-- Some clients ask anyway, and an error would be read as a broken server.
 local unknown_calls, unknown, unknown_err = ask("textDocument/formatting", { textDocument = { uri = URI } })
 check("it is answered exactly once", unknown_calls, 1)
 check("with nothing", unknown, nil)
@@ -409,8 +377,7 @@ check("and so is vim.lsp", vim.lsp.start == real_start, true)
 
 store.clear(connection)
 pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
--- vim.uri_to_bufnr made a buffer for the document the column answer points at,
--- the way it would for a client about to jump there.
+-- vim.uri_to_bufnr made a buffer for the document the column answer points at.
 for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
 	if vim.startswith(vim.api.nvim_buf_get_name(buffer), "neogrip://") then
 		pcall(vim.api.nvim_buf_delete, buffer, { force = true })

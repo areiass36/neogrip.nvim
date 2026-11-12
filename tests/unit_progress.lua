@@ -1,7 +1,5 @@
--- What gripd says on its own: the status frame it has always sent, and the
--- progress frame protocol 5 added (ADR-0042). The point of the routing is that
--- a frame about one result reaches the request waiting on that result and no
--- other, so most of this suite is about frames that must be ignored.
+-- Routing of gripd's status frames and the progress frames protocol 5 added:
+-- a frame about one result must reach only the request waiting on that result.
 local support = require("tests.support")
 local check = support.check
 local runner = require("neogrip.runner")
@@ -33,8 +31,6 @@ gripd.request = function()
 	return 1
 end
 
---- Start a query and collect the phases it is told about.
---- @return table handle, table phases
 local function started(connection)
 	local phases = {}
 	local handle = runner.run({
@@ -42,8 +38,7 @@ local function started(connection)
 		sql = "select 1",
 		mode = "query",
 		limit = 10,
-		-- The watchdog would restart gripd ten seconds after a request that
-		-- never answers, and every request here never answers.
+		-- Disarms the watchdog, since every request here deliberately never answers.
 		timeout_ms = 0,
 		on_progress = function(event)
 			phases[#phases + 1] = event.phase
@@ -91,8 +86,7 @@ local quiet = #first_phases
 gripd.notification(one, "progress", { hash = "deadbeefcafe", phase = "executing" })
 check("an unknown name is ignored", #first_phases, quiet)
 
--- The tree and the dialect probes open named results too, and nothing listens
--- for theirs, so a frame with no listener must not raise either.
+-- The tree and dialect probes open named results nothing listens for, so no listener, no raise.
 local ok = pcall(gripd.notification, one, "progress", { phase = "executing" })
 check("a frame with no name does not raise", ok, true)
 check("nor does an unknown method", pcall(gripd.notification, one, "log", { message = "x" }), true)
@@ -108,9 +102,8 @@ check("a frame for a finished request is ignored", #first_phases, after_finish)
 
 support.describe("progress: a request that dies on dispatch stays dead")
 
--- gripd.request answers synchronously when the process is gone, so finish runs
--- inside runner.run. Nothing may be reported after that: the caller has already
--- drawn the error.
+-- The stub answers synchronously on purpose: gripd.request does so when the process is gone,
+-- making finish run inside runner.run.
 gripd.request = function(_, _, _, callback)
 	callback(nil, { message = "not connected" })
 	return 1
@@ -124,8 +117,6 @@ end
 
 support.describe("progress: the phases the client knows by itself")
 
--- The queue serializes one request per connection, so the second one waits and
--- is owed a word about it: the window it opened cannot show a number yet.
 local third, third_phases = started(two)
 check("a request behind an active one says so", third_phases[1], "queued")
 check("and does not claim to have been sent", third_phases[#third_phases], "queued")

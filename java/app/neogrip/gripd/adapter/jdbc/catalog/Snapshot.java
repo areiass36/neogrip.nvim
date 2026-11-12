@@ -11,13 +11,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import neogrip.gripd.contract.Contracts;
 
 /**
- * A whole schema - every table with every one of its columns - in two round
- * trips. This is where the explorer's waiting went: walking in asked for one
- * level at a time and the preview asked for one more table's columns on every
- * cursor move, so a remote engine was paying a network round trip per
- * keystroke. getColumns takes a table *pattern*, so one sweep answers for the
- * entire schema and the rest of the walk is served from the cache without
- * touching the server again.
+ * A whole schema in two round trips: getColumns takes a table *pattern*, so
+ * one sweep answers for the entire schema - walking in level by level had a
+ * remote engine paying a network round trip per keystroke.
  */
 public final class Snapshot {
     private final Connection connection;
@@ -32,20 +28,15 @@ public final class Snapshot {
     static final int COLUMN_LIMIT = 20000;
 
     /**
-     * One schema as the sweeps left it: its tables, their keys, and a buffer
-     * of rendered columns per table.
-     *
-     * Every schema gets its own, because the sweeps run on several connections
-     * at once and a StringBuilder two threads append to is not a buffer but a
-     * race. The buffers are joined only when the file is written.
+     * One schema as the sweeps left it; every schema gets its own because the
+     * sweeps run on several connections at once, and a StringBuilder two
+     * threads append to is a race.
      */
     static final class SchemaBody {
         /** What the editor looks this schema up under; empty for no schema layer. */
         final String name;
-        /** What the metadata calls are filtered by, which is the same thing. */
         final String pattern;
         final java.util.LinkedHashMap<String, String> kinds = new java.util.LinkedHashMap<>();
-        /** A table's comment, for the tables that have one. */
         final java.util.LinkedHashMap<String, String> remarks = new java.util.LinkedHashMap<>();
         final java.util.LinkedHashMap<String, List<Contracts.ColumnRow>> columns = new java.util.LinkedHashMap<>();
         final java.util.Map<String, Details.DetailParts> details = new ConcurrentHashMap<>();
@@ -82,10 +73,9 @@ public final class Snapshot {
 
         java.util.Map<String, Keys.PrimaryKey> keys = Keys.schemaPrimaryKeys(meta, catalog, body.pattern);
         if (keys == null) {
-            // The driver would not answer for a whole schema. Asking per table
-            // is the thing this method exists to avoid, so it is only done for
-            // a schema small enough that it stays cheap; a bigger one loses
-            // the key flags in the tree, and the table view still shows them.
+            // The driver refused the whole-schema call; asking per table is only done where it
+            // stays cheap - a bigger schema loses the key flags in the tree, and the table view
+            // still shows them.
             keys = new java.util.LinkedHashMap<>();
             if (body.kinds.size() <= Keys.KEY_FALLBACK_TABLES) {
                 for (String table : body.kinds.keySet()) {
@@ -106,8 +96,7 @@ public final class Snapshot {
                     continue;
                 }
                 String table = rows.getString("TABLE_NAME");
-                // The sweep also answers for system objects and for anything
-                // the table pass dropped; those have nowhere to go.
+                // The sweep also answers for system objects and anything the table pass dropped.
                 if (!body.kinds.containsKey(table)) {
                     continue;
                 }
@@ -120,21 +109,10 @@ public final class Snapshot {
         body.columnCount = written;
     }
 
-    /**
-     * A whole schema - every table with every one of its columns - in two
-     * round trips.
-     *
-     * This is where the explorer's waiting went: walking in asked for one
-     * level at a time and the preview asked for one more table's columns on
-     * every cursor move, so a remote engine was paying a network round trip
-     * per keystroke. getColumns takes a table *pattern*, so one sweep answers
-     * for the entire schema and the rest of the walk is served from the cache
-     * without touching the server again.
-     */
+    /** A whole schema - every table with every one of its columns - in two round trips. */
     public Contracts.Rows<Contracts.TableWithColumns> snapshot(String catalog, String schema) throws SQLException {
         if (MongoFields.isMongo(connection)) {
-            // Collections have no columns to sweep; their fields come from
-            // sampling on the columns path, one collection at a time.
+            // Collections have no columns to sweep; their fields come from sampling.
             List<Contracts.TableWithColumns> collections = new ArrayList<>();
             for (String name : MongoFields.collectionNames(connection)) {
                 collections.add(new Contracts.TableWithColumns(name, "collection", null, List.of()));
@@ -154,29 +132,22 @@ public final class Snapshot {
                     body.remarks.get(table.getKey()),
                     columns == null ? List.of() : columns));
         }
-        // Ordered by name like every other listing (ADR-0036). This is the one
-        // the editor's table level actually reads - it asks for a whole schema
-        // in one round trip rather than a bare listing - so leaving it in the
-        // driver's order left the tree reshuffling on refresh in exactly the
-        // engines whose catalog tables are not alphabetical by accident.
-        // The columns inside each table keep their declared position.
+        // Ordered by name like every other listing (ADR-0036): the driver's order left the tree
+        // reshuffling on refresh. The columns inside each table keep their declared position.
         list.sort(Comparator.comparing(Contracts.TableWithColumns::name, Metadata.BY_NAME));
         return Contracts.Rows.of(list);
     }
 
     /**
-     * One body per schema to sweep, in the order the driver listed them, which
-     * is the order they are written in: the tasks finish out of order, so the
-     * file's order has to come from somewhere that does not.
-     *
-     * MySQL and SQLite have no schema layer and the editor looks their tables
-     * up under an empty name, so that case is a single unnamed body.
+     * One body per schema, in the order the driver listed them, since the
+     * tasks finish out of order and the file's order has to come from
+     * somewhere that does not; MySQL and SQLite have no schema layer, so that
+     * case is a single unnamed body.
      */
     static List<SchemaBody> schemaBodies(DatabaseMetaData meta, String catalog) {
         List<SchemaBody> bodies = new ArrayList<>();
         for (String name : Metadata.schemaNames(meta, catalog, Integer.MAX_VALUE)) {
-            // A schema the driver reports without a name is one the metadata
-            // calls cannot be filtered by, so there is no sweeping it.
+            // A schema reported without a name cannot filter the metadata calls, so there is no sweeping it.
             if (name != null && !name.isEmpty()) {
                 bodies.add(new SchemaBody(name, name));
             }

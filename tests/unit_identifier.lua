@@ -1,16 +1,12 @@
--- Which database object the cursor is on, answered out of a swept catalog on
--- disk: no server, no Java process and no window. What is worth pinning down
--- here is the scope. A name is read against the statement it sits in, so an
--- alias bound in the statement above means nothing here -- which is exactly
--- what the whole-buffer regex in db/completion.lua got wrong.
+-- Which database object the cursor is on, out of a catalog on disk: no server, no window.
+-- A name is scoped to its own statement, which the whole-buffer regex it replaced got wrong.
 local support = require("tests.support")
 local check = support.check
 local connections = require("neogrip.connections")
 local identifier = require("neogrip.sql.identifier")
 local store = require("neogrip.schema.store")
 
--- An id no real connection can have: the snapshot below is written next to a
--- developer's own and deleted again at the end.
+-- An id no real connection can have: the snapshot lands next to a developer's own.
 local connection = connections.register({
 	id = "__test_identifier__",
 	name = "identifier test",
@@ -74,8 +70,7 @@ store.save(connection, CATALOG, {
 	},
 })
 
--- Ten statements in the one buffer, which is the point of the file: every
--- alias below is bound in one of them and has to mean nothing in the others.
+-- Every alias below is bound in one statement and has to mean nothing in the others.
 local LINES = {
 	"-- customers, as a word in a comment",
 	"select email, c.email from sales.customers c where c.id > 0;",
@@ -91,14 +86,12 @@ local LINES = {
 
 local bufnr = vim.api.nvim_create_buf(false, true)
 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, LINES)
--- Bound through the buffer variable rather than db.resolve.bind, which would
--- write the binding into a developer's own state directory and start a
--- language server for it.
+-- Bound through the buffer variable: resolve.bind would write into a developer's
+-- own state directory and start a language server.
 vim.b[bufnr].neogrip_connection = connection.id
 vim.b[bufnr].neogrip_dialect = "postgres"
 
---- The 0-based column where `needle` starts, so a test names the text it means
---- rather than counting characters.
+--- The 0-based column where `needle` starts, so a test names text instead of counting.
 local function column_of(line, needle)
 	local at = LINES[line]:find(needle, 1, true)
 	if not at then
@@ -107,7 +100,6 @@ local function column_of(line, needle)
 	return at - 1
 end
 
---- An answer reduced to the four fields that say which object it is.
 local function flat(found)
 	if not found then
 		return nil
@@ -115,9 +107,7 @@ local function flat(found)
 	return { kind = found.kind, schema = found.schema, table = found.table, column = found.column }
 end
 
---- What the identifier at a position resolves to. The position is passed in
---- rather than set in a window, so none of this depends on a window existing.
---- @param offset integer|nil how far into `needle` the cursor sits
+--- The position is passed in rather than set in a window, so nothing here needs one.
 local function at(line, needle, offset)
 	local col = column_of(line, needle) + (offset or 0)
 	return flat(identifier.at_cursor(bufnr, { line = line, col = col }))
@@ -211,17 +201,14 @@ check("and its columns come from the table it names", at(4, "e.note", 2), {
 	column = "note",
 })
 
--- The whole reason this module exists rather than the regex it replaced: "c"
--- is bound to sales.customers three statements up, and a script that joins one
--- table here and another there would otherwise answer with the wrong columns.
+-- The regex this module replaced answered with the wrong table's columns here.
 check("an alias from another statement does not leak", at(5, "c.id"), nil)
 check("nor does the column behind it", at(5, "c.id", 2), nil)
 
 support.describe("identifier: quoting is the buffer's dialect")
 
---- One line in a buffer of its own dialect. Quoting is a property of the
---- buffer and the catalog is a property of the connection, so the one snapshot
---- answers for every dialect below.
+--- Quoting is a property of the buffer and the catalog of the connection, so the
+--- one snapshot answers for every dialect below.
 local function in_dialect(dialect, line, needle)
 	local scratch = vim.api.nvim_create_buf(false, true)
 	vim.api.nvim_buf_set_lines(scratch, 0, -1, false, { line })
@@ -245,8 +232,6 @@ check("and the quoted half of a qualified name is still a schema", in_dialect("m
 	schema = "sales",
 })
 
--- Another engine's quoting is not quoting here: a backtick opens a string in
--- postgres, and what is inside a string is prose.
 check("another engine's quoting reads as a string, not a name", in_dialect("postgres", MY, "customers"), nil)
 check("in both directions", in_dialect("mysql", PG, "customers"), nil)
 
@@ -257,8 +242,7 @@ check("nor does one in a comment", at(1, "customers"), nil)
 
 support.describe("identifier: the extent it reports")
 
--- The range is what a hover highlights and what a jump measures, so on
--- "c.email" it has to be one half or the other and never both.
+-- The range is what a hover highlights, so on "c.email" it must be one half, never both.
 local alias_from = column_of(2, "c.email")
 local alias = identifier.at_cursor(bufnr, { line = 2, col = alias_from })
 check("the range on an alias covers the alias alone", alias.range, {
@@ -291,10 +275,7 @@ check("the suite leaves no snapshot behind", vim.fn.filereadable(store.path(conn
 
 support.describe("identifier: a FROM that binds nothing")
 
--- Its own buffer, so the line numbers every check above counts on do not move.
--- A statement that builds SQL in a string, or a comment quoting one, has the
--- word FROM in it without binding an alias: read as one, "u" would resolve to
--- the wrong table and the jump would land somewhere plausible and wrong.
+-- A buffer of its own, so the line numbers the checks above count on do not move.
 local phantom = vim.api.nvim_create_buf(false, true)
 vim.b[phantom].neogrip_connection = connection.id
 vim.b[phantom].neogrip_dialect = "postgres"

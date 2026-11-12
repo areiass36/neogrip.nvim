@@ -25,27 +25,19 @@ public final class SiblingPool {
     private SiblingPool() {}
 
     /**
-     * However many connections a sweep is asked to use, this many at most:
-     * past a handful it is waiting on the server's catalog rather than on
-     * itself, and every connection taken here is one the rest of the machine
-     * cannot have.
+     * At most this many: past a handful the sweep is waiting on the server's
+     * catalog rather than on itself.
      */
     static final int MAX_SIBLINGS = 8;
 
     /**
-     * A sweep's own connections, handed to one task at a time.
-     *
-     * A queue rather than one connection per thread because the detail pass
-     * has far more tasks than there are connections, and because a task that
-     * fails still has to give its connection back.
+     * A queue rather than one connection per thread: the detail pass has far
+     * more tasks than connections, and a failed task still has to give its
+     * connection back.
      */
     static final class Pool {
         private final List<Connection> opened = new ArrayList<>();
-        /**
-         * Unbounded, because a later stage tops the pool up rather than
-         * replacing it: the detail pass wants more connections than the schema
-         * sweeps did, and the ones already open are still good.
-         */
+        /** Unbounded, because a later stage tops the pool up rather than replacing it. */
         private final BlockingQueue<Connection> free = new LinkedBlockingQueue<>();
 
         /** Only ever called between stages, with every task finished. */
@@ -71,28 +63,19 @@ public final class SiblingPool {
                 try {
                     connection.close();
                 } catch (SQLException ignored) {
-                    // The sweep is over either way.
                 }
             }
         }
     }
 
     /**
-     * Connections of a sweep's own, or null to stay on the process's one.
+     * Connections of a sweep's own, or null to stay on the process's one;
+     * asked once per stage, because sizing for the first stage would leave the
+     * second with one connection on the commonest shape of database.
      *
-     * The main connection belongs to the user's statements: a sweep that
-     * borrowed it would make the next query wait for a whole catalog, which is
-     * the reason this operation exists at all. Falling back to it is still a
-     * correct outcome - slower, not wrong - so a server that will not hand out
-     * another connection is not an error here.
-     *
-     * Asked once per stage, because the two stages have their work divided up
-     * differently and sizing for the first would leave the second with one
-     * connection on the commonest shape of database there is.
-     *
-     * @param work how many tasks the stage is about to run, which is what
-     *             bounds the number of connections worth opening
-     * @param pool what an earlier stage opened, to be topped up rather than
+     * @param work how many tasks the stage is about to run, which bounds the
+     *             connections worth opening
+     * @param pool what an earlier stage opened, topped up rather than
      *             replaced, or null when nothing is open yet
      */
     static Pool openSiblings(DatabaseMetaData meta, String url, Properties properties, int work, int parallelism, Pool pool) {
@@ -108,8 +91,7 @@ public final class SiblingPool {
             wanted = Math.min(wanted, limit);
         }
         int have = pool == null ? 0 : pool.size();
-        // A stage with less work than the last one keeps what is open instead
-        // of closing connections it would only have to reopen.
+        // A stage with less work than the last keeps what is open instead of reopening it later.
         if (wanted < 2 || wanted <= have || url.isEmpty() || isSingleConnection(meta, url)) {
             return pool;
         }
@@ -119,14 +101,12 @@ public final class SiblingPool {
             try {
                 opened.add(DriverManager.getConnection(url, properties));
             } catch (SQLException refused) {
-                // A server at its connection limit, a pooler in the way, or
-                // credentials good for one session at a time.
+                // A server at its limit, a pooler in the way, or single-session credentials.
                 break;
             }
         }
         if (opened.size() < 2) {
-            // One sibling does nothing the main connection would not, and
-            // costs the server a session to do it.
+            // One sibling does nothing the main connection would not, and costs a session.
             opened.closeAll();
             return null;
         }
@@ -146,9 +126,8 @@ public final class SiblingPool {
     }
 
     /**
-     * Engines a second connection must not be opened against: DuckDB and
-     * SQLite are single-writer files, and the MongoDB driver starts a
-     * JavaScript engine per connection.
+     * Engines a second connection must not be opened against; see
+     * doc/internals.md#jdbc-drivers.
      */
     static boolean isSingleConnection(DatabaseMetaData meta, String url) {
         String jdbcUrl = url;
@@ -158,7 +137,6 @@ public final class SiblingPool {
                 jdbcUrl = reported;
             }
         } catch (SQLException ignored) {
-            // The url this process was started with says the same thing.
         }
         jdbcUrl = jdbcUrl.toLowerCase();
         return jdbcUrl.startsWith("jdbc:duckdb:")

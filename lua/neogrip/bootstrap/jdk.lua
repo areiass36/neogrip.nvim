@@ -1,14 +1,6 @@
--- A JVM that belongs to this plugin and to nothing else.
---
--- Whatever `java` happens to be on PATH would make the plugin depend on the
--- user's toolchain - a version manager with no version selected, a JRE without
--- javac, a JDK 8 from years ago - so a Temurin JDK is downloaded into the
--- plugin's data directory and that one is used, always. A JDK rather than a
--- JRE because gripd is compiled on first use (ADR-0004).
---
--- Releases are pinned to exact artifacts with their SHA-256, taken from the
--- Adoptium API on 2026-10-29, because "latest" cannot be checksummed
--- (ADR-0005). Bumping means updating url and sha256 together.
+-- A Temurin JDK of the plugin's own, never the PATH java; a JDK, not a JRE, because gripd is
+-- compiled on first use. Checksums taken from the Adoptium API on 2026-10-29, because "latest"
+-- cannot be checksummed; bump url and sha256 together.
 local platform = require("neogrip.bootstrap.platform")
 local download = require("neogrip.bootstrap.download")
 local neogrip = require("neogrip")
@@ -36,8 +28,7 @@ local RELEASES = {
 		},
 	},
 	windows = {
-		-- Temurin's Windows build lags the others by a patch level; each
-		-- target pins the artifact that actually exists for it.
+		-- Temurin's Windows build lags the others by a patch level; each target pins what exists.
 		x64 = {
 			url = GITHUB .. "/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_windows_hotspot_21.0.12.1_1.zip",
 			sha256 = "f9d6e191ab098c0d416e7d588a24420a8621cd2f4720dab2459b8b7b2d2d8b4e",
@@ -47,10 +38,8 @@ local RELEASES = {
 
 local M = {}
 
--- The Java language level gripd is written to and, more importantly,
--- compiled against: the pinned runtime above is what has to load the classes,
--- and a javac from a newer JDK would otherwise emit bytecode it cannot read
--- (ADR-0005; virtual threads are what put the floor at 21, ADR-0028).
+-- The pinned runtime must load the classes, and a newer javac would otherwise emit bytecode it
+-- cannot read (ADR-0005); virtual threads put the floor at 21 (ADR-0028).
 M.LANGUAGE_LEVEL = 21
 
 M.dir = neogrip.data_dir .. "/jdk"
@@ -59,10 +48,8 @@ M.dir = neogrip.data_dir .. "/jdk"
 --- tests can point NEOGRIP_TEST_JDK at an existing JDK to skip the download.
 --- @return string|nil
 local function find_executable(name)
-	-- Built without a nil hole on purpose: `{ vim.env.NEOGRIP_TEST_JDK, M.dir }`
-	-- becomes `{ nil, M.dir }` when the test override is unset - every real
-	-- user - and ipairs stops at that first nil, so M.dir was never checked
-	-- and a perfectly good JDK read as missing.
+	-- Built without a nil hole: `{ vim.env.NEOGRIP_TEST_JDK, M.dir }` with the override unset
+	-- starts with nil, ipairs stopped there, and a perfectly good JDK read as missing.
 	local roots = {}
 	if vim.env.NEOGRIP_TEST_JDK and vim.env.NEOGRIP_TEST_JDK ~= "" then
 		roots[#roots + 1] = vim.env.NEOGRIP_TEST_JDK
@@ -75,11 +62,7 @@ local function find_executable(name)
 				("%s/Contents/Home/bin/%s%s"):format(root, name, platform.exe_suffix),
 			}
 			for _, path in ipairs(candidates) do
-				-- Presence, not executability: on Windows vim.fn.executable()
-				-- can report 0 for a freshly extracted .exe while antivirus or
-				-- the indexer still holds it, which made a good JDK look
-				-- missing the instant the archive finished. The file being
-				-- there is the real question; a true failure surfaces at spawn.
+				-- Presence, not executability; see doc/internals.md#bootstrap.
 				if vim.uv.fs_stat(path) then
 					return path
 				end

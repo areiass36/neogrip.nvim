@@ -1,24 +1,13 @@
--- JSON is the transport, not CSV.
---
--- In CSV the clients cannot tell NULL from an empty string -- usql prints both
--- as an empty field, and its null marker is written unquoted, so it collides
--- with a string that happens to equal it. In JSON, null and "" are distinct.
---
--- Two things still have to be done by hand:
---
---   * Column order. vim.json.decode returns an unordered Lua table; the order
---     only exists in the text, so it is read from the first object.
---   * Integers above 2^53. Postgres int8 arrives as a JSON number and
---     vim.json.decode silently rounds it, so long integer literals are quoted
---     before decoding and kept as text.
+-- JSON is the transport because CSV cannot tell NULL from an empty string. Column order is read
+-- from the text (vim.json.decode loses it), and long integer literals are quoted before decoding;
+-- see doc/internals.md#protocol.
 local db = require("neogrip")
 
 local M = {}
 
 M.NULL = db.NULL
 
---- Walk the text and hand every stretch that is outside a string literal to
---- `transform`. String contents are copied through untouched.
+--- Hand every stretch outside a string literal to `transform`; string contents pass untouched.
 local function outside_strings(text, transform)
 	local out, index, length = {}, 1, #text
 	while index <= length do
@@ -45,8 +34,7 @@ local function outside_strings(text, transform)
 	return table.concat(out)
 end
 
--- 2^53 is 16 digits, so 16 or more digits may not survive a double. Quoting at
--- 16 keeps every value that is exactly representable as a number.
+-- The digit count where a double starts lying; see doc/internals.md#protocol.
 local BIG_INTEGER_DIGITS = 16
 
 --- Quote integer literals too long for a double so they survive as text.
@@ -63,10 +51,8 @@ function M.quote_big_integers(text)
 	end)
 end
 
---- Column names in the order the client wrote them, read from the text because
---- vim.json.decode loses it. A key is a string at object depth 1 followed by a
---- colon, so keys of nested objects are not mistaken for columns, and an array
---- of documents contributes every document's keys.
+--- Column names in written order, read from the text because vim.json.decode loses it; only
+--- depth-1 keys count, so nested objects' keys are not mistaken for columns.
 function M.key_order(text)
 	local keys, seen = {}, {}
 	local object_depth = 0
@@ -123,8 +109,7 @@ local function decode(text)
 	return value
 end
 
---- Turn one decoded object into a row, following `columns`, and record any key
---- the first object did not have.
+--- One decoded object as a row, recording any key the first object did not have.
 local function row_of(object, columns, seen)
 	for key in pairs(object) do
 		if not seen[key] then
@@ -144,10 +129,8 @@ local function row_of(object, columns, seen)
 	return row
 end
 
---- Split the output into top-level JSON values. usql prints one array per
---- result set on its own line, but duckdb pretty-prints a single array across
---- many lines, so splitting on newlines would cut a value in half. Braces are
---- counted instead, ignoring anything inside a string.
+--- Split into top-level JSON values by counting braces: duckdb pretty-prints one array across
+--- many lines, so splitting on newlines would cut a value in half.
 --- @return string[]
 function M.split_values(text)
 	local values = {}
@@ -188,8 +171,7 @@ function M.split_values(text)
 	return values
 end
 
---- One result set per JSON value the client printed. A statement that returns
---- nothing prints nothing at all.
+--- One result set per JSON value printed; a statement that returns nothing prints nothing.
 --- @return table[] result sets, each { columns = string[], rows = any[][] }
 --- @return string|nil error
 function M.result_sets(text)
@@ -222,9 +204,8 @@ function M.result_sets(text)
 	return sets
 end
 
---- Canonical Extended JSON wraps every scalar in a type tag. Unwrap the ones
---- that have an obvious text form; anything else keeps its JSON shape so no
---- information is invented.
+--- Canonical Extended JSON wraps every scalar in a type tag: unwrap the ones with an obvious
+--- text form, keep the JSON shape otherwise so no information is invented.
 function M.flatten_ejson(value)
 	if type(value) ~= "table" then
 		if value == vim.NIL then
@@ -278,9 +259,8 @@ function M.flatten_ejson(value)
 	return "{…}"
 end
 
---- A Mongo result: an array of documents, or one document per line (NDJSON).
---- Fields are flattened one level, in order of first appearance, which is what
---- a grid can show; the untouched document stays available for the detail view.
+--- A Mongo result, fields flattened one level for the grid; the untouched document stays
+--- available for the detail view.
 --- @return table { columns = string[], rows = any[][], documents = table[] }
 function M.documents(text)
 	local documents = {}
@@ -306,9 +286,7 @@ function M.documents(text)
 	for _, document in ipairs(documents) do
 		local row = {}
 		for index, column in ipairs(columns) do
-			-- Written out rather than "type(...) == 'table' and document[column]
-			-- or nil": a field whose value is false would come out of that as
-			-- nil, and be drawn as NULL.
+			-- Written out because the and/or idiom turns a false field into nil, drawn as NULL.
 			local value
 			if type(document) == "table" then
 				value = document[column]

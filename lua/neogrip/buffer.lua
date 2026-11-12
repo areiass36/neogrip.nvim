@@ -1,8 +1,3 @@
--- Behaviour for the buffers you write queries in.
---
--- No keymaps are attached here or anywhere (ADR-0017): attach() wires the
--- dialect layer and the language server when those are available, and the
--- user's own FileType autocommand is where keys come from.
 local resolve = require("neogrip.resolve")
 
 local M = {}
@@ -20,8 +15,7 @@ local function attach_services(bufnr, connection)
 	end
 end
 
---- A buffer for a query that has no file yet. acwrite plus a BufWriteCmd so :w
---- asks where to put it instead of failing or leaving litter in the project.
+--- A scratch query buffer; acwrite plus BufWriteCmd so :w asks where to save instead of failing.
 --- @return integer bufnr
 function M.new_query(connection, text)
 	scratch_count = scratch_count + 1
@@ -54,8 +48,7 @@ function M.new_query(connection, text)
 	return bufnr
 end
 
---- Wire up a SQL or Mongo buffer: the dialect layer and the language server,
---- when their phases have landed.
+--- Wire the dialect layer and the language server onto a SQL or Mongo buffer.
 function M.attach(bufnr)
 	if vim.b[bufnr].neogrip_attached then
 		return

@@ -1,5 +1,4 @@
--- The shared test vocabulary: flat suites call describe/check/fail and the
--- runner reads the counters. No framework, because the modules under test are
+-- Shared test vocabulary: no framework, because the modules under test are
 -- callback-based and the one primitive they need is sync().
 local M = {}
 
@@ -36,15 +35,12 @@ function M.fail(name, detail)
 	end
 end
 
--- Block until fn is true, the way a test has to when the module under test is
--- callback-based. Returns whether the condition was met in time.
 function M.wait(fn, timeout)
 	return vim.wait(timeout or 60000, fn, 50)
 end
 
--- Turn a callback-based function into a synchronous call: starter receives a
--- done(...) to invoke, and sync returns whatever done was given, or nil plus
--- "timeout" when it never came.
+-- Turns a callback-based function into a synchronous call; returns nil plus "timeout" when
+-- done(...) never came.
 function M.sync(starter, timeout)
 	local results = nil
 	starter(function(...)
@@ -59,8 +55,8 @@ function M.sync(starter, timeout)
 	return vim.F.unpack_len(results)
 end
 
--- Passwords match tests/containers.sh; the fixtures read them from kvstore,
--- which the harness replaced with the fake, seeded here from the environment.
+-- Passwords match tests/containers.sh and reach the suites only through the fake kvstore,
+-- seeded from the environment; no real credentials.
 M.PASSWORD_ENV = "NVIM_DB_TEST_PW"
 M.MSSQL_PASSWORD_ENV = "NVIM_DB_TEST_MSSQL_PW"
 
@@ -72,8 +68,7 @@ end
 
 local temp_dir = vim.fn.fnamemodify(vim.fn.tempname(), ":h")
 
---- The connections the live tests use. Ports match tests/containers.sh; the
---- shapes are schema v2 (ADR-0008) after normalization.
+--- Live-test connections: ports match tests/containers.sh, shapes are schema v2 (ADR-0008).
 function M.connections()
 	local password = { type = "password", password = { kvstore = "test-pw" } }
 	return {
@@ -122,11 +117,8 @@ function M.connections()
 			id = "test-lite",
 			name = "test sqlite",
 			driver = "sqlite",
-			-- A temp path from nvim itself, not a hardcoded /tmp: on Windows
-			-- nvim resolves "/tmp/x" against the drive of the current
-			-- directory, so the file the suite read was never the file the
-			-- shell wrote, and whether the fixture was there at all depended
-			-- on where the runner happened to be started from.
+			-- A temp path from nvim, not a hardcoded /tmp: on Windows "/tmp/x" resolves against
+			-- the current drive, so the suite read a different file than the shell wrote.
 			file = temp_dir .. "/neogrip-test.sqlite",
 			auth = { type = "none" },
 			options = {},
@@ -145,12 +137,8 @@ function M.connections()
 			driver = "trino",
 			host = "127.0.0.1",
 			port = 18080,
-			-- No catalog on purpose: Trino is the only fixture with an
-			-- instance level to walk into, which is what exercises the catalog
-			-- travelling in every ref. The user is an option rather than an
-			-- auth, because the driver refuses a password without TLS and a
-			-- plain-HTTP coordinator trusts whatever name it is given - for
-			-- Trino an option lands in the URL and nowhere else (ADR-0012).
+			-- No catalog on purpose (exercises the instance level), and user as an option, not
+			-- an auth, because the driver refuses a password without TLS (ADR-0012).
 			auth = { type = "none" },
 			options = { user = "testuser" },
 		},
@@ -174,14 +162,8 @@ end
 
 local seeded = {}
 
---- The standard torture fixture in a database that arrives without one.
----
---- The same reason DuckDB's fixture is made this way: a file database has no
---- container, so tests/containers.sh cannot reach it. SQLite used to be seeded
---- by the sqlite3 CLI, which assumed an executable that is not there on a
---- stock Windows box and wrote to a different path than the JVM resolved
---- anyway. Memoized, and the stale file is dropped first, so a run starts from
---- a known fixture rather than from whatever an earlier run left behind.
+--- Seeds the torture fixture from here, not tests/containers.sh: the sqlite3 CLI it used is
+--- absent on a stock Windows box and wrote to a different path than the JVM resolved anyway.
 function M.ensure_fixture(connection)
 	if seeded[connection.id] then
 		return true
@@ -190,9 +172,7 @@ function M.ensure_fixture(connection)
 	local statements = nil
 	if connection.driver == "sqlite" then
 		vim.fn.delete(connection.file)
-		-- One statement per call: a single string of three would be split by
-		-- the sequence rule of ADR-0030 and the failure would read as a
-		-- parse error.
+		-- One statement per call: a single string would be split by the ADR-0030 sequence rule.
 		statements = {
 			"create table torture(id integer primary key, s_null text, s_empty text, "
 				.. "s_comma text, cjk text)",
@@ -200,11 +180,8 @@ function M.ensure_fixture(connection)
 			"insert into torture values (2,null,'','x','中文')",
 		}
 	elseif connection.driver == "trino" then
-		-- Trino has a container but nothing in it to write to: tpch is generated
-		-- and read-only, and the memory catalog starts empty and dies with the
-		-- process. So it is seeded here like the file databases are, and named in
-		-- full because the connection deliberately pins no catalog - that is what
-		-- gives the tree an instance level to walk into.
+		-- Trino's memory catalog starts empty and dies with the process, so it is seeded here,
+		-- named in full because the connection pins no catalog.
 		statements = {
 			"drop table if exists memory.default.torture",
 			"create table memory.default.torture as select * from (values "
@@ -213,11 +190,7 @@ function M.ensure_fixture(connection)
 				.. ") as t(id, s_null, s_empty, s_comma, cjk)",
 		}
 	elseif connection.driver == "duckdb" then
-		-- A DuckDB file is a fresh temp path per process, so a suite run on its
-		-- own finds nothing in it. The suites that want a particular shape
-		-- replace this one straight after; what this guarantees is only that
-		-- `torture` exists, which is what the suites that merely name it need -
-		-- live_diagnostics asked for a column of it and got "Table with name
+		-- Only guarantees `torture` exists: live_diagnostics failed with "Table with name
 		-- torture does not exist" whenever it ran without live_jdbc ahead of it.
 		statements = {
 			"create table if not exists torture(id integer, s_null varchar, s_empty varchar, "
@@ -235,11 +208,8 @@ function M.ensure_fixture(connection)
 	return true
 end
 
---- Is this server answering? The live tests skip rather than fail when the
---- containers are not up, so the unit tests still run anywhere. A file
---- database is created by the driver itself, so it only needs a JVM - asking
---- whether the file is already there would skip the very first run and make
---- the suite depend on an artifact of the last one.
+--- Reachability probe: live suites skip rather than fail when the containers are not up, and
+--- a file database only needs a JVM since the driver creates the file itself.
 function M.reachable(connection)
 	if connection.file then
 		return M.has_jdk()
@@ -250,10 +220,7 @@ function M.reachable(connection)
 		connected = err == nil
 		socket:close()
 	end)
-	-- Trino's coordinator binds its HTTP port well before it will plan a
-	-- query, and the handshake itself is slower than a database socket, so it
-	-- gets longer here. The real gate is tests/containers.sh, which does not
-	-- return until Trino answers `select 1`.
+	-- Trino's handshake is slower than a database socket, so it gets a longer wait.
 	vim.wait(connection.driver == "trino" and 5000 or 2000, function()
 		return socket:is_closing()
 	end, 20)
@@ -276,8 +243,6 @@ function M.run(connection, sql, opts)
 end
 
 --- The next batch of a result left open under `hash` (ADR-0031).
---- @param opts table|nil merged into the request, so a suite can pass
----             on_progress and watch what gripd says during a refill.
 function M.next_batch(connection, hash, limit, opts)
 	opts = opts or {}
 	local request = vim.tbl_extend("force", {

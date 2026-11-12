@@ -1,6 +1,4 @@
--- The rpc client against the mock gripd: framing, correlation, errors,
--- server-initiated traffic and lifecycle. Everything here runs with no JVM and
--- no network - the mock is another headless nvim.
+-- The rpc client against the mock gripd, which is another headless nvim: no JVM, no network.
 local support = require("tests.support")
 local protocol = require("neogrip.rpc.protocol")
 local client = require("neogrip.rpc.client")
@@ -18,12 +16,10 @@ local function start(handlers)
 	return c, result, err
 end
 
--- Handshake.
 local c, init_result, init_err = start()
 support.check("initialize answers with the protocol version", init_err, nil)
 support.check("initialize carries the version", init_result and init_result.protocolVersion, protocol.VERSION)
 
--- Correlation across several requests on one process.
 local first = support.sync(function(done)
 	c:request("echo", { n = 1 }, done)
 end)
@@ -32,7 +28,6 @@ local second = support.sync(function(done)
 end)
 support.check("responses correlate to their requests", { first.n, second.n }, { 1, 2 })
 
--- Error objects arrive as the err argument with data intact.
 local failed_result, failed_err = support.sync(function(done)
 	c:request("fail", {}, done)
 end)
@@ -48,7 +43,6 @@ support.check(
 	{ "42000", 7, 3 }
 )
 
--- A notification from the process reaches the handler.
 local notified = nil
 local c2 = client.start(mock_cmd, {
 	on_notification = function(method, params)
@@ -66,8 +60,6 @@ support.wait(function()
 end, 5000)
 support.check("notifications dispatch to the handler", notified, { method = "status", message = "hello" })
 
--- A server-initiated request gets answered through respond() and the answer
--- makes it back into the original request's response.
 local c3 = client.start(mock_cmd, {
 	on_request = function(method, _params, respond)
 		if method == "input" then
@@ -84,20 +76,17 @@ end)
 support.check("server requests round-trip through on_request", asked and asked.received, "42")
 c3:close()
 
--- Non-JSON lines on stdout are skipped, not fatal.
 local after_garbage = support.sync(function(done)
 	c2:request("garbage", {}, done)
 end)
 support.check("garbage lines are skipped", after_garbage ~= nil, true)
 
--- A payload far bigger than one pipe chunk reassembles across _consume calls.
 local big = support.sync(function(done)
 	c2:request("big", {}, done)
 end)
 support.check("a 200KB payload survives chunked reads", big and #big.blob, 200000)
 c2:close()
 
--- A version the mock refuses: the error comes back, then the process exits.
 local exit_code = nil
 local c4 = client.start(mock_cmd, {
 	on_exit = function(code)
@@ -113,8 +102,6 @@ support.wait(function()
 end, 10000)
 support.check("the refusing process exits", exit_code ~= nil, true)
 
--- Closing stdin ends the process (the EOF shutdown path) and pending requests
--- are drained with a synthetic error rather than leaking.
 local c5_exit = nil
 local c5 = client.start(mock_cmd, {
 	on_exit = function(code)

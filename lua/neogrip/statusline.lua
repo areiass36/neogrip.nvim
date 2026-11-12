@@ -1,7 +1,4 @@
--- The statusline component: which connection a buffer runs against, whether it
--- is read-only, and - the one effect production has (ADR-0016) - whether it is
--- marked production. Nothing is installed anywhere: the user calls component()
--- from their own statusline.
+-- Nothing is installed anywhere: the user calls component() from their own statusline.
 local resolve = require("neogrip.resolve")
 
 local M = {}
@@ -31,9 +28,7 @@ function M.status(bufnr)
 	}
 end
 
---- A ready-made string: `replica [RO][PROD]`, with `…` while a statement runs.
---- Empty for buffers that are not query or grid buffers, so it can sit in a
---- global statusline without noise.
+--- A ready-made string (`replica [RO][PROD] …`), empty outside query and grid buffers.
 function M.component()
 	local bufnr = vim.api.nvim_get_current_buf()
 	local filetype = vim.bo[bufnr].filetype

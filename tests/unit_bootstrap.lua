@@ -1,6 +1,5 @@
--- The checksum discipline without a network: hashing matches vim.fn.sha256,
--- a verified download installs, and a wrong digest refuses to install and
--- leaves nothing behind. curl reads file:// urls, so the "download" is local.
+-- The checksum discipline without a network: curl reads file:// urls, so the
+-- "download" is local.
 local support = require("tests.support")
 local download = require("neogrip.bootstrap.download")
 
@@ -39,10 +38,8 @@ support.check("no partial file is left either", vim.fn.filereadable(bad_destinat
 
 support.describe("bootstrap jdk: a JDK is detected by presence, not an +x bit")
 
--- A plain file, never marked executable, standing in for a freshly extracted
--- java/javac: vim.fn.executable() would report 0 for it (and does, on Windows,
--- transiently for a real new .exe), but the file is there. Detection must say
--- installed.
+-- A deliberately non-executable file stands in for a fresh java/javac, because
+-- vim.fn.executable() transiently reports 0 for a real new .exe on Windows.
 local jdk = require("neogrip.bootstrap.jdk")
 local platform = require("neogrip.bootstrap.platform")
 local fake_jdk = temp_root .. "/fake-jdk"
@@ -51,9 +48,8 @@ for _, name in ipairs({ "java", "javac" }) do
 	vim.fn.writefile({ "not a real binary" }, ("%s/bin/%s%s"):format(fake_jdk, name, platform.exe_suffix))
 end
 
--- The downloaded JDK lives at jdk.dir, with no NEOGRIP_TEST_JDK override - the
--- normal case. This is the regression that shipped: find_executable built
--- { nil, M.dir } and ipairs never reached M.dir, so a good JDK read as missing.
+-- The shipped regression: find_executable built { nil, M.dir } and ipairs never
+-- reached M.dir, so a good JDK read as missing.
 local saved_env = vim.env.NEOGRIP_TEST_JDK
 local saved_dir = jdk.dir
 vim.env.NEOGRIP_TEST_JDK = nil
@@ -63,7 +59,6 @@ support.check("and javac likewise", jdk.javac() ~= nil, true)
 support.check("so the JDK reads as installed", jdk.installed(), true)
 jdk.dir = saved_dir
 
--- And the env override still takes precedence when it is set (the CI path).
 vim.env.NEOGRIP_TEST_JDK = fake_jdk
 support.check("NEOGRIP_TEST_JDK is honoured when present", jdk.java() ~= nil, true)
 vim.env.NEOGRIP_TEST_JDK = saved_env

@@ -1,8 +1,5 @@
--- The lifecycle of gripd, the Java daemon: compile it on first use, launch it,
--- shake hands, and stop it by closing its stdin (ADR-0003, ADR-0004).
---
--- The argv never carries anything database-related; connection parameters and
--- secrets travel in the connect request (ADR-0009).
+-- The lifecycle of gripd, the Java daemon. The argv built here never carries
+-- connection parameters or secrets.
 local jdk = require("neogrip.bootstrap.jdk")
 local platform = require("neogrip.bootstrap.platform")
 local client = require("neogrip.rpc.client")
@@ -11,15 +8,14 @@ local neogrip = require("neogrip")
 
 local M = {}
 
--- The sources ship with the plugin; this file's own path is what locates them,
--- because a plugin cannot know where a manager cloned it.
+-- This file's own path locates the shipped sources; a plugin cannot know
+-- where a manager cloned it.
 local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h")
 M.sources_dir = plugin_root .. "/java"
 M.classes_dir = neogrip.data_dir .. "/classes"
 
--- The compiled classes are stamped with the protocol version, so a plugin
--- update that bumps the contract triggers a recompile instead of a runtime
--- version mismatch.
+-- The classes are stamped with the protocol version, so a contract bump
+-- recompiles instead of mismatching at runtime.
 local stamp_file = M.classes_dir .. "/.protocol-version"
 
 local function sources()
@@ -55,23 +51,15 @@ function M.build(on_done)
 		return on_done(false, "no gripd sources found under " .. M.sources_dir)
 	end
 
-	-- The layout before gripd left these trees behind. Nothing loads them, but
-	-- a stale class cache is how a JDK mismatch once turned into every
-	-- statement hanging instead of an error, so they go. Best-effort: on
-	-- Windows a live process can hold a class file open, and the build has to
-	-- proceed either way.
+	-- Sweep stale class trees, best-effort; see doc/internals.md#gripd-process.
 	for _, stale in ipairs({ "neogrip/app", "neogrip/db", "neogrip/rpc" }) do
 		pcall(vim.fn.delete, M.classes_dir .. "/" .. stale, "rf")
 	end
 
 	vim.fn.mkdir(M.classes_dir, "p")
-	-- -parameters keeps parameter names for gripd's named binding.
-	--
-	-- --release pins the class file version to the JDK this plugin downloads
-	-- and runs (ADR-0005), rather than to whichever javac happened to be
-	-- found: NEOGRIP_TEST_JDK can point at a newer one, and classes compiled
-	-- by it then fail to load at runtime with UnsupportedClassVersionError -
-	-- which, before this flag, read as every statement hanging.
+	-- -parameters keeps parameter names for gripd's named binding (ADR-0027).
+	-- --release pins the class file version to the pinned JDK (ADR-0005); see
+	-- doc/internals.md#gripd-process.
 	local command = {
 		javac,
 		"--release",
@@ -110,9 +98,8 @@ function M.ensure(on_done)
 	end)
 end
 
---- Spawn gripd and complete the handshake. opts.jar puts one driver on
---- the classpath (ADR-0003: each driver loads alone); opts.handlers goes to
---- the rpc client. on_ready(gripd, err) gets the live client or a message.
+--- Spawn gripd and complete the handshake; opts.jar puts one driver alone on
+--- the classpath (ADR-0003).
 function M.launch(opts, on_ready)
 	opts = opts or {}
 	local java = jdk.java()
@@ -124,17 +111,14 @@ function M.launch(opts, on_ready)
 	if opts.jar then
 		classpath = classpath .. platform.path_separator .. opts.jar
 	end
-	-- Flags chosen for startup over throughput: this JVM lives beside an
-	-- editor, not in a datacentre.
+	-- Flags chosen for startup over throughput: this JVM lives beside an editor.
 	local command = {
 		java,
 		"-XX:TieredStopAtLevel=1",
 		"-XX:+UseSerialGC",
 		"-Xss4m",
 		"-Dfile.encoding=UTF-8",
-		-- The MongoDB wrapper sorts sampled collections with a comparator that
-		-- violates its contract, which TimSort rejects outright; the legacy
-		-- merge sort does not enforce the contract, so metadata listing works.
+		-- The Mongo wrapper's comparator trips TimSort; see doc/internals.md#gripd-process.
 		"-Djava.util.Arrays.useLegacyMergeSort=true",
 		"-cp",
 		classpath,
@@ -155,8 +139,7 @@ function M.launch(opts, on_ready)
 	end)
 end
 
---- The shutdown contract: notify, close stdin, and give the process 500 ms
---- before the SIGTERM backstop.
+--- The shutdown contract: notify, close stdin, SIGTERM backstop after 500 ms.
 function M.stop(gripd)
 	if not gripd then
 		return
@@ -170,9 +153,8 @@ function M.stop(gripd)
 	end, 500)
 end
 
--- One process per configured connection (ADR-0003), keyed by id. Each entry
--- remembers the url it connected to, because choosing another database
--- re-points the connection and the process must be replaced, not reused.
+-- One process per connection (ADR-0003), keyed by id; the url is remembered
+-- because a re-pointed connection must replace the process, not reuse it.
 local processes = {}
 
 --- JDK present, gripd compiled, and this driver's jar installed.
@@ -196,16 +178,14 @@ function M.is_connected_to(connection)
 	return entry.url == url
 end
 
---- Connected under this id at all; is_connected_to is the url-aware check and
---- the one a caller about to send statements must use.
+--- Connected under this id at all; is_connected_to is the url-aware check.
 function M.is_connected(id)
 	local entry = processes[id]
 	return entry ~= nil and not entry.gripd.exited
 end
 
 --- Open a connection's process and connect it, replacing a process bound to a
---- different url. The auth table is the resolved one from secrets.resolve and
---- is never logged (ADR-0009).
+--- different url; the resolved auth table is never logged (ADR-0009).
 --- @param on_done fun(ok: boolean, err: table|string|nil)
 function M.connect(connection, auth, on_done)
 	local dsn = require("neogrip.dsn")
@@ -265,20 +245,14 @@ function M.connect(connection, auth, on_done)
 	end)
 end
 
---- What gripd says on its own, rather than as an answer to a request.
----
---- A named function and not the closure it replaced, so a suite can deliver one
---- without a live process: ADR-0023 keeps a unit suite off the network, and this
---- is the only path a server-sent frame takes into the plugin.
+--- What gripd says on its own, rather than as an answer to a request; named so
+--- a suite can deliver one without a live process (ADR-0023).
 function M.notification(connection, method, params)
 	if method == "status" and params and params.message then
 		return neogrip.notify(("%s: %s"):format(connection.name, params.message))
 	end
 	if method == "progress" and params and params.hash then
-		-- Required here rather than at the top: the runner requires this module,
-		-- so naming it up there would close the circle. The runner owns the map
-		-- from a result's name to the request waiting on it; this module knows
-		-- only which connection spoke.
+		-- Required here rather than at the top: the runner requires this module.
 		return require("neogrip.runner").progress(connection, params)
 	end
 end

@@ -1,6 +1,5 @@
--- The things that must not happen: a secret in the process table, a validation
--- that changes data, a write on a read-only connection. There are no
--- confirmations to test (ADR-0016): protection is mechanical or absent.
+-- The things that must not happen: a secret in the process table, a validation that
+-- changes data, a write on a read-only connection.
 local support = require("tests.support")
 local check, note = support.check, support.note
 
@@ -32,11 +31,9 @@ else
 	local pid = (gripd.info(pg.id) or {}).pid
 	check("gripd is running", pid ~= nil, true)
 
-	-- By pid, not by pattern: this must look at exactly the process we
-	-- started, and nothing else that happens to mention it.
+	-- By pid, not by pattern: exactly the process we started.
 	local password = vim.env[support.PASSWORD_ENV] or ""
-	-- Windows needs its own way of asking: ps there reports the processes Git
-	-- Bash knows about and not a native process's command line.
+	-- On Windows, ps reports Git Bash's processes, not a native command line.
 	local function command_line_of(process)
 		if vim.fn.has("win32") == 1 then
 			local query = ('(Get-CimInstance Win32_Process -Filter "ProcessId=%d").CommandLine'):format(
@@ -66,9 +63,6 @@ end
 support.describe("live/safety: the secret is not even in the URL")
 local dsn = require("neogrip.dsn")
 local url = dsn.build(pg)
--- The JDBC URL is built without it: secrets travel inside the connect request
--- (ADR-0009), so there is no string to leak in the first place. Redaction
--- stays as a guard for whatever a server echoes back.
 check("the url has no password", url:find(vim.env[support.PASSWORD_ENV] or "@@none@@", 1, true), nil)
 check(
 	"redacting a password that appears in a message",
@@ -88,8 +82,7 @@ else
 	local before = support.scalar(pg, "select count(*) from torture")
 	check("rows before", before, 2)
 
-	-- Each of these is sent to the server exactly as written. Preparing it
-	-- parses and resolves it; none of it runs.
+	-- Each is sent as written: preparing parses and resolves it, none of it runs.
 	for _, sql in ipairs({
 		"delete from torture",
 		"drop table torture",
@@ -141,21 +134,17 @@ else
 	end, 10000)
 	check("the cancel comes back as cancelled", outcome and outcome.cancelled, true)
 	check("and does not wait out the statement", (vim.uv.now() - started) < 10000, true)
-	-- The connection survives a cancel: the next query answers.
 	check("the connection is still usable", support.scalar(pg, "select 41 + 1"), 42)
 end
 
--- The editor's classifier refuses a write on a read-only connection before it
--- is ever sent, which is why gripd's own guard - the second of the three
--- layers in ADR-0016 - is only reached by a request that skips the classifier.
--- This sends one, on a file database that needs no server.
+-- Gripd's own guard (the second ADR-0016 layer) is only reached by a request
+-- that skips the classifier, so one is sent here.
 support.describe("live/safety: gripd refuses a write of its own accord")
 do
 	local gripd = require("neogrip.gripd")
 	local protocol = require("neogrip.rpc.protocol")
 	local connections_module = require("neogrip.connections")
-	-- Its own file, written and then released: one DuckDB file takes one
-	-- writer, so the read-only connection cannot share the suite's.
+	-- One DuckDB file takes one writer, so the read-only connection cannot share the suite's.
 	local file = vim.fs.normalize(vim.fn.tempname() .. "-readonly.duckdb")
 	local template = vim.deepcopy(support.connections().duckdb)
 	local writer = vim.tbl_extend("force", template, { id = "test-duck-rw-seed", file = file })

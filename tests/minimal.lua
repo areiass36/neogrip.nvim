@@ -1,9 +1,7 @@
--- The whole test bootstrap: the repository on the runtime path, no plugin
--- manager, so the suites exercise the modules rather than a loader. kvstore is
--- replaced by an in-memory fake so no test can ever touch a real keystore.
+-- Test bootstrap: the repository on the runtime path, with kvstore replaced
+-- by an in-memory fake so no test can ever touch a real keystore.
 local root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
--- The user's own config must not leak into the suites: locally it masked a
--- stale require that only failed on the bare CI runner.
+-- The user's config must not leak in: locally it masked a stale require that only failed on CI.
 vim.opt.rtp:remove(vim.fn.stdpath("config"))
 vim.opt.rtp:remove(vim.fn.stdpath("config") .. "/after")
 vim.opt.rtp:prepend(root)

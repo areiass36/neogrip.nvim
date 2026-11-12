@@ -1,5 +1,4 @@
--- The test runner: two explicit lists, unit suites that touch no network and
--- live suites that probe reachability and skip when the server is absent.
+-- Test runner: unit suites touch no network, live suites skip when the server is absent.
 -- Invoke as: nvim --headless -u tests/minimal.lua -l tests/run.lua [unit]
 local support = require("tests.support")
 
@@ -63,10 +62,8 @@ end
 print("")
 print(string.format("%d checks, %d failures", support.checks, support.failures))
 
--- Stop gripd processes before leaving. os.exit() in -l mode does not run
--- VimLeavePre, so a live suite's child processes would still be open handles
--- at exit, and nvim then reports a non-zero code even though every check
--- passed. Draining them first keeps the exit code honest.
+-- Drain gripd children before os.exit(): -l mode skips VimLeavePre, and open child
+-- handles make nvim report a non-zero exit code even when every check passed.
 local ok_gripd, gripd = pcall(require, "neogrip.gripd")
 if ok_gripd then
 	pcall(gripd.disconnect_all)

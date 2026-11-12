@@ -1,14 +1,6 @@
--- JDBC drivers, one jar per database, downloaded when that database is first
--- used, pinned and checksum-verified (ADR-0006).
---
--- Each connection runs with only its own driver on the classpath. That is not
--- tidiness: the MongoDB driver bundles a GraalVM JavaScript engine, and having
--- it on the classpath of a PostgreSQL connection prints warnings and slows the
--- start of every query (ADR-0003).
---
--- Digests computed from the official artifacts on 2026-10-29 and cross-checked
--- against the repository's published hashes. Bumping a version means updating
--- jar, url and sha256 together.
+-- Each connection runs with only its own driver on the classpath: the MongoDB driver's bundled
+-- GraalVM engine slows every other connection's queries. Digests computed from the official
+-- artifacts on 2026-10-29; bump jar, url and sha256 together.
 local download = require("neogrip.bootstrap.download")
 local neogrip = require("neogrip")
 
@@ -49,17 +41,14 @@ local DRIVERS = {
 		url = MAVEN .. "/org/duckdb/duckdb_jdbc/1.3.1.0/duckdb_jdbc-1.3.1.0.jar",
 		sha256 = "612c1e55e45fb496902b8ec7f9bb957a404813e6d1fc1c4531df000d1bab2d07",
 	},
-	-- Trino is a query engine in front of other stores rather than a store, so
-	-- this jar speaks its HTTP protocol instead of a database wire protocol.
+	-- Trino's jar speaks its HTTP protocol, not a database wire protocol.
 	trino = {
 		jar = "trino-jdbc-484.jar",
 		url = MAVEN .. "/io/trino/trino-jdbc/484/trino-jdbc-484.jar",
 		sha256 = "46476af2968e6f3234e8b22d7e29c26e6d7213ce88ab546a29c4c318c921cd34",
 	},
-	-- JetBrains', the one DataGrip itself uses: Apache-2.0, and the only JDBC
-	-- driver that talks to a plain mongod. MongoDB's own driver needs the
-	-- Atlas SQL interface, which a local server does not have. Gated by the
-	-- spike recorded against ADR-0020 before the MongoDB phase starts.
+	-- JetBrains' Apache-2.0 driver, the only JDBC one that talks to a plain mongod (MongoDB's
+	-- own needs Atlas SQL); gated by the spike recorded against ADR-0020.
 	mongodb = {
 		jar = "mongo-jdbc-standalone-1.21.jar",
 		url = "https://github.com/DataGrip/mongo-jdbc-driver/releases/download/v1.21/mongo-jdbc-standalone-1.21.jar",

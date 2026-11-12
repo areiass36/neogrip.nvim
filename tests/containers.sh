@@ -74,10 +74,8 @@ seed_mongo() {
       {_id:1, cust:{name:"Ann",city:"Lisbon"}, total:10.5, tags:["a","b"], when:new Date("2024-01-02"), paid:true},
       {_id:2, cust:{name:"Bob, Jr"}, total:NumberDecimal("99.99"), tags:[], when:new Date("2024-02-03"), paid:false}
     ]);
-    // A collection bigger than one sampling window, with a field only in its
-    // first document and another only in its last: a sample that reads just
-    // the head sees one of them and a sample that reads both ends sees both
-    // (ADR-0038).
+    // A field only in the first document and another only in the last: a
+    // head-only sample must miss one of them.
     db.sampling.drop();
     db.sampling.insertMany(
       Array.from({length: 120}, (_, index) => {

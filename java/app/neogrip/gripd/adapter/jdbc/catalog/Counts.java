@@ -11,19 +11,10 @@ import neogrip.gripd.adapter.jdbc.Running;
 import neogrip.gripd.contract.Contracts;
 
 /**
- * How many rows a set has, approximately and cheaply - or nothing at all.
- *
- * The number decorates a node in a tree somebody else draws, so it has to cost
- * less than the walk that shows it. Every engine here that keeps an estimate in
- * its own catalog answers for a whole namespace in one statement, which is why
- * this takes a namespace and not a set. The engines that keep no estimate
- * answer with nothing rather than having `count(*)` run on their behalf
- * (ADR-0038): a client that gets no number shows no number, which is better
- * than a client that waits.
- *
- * Nothing here fails the request. An estimate is a decoration, and a server
- * that will not produce one - a permission the connection lacks, a catalog view
- * an old version does not have - has still answered the question that matters.
+ * Approximate row counts, cheaply or not at all: engines with a catalog
+ * estimate answer a whole namespace in one statement, the rest answer nothing
+ * rather than having count(*) run on their behalf (ADR-0038), and nothing
+ * here fails the request.
  */
 public final class Counts {
     /** A catalog read that has not answered in this long is not an estimate worth waiting for. */
@@ -41,8 +32,7 @@ public final class Counts {
 
     public Contracts.Counts counts(String catalog, String schema) {
         Map<String, Long> estimates = new LinkedHashMap<>();
-        // MySQL and MariaDB report their databases as catalogs and have no
-        // schema layer, so the qualifier is whichever of the two was filled in.
+        // Either qualifier serves MySQL and MariaDB; see doc/internals.md#schema-and-tree.
         String qualifier = Metadata.orNull(schema) != null ? schema : catalog;
         try {
             switch (Metadata.engine(connection, url)) {
@@ -50,20 +40,18 @@ public final class Counts {
                 case "mysql", "mariadb" -> read(estimates, MYSQL, qualifier);
                 case "sqlserver" -> read(estimates, SQLSERVER, qualifier);
                 default -> {
-                    // sqlite, duckdb, trino and the Mongo wrapper keep no row
-                    // estimate; the only way to a number there is counting.
+                    // Some engines keep no row estimate; see doc/internals.md#schema-and-tree.
                 }
             }
         } catch (SQLException | RuntimeException refused) {
-            // Said above: a decoration nobody can produce is not an error.
+            // A decoration nobody can produce is not an error.
         }
         return new Contracts.Counts(estimates);
     }
 
     /**
-     * reltuples is what the planner uses, and it is -1 on a table that has
-     * never been analysed (PostgreSQL 14 and up) - which is not an estimate, so
-     * those are left out. Views and foreign tables have no estimate either.
+     * Never-analysed tables are left out along with views and foreign tables;
+     * see doc/internals.md#schema-and-tree.
      */
     private static final String POSTGRES =
             """
@@ -73,7 +61,7 @@ public final class Counts {
              where n.nspname = ? and c.relkind in ('r', 'p', 'm') and c.reltuples >= 0
             """;
 
-    /** table_rows is an estimate on InnoDB and exact on MyISAM; a view has none. */
+    /** An estimate or exact by storage engine; see doc/internals.md#schema-and-tree. */
     private static final String MYSQL =
             """
             select table_name, table_rows
@@ -82,9 +70,8 @@ public final class Counts {
             """;
 
     /**
-     * index_id 0 and 1 are the heap and the clustered index: the rows, counted
-     * once. The column is row_count - sys.partitions is the view with a column
-     * called rows, and dm_db_partition_stats is not it.
+     * Rows are counted once across the heap and the clustered index; see
+     * doc/internals.md#schema-and-tree.
      */
     private static final String SQLSERVER =
             """

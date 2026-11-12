@@ -1,15 +1,5 @@
--- Which database does this buffer run against?
---
--- Five rules, most specific first:
---
---   1. an explicit choice made in this session
---   2. a binding saved for this exact file
---   3. a glob or folder from .nvim/database.json
---   4. the project default
---   5. the last connection used in this project
---
--- Rules 1 and 2 are the same store: choosing a connection for a buffer saves
--- it, so the choice survives a restart.
+-- Resolves which connection a buffer runs against, most specific rule first;
+-- an explicit choice is saved per file, so it survives a restart.
 local neogrip = require("neogrip")
 local connections = require("neogrip.connections")
 
@@ -60,21 +50,17 @@ local function save()
 	pcall(vim.fn.writefile, { vim.json.encode(payload) }, store_path())
 end
 
---- Match a project-relative path against a glob. vim.glob.to_lpeg understands
---- "**", which glob2regpat does not.
+--- Match a project-relative path; vim.glob.to_lpeg understands "**", which glob2regpat does not.
 local function match_glob(relative, pattern)
 	local ok, parser = pcall(vim.glob.to_lpeg, pattern)
 	if ok and parser then
 		return parser:match(relative) ~= nil
 	end
-	-- Fall back to a regex, approximating "**" with ".*".
 	local escaped = vim.fn.glob2regpat(pattern)
 	return vim.fn.match(relative, escaped) >= 0
 end
 
---- A pattern with more literal characters is more specific: "reports/**/*.sql"
---- beats "**/*.sql". Ties go to the first declared entry, because the order in
---- the file is the author's own ranking.
+--- More literal characters means more specific; ties go to the first declared entry.
 local function binding_for_path(relative)
 	local best, best_score
 	for _, binding in ipairs(connections.project_bindings()) do
@@ -98,8 +84,7 @@ function M.for_buf(bufnr)
 	local path = vim.api.nvim_buf_get_name(bufnr)
 	local candidates = {}
 
-	-- An explicit choice for this buffer, which is also what a scratch buffer
-	-- with no file on disk has to rely on.
+	-- Also the only rule a scratch buffer with no file on disk can hit.
 	if vim.b[bufnr].neogrip_connection then
 		candidates[#candidates + 1] = { vim.b[bufnr].neogrip_connection, "chosen for this buffer" }
 	end
@@ -137,8 +122,7 @@ function M.for_buf(bufnr)
 	return nil, nil
 end
 
---- A later phase's module, attached only when it exists: the port grows in
---- phases and resolve must not fail while lsp and dialect are still unported.
+--- Attached via pcall: the port grows in phases and resolve must not fail while a module is unported.
 local function attach_services(bufnr, connection)
 	local dialect_ok, dialect = pcall(require, "neogrip.dialect")
 	if dialect_ok then

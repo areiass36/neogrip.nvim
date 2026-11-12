@@ -63,7 +63,6 @@ end, 2000)
 check("syntax switched", vim.bo[tsql_buf].syntax, "tsql")
 check("the dialect is recorded", vim.b[tsql_buf].neogrip_dialect, "mssql")
 
--- and back again
 dialect.attach(tsql_buf, "postgres")
 support.wait(function()
 	return vim.bo[tsql_buf].syntax ~= "tsql"

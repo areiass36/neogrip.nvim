@@ -1,6 +1,5 @@
 -- The real gripd, no database: compile, launch, shake hands, and walk the
--- contract's edges. Needs a JDK (NEOGRIP_TEST_JDK in CI, the plugin's own
--- download locally); skips - never fails - without one.
+-- contract's edges. Skips - never fails - without a JDK.
 local support = require("tests.support")
 local jdk = require("neogrip.bootstrap.jdk")
 local gripd = require("neogrip.gripd")
@@ -71,7 +70,6 @@ local function raw_gripd(handlers)
 	}, handlers)
 end
 
--- A fresh process refuses work before the handshake.
 local raw = raw_gripd()
 local _, early = support.sync(function(done)
 	raw:request("ping", {}, done)
@@ -83,9 +81,7 @@ support.check(
 )
 raw:close()
 
--- A client speaking another contract is refused and the process goes away:
--- the server reports why it stopped and main picks the exit code, so a
--- mismatch has to still be fatal rather than leave a process nobody can use.
+-- A mismatch must stay fatal rather than leave a process nobody can use.
 local mismatch_exit = nil
 local wrong = raw_gripd({
 	on_exit = function(code)

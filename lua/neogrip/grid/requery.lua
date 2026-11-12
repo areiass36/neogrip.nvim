@@ -1,14 +1,5 @@
--- Querying a result with SQL (ADR-0021).
---
--- The grid's rows are written as CSV and registered as a view in a scratch
--- DuckDB file; a query buffer then opens against that file. The result of that
--- query can be materialised in turn, so results compose.
---
--- The scratch is a file rather than :memory: so it survives whatever happens
--- to the Java process, and per-PID because a DuckDB file takes a single
--- writer and its format is tied to the driver's version. A file written by
--- another DuckDB version will not open: the driver says so plainly, and a new
--- scratch costs nothing.
+-- Querying a result with SQL: the rows become a CSV view in a scratch DuckDB file,
+-- per-PID because the file takes one writer and its format is tied to the driver version.
 local neogrip = require("neogrip")
 local config = require("neogrip.config")
 local export = require("neogrip.grid.export")
@@ -27,8 +18,7 @@ function M.scratch_path()
 	return ("%s/%d.duckdb"):format(scratch_dir(), vim.uv.os_getpid())
 end
 
---- The synthetic connection the scratch is queried through. Registered so a
---- query buffer opened on it resolves to it by id like any other.
+--- The synthetic connection the scratch is queried through, registered so it resolves by id.
 function M.connection()
 	return require("neogrip.connections").register({
 		id = "__scratch__",
@@ -43,10 +33,7 @@ function M.connection()
 	})
 end
 
---- Register a CSV as a view. all_varchar keeps every column as text: type
---- inference on a CSV is a guess, and a guess that turns an id into a float is
---- worse than a string. A query that needs a number can cast the column, which
---- is at least written down where it happens.
+--- Register a CSV as a view, every column kept as text; see doc/internals.md#requery.
 --- @param callback fun(view: string|nil, err: string|nil)
 function M.register(csv_path, opts, callback)
 	opts = opts or {}
@@ -90,8 +77,7 @@ function M.query_csv(csv_path, callback)
 	end)
 end
 
---- Write the rows the grid has loaded to CSV, register it, and open a query
---- buffer on it.
+--- Write the rows the grid has loaded to CSV, register it, and open a query buffer on it.
 function M.materialise(bufnr)
 	local grid = require("neogrip.grid")
 	local state = grid.state(bufnr)
@@ -113,9 +99,7 @@ function M.materialise(bufnr)
 	end)
 end
 
---- Is a process still running? uv.kill with signal 0 asks without sending
---- anything. It does not raise for a dead process, it returns nil plus ESRCH,
---- so a plain pcall around it would report every pid as alive.
+--- uv.kill with signal 0 does not raise for a dead process; see doc/internals.md#requery.
 local function process_alive(pid)
 	local ok, result = pcall(vim.uv.kill, pid, 0)
 	return ok and result == 0

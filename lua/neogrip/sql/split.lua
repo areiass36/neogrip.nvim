@@ -1,22 +1,10 @@
--- Which statement is under the cursor.
---
--- A hand-written lexer rather than treesitter: the sql parser does not
--- understand T-SQL at all (it fails on [brackets], TOP, @variables, MERGE and
--- GO), and the four things that actually break a naive split are exactly the
--- ones a lexer can track -- dollar-quoted bodies in Postgres, MySQL's DELIMITER,
--- SQL Server's GO batch separator, and nested block comments.
---
--- Visual mode bypasses all of it and sends the selection as written, bar a
--- trailing terminator, which is the escape hatch for anything this gets wrong.
+-- A hand-written lexer: the treesitter sql parser fails on T-SQL (see doc/internals.md#lsp), and
+-- what breaks a naive split (dollar quoting, DELIMITER, GO, nested block comments) a lexer can
+-- track; visual mode bypasses it.
 local M = {}
 
--- MySQL is the only one of these engines that treats a backslash inside a
--- string as an escape. In Trino, Postgres, SQLite and SQL Server it is an
--- ordinary character and a doubled quote is the only escape, so consuming
--- whatever follows a backslash swallows the closing quote: a literal path or
--- separator ending in one would leave the lexer inside a string, carry it past
--- the terminator, and hand the whole tail of the file to the driver as one
--- statement.
+-- Only MySQL treats a backslash in a string as an escape; elsewhere consuming what follows one
+-- would swallow the closing quote and hand the file's whole tail to the driver as one statement.
 local BACKSLASH_ESCAPES = {
 	mysql = true,
 	mariadb = true,
@@ -146,7 +134,6 @@ function M.statements(text, dialect)
 					goto continue
 				end
 				-- GO on a line of its own is a batch separator in SQL Server.
-				-- string.match with an init returns absolute positions.
 				local go_end = text:match("^[Gg][Oo][ \t]*\n()", index)
 					or text:match("^[Gg][Oo][ \t]*()$", index)
 				if go_end then
@@ -183,8 +170,7 @@ function M.at_cursor(bufnr, winid)
 			return statement
 		end
 	end
-	-- The cursor sits in blank space or a comment: take the statement above it,
-	-- which is what you were just editing.
+	-- In blank space or a comment, take the statement above: it is what was just edited.
 	local previous = statements[1]
 	for _, statement in ipairs(statements) do
 		if statement.end_line <= line then
@@ -211,10 +197,7 @@ function M.selection(bufnr)
 	lines[#lines] = lines[#lines]:sub(1, math.min(to[2] + 1, #lines[#lines]))
 	lines[1] = lines[1]:sub(from[2] + 1)
 	local text = vim.trim(table.concat(lines, "\n"))
-	-- A terminator belongs to the splitter, not to the driver: Trino rejects a
-	-- statement that ends in one outright ("mismatched input ';'"), and it also
-	-- breaks the subquery the sort wraps the statement in. The rest of the
-	-- selection is still sent verbatim.
+	-- The trailing terminator must go; see doc/internals.md#runner-and-execute.
 	text = vim.trim((text:gsub(";%s*$", "")))
 	if text == "" then
 		return nil

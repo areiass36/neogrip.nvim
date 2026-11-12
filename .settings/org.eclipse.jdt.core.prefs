@@ -1,12 +1,4 @@
-#
-# The language server compiles the way the real build does, so the editor
-# cannot bless what javac will later refuse: release 21 (ADR-0005 pins the JDK,
-# lua/neogrip/bootstrap/jdk.lua holds the level) and parameter names kept in
-# the class file, which the RPC library binds requests by (ADR-0027).
-#
-# Without the compliance level the server would use whatever JDK it happens to
-# run on - 25 here - and a Java 22+ API would read as fine until CI said no.
-#
+# See doc/internals.md#java-tooling.
 eclipse.preferences.version=1
 org.eclipse.jdt.core.compiler.codegen.methodParameters=generate
 org.eclipse.jdt.core.compiler.codegen.targetPlatform=21

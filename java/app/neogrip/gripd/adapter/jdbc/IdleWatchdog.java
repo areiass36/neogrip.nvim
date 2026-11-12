@@ -6,16 +6,8 @@ import java.util.function.Supplier;
 import neogrip.gripd.domain.Notifications;
 
 /**
- * The timer that looks after what nobody is using any more.
- *
- * An idle open transaction holds locks on the server, so one that has seen no
- * request for its window is rolled back - never committed (ADR-0013) - and the
- * editor is told why its session is suddenly clean. An open result nobody
- * continues is memory held on both sides, so one untouched for its window is
- * closed (ADR-0031).
- *
- * The checks are cheap and run on a daemon thread; the work they lead to goes
- * through the lane, where it cannot race a statement for the connection.
+ * The idle timer: a transaction idle past its window is rolled back, never
+ * committed (ADR-0013), and a result nobody continues is closed (ADR-0031).
  */
 final class IdleWatchdog {
     private static final long EVERY_SECONDS = 15;

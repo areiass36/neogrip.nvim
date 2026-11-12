@@ -12,15 +12,12 @@ public final class Drivers {
     }
 
     /**
-     * Apply a setting the driver may not have. Not every JDBC driver
-     * implements every knob - MongoDB refuses setQueryTimeout outright - and
-     * a missing one is no reason to fail the query.
+     * Apply a setting the driver may not have; see doc/internals.md#jdbc-drivers.
      */
     public static void tolerate(Setting setting) {
         try {
             setting.apply();
         } catch (SQLException ignored) {
-            // The driver does not support it; the query still runs.
         }
     }
 }

@@ -1,9 +1,5 @@
--- The grid asking for the next batch on its own (ADR-0040): when it asks, when
--- it must not, and that it asks exactly once however often the cursor moves.
---
--- Driven through grid.maybe_load_more(bufnr, line) with the line given rather
--- than read from a window, which is why that function takes one: the whole
--- suite runs with no window and no server.
+-- The grid asking for the next batch on its own. Driven through
+-- grid.maybe_load_more(bufnr, line) so the whole suite runs with no window and no server.
 local support = require("tests.support")
 local check, note = support.check, support.note
 local config = require("neogrip.config")
@@ -44,8 +40,7 @@ local function fresh(opts)
 	if opts.done ~= nil then
 		done = opts.done
 	end
-	-- Spelled out rather than `opts.no_hash and nil or "..."`, which in Lua
-	-- always yields the fallback: nil is false, so the or branch wins.
+	-- Spelled out: `opts.no_hash and nil or "..."` always yields the fallback in Lua.
 	local hash = "aaaabbbbcccc"
 	if opts.no_hash then
 		hash = nil
@@ -74,7 +69,6 @@ local function settle()
 	end, 20)
 end
 
---- Arm the trigger and wait for the request it should produce.
 local function trigger(bufnr, line)
 	local before = #requests
 	grid.maybe_load_more(bufnr, line)
@@ -114,8 +108,7 @@ end, 1000)
 settle()
 check("ten motions in a row still ask once", #requests, 1)
 
--- The blank line and the footer are past the last row, and sync_from_cursor
--- ignores them. Resting there is the clearest "I am at the bottom" there is.
+-- The blank line and the footer sit past the last row, which sync_from_cursor ignores.
 bufnr = fresh({ rows = 200 })
 trigger(bufnr, 200 + 3)
 check("the blank line past the rows still asks", #requests, 1)
@@ -130,8 +123,7 @@ bufnr = fresh({ rows = 200, done = true })
 grid.maybe_load_more(bufnr, line_of(200))
 settle()
 check("a finished result is not asked", #requests, 0)
--- Only page_next speaks; the automatic path is silent or it would say "no
--- further rows" on every motion at the bottom of every result.
+-- The automatic path is silent or it would speak on every motion at the bottom.
 check("and says nothing about it", #notices, 0)
 
 bufnr = fresh({ rows = 200, no_hash = true })
@@ -139,9 +131,7 @@ grid.maybe_load_more(bufnr, line_of(200))
 settle()
 check("an unnamed result cannot be continued", #requests, 0)
 
--- A batch that claims there is more and brings nothing would be asked for
--- again on the next motion, forever. No server does this today; the latch is
--- what keeps it a bug rather than a loop.
+-- Without the latch, a batch claiming more but bringing nothing would be re-asked forever.
 bufnr = fresh({ rows = 200 })
 answer = function()
 	return { rows = {}, done = false }
@@ -167,9 +157,7 @@ check("while still promising more", lines[#lines]:find("more", 1, true) ~= nil, 
 
 support.describe("autoload: a result the server no longer has")
 
--- Evicted, swept for being idle, or cancelled: the continuation comes back
--- -32600 and nothing is re-run (ADR-0040). The rows already loaded stay
--- usable, the reader is told once, and the asking stops.
+-- An expired continuation comes back -32600 and nothing is re-run (ADR-0040).
 config.setup({ auto_load_rows = 10 })
 bufnr = fresh({ rows = 200 })
 answer = function()
@@ -190,15 +178,12 @@ lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 check("the footer says so", lines[#lines]:find("expired", 1, true) ~= nil, true)
 check("and stops promising more", lines[#lines]:find("(more)", 1, true), nil)
 
--- The part that matters: scrolling on a dead result must not retry, and must
--- not say anything again either.
 grid.maybe_load_more(bufnr, line_of(200))
 grid.maybe_load_more(bufnr, line_of(199))
 settle()
 check("a later motion does not ask again", #requests, 1)
 check("nor repeat itself", #notices, 1)
 
--- But the key does get an answer, because someone pressed it.
 local execute = require("neogrip.execute")
 notices = {}
 execute.page(grid.state(bufnr), 1)
@@ -213,9 +198,7 @@ end
 
 support.describe("autoload: the threshold is held below the batch")
 
--- A threshold as large as the batch re-arms the instant a batch lands, so
--- `auto_load_rows = 500` against `limit = 200` would walk the whole table from
--- the first row. Clamped, it is one batch of lookahead and no more.
+-- Unclamped, a threshold as large as the batch would walk the whole table from row one.
 config.setup({ auto_load_rows = 500 })
 bufnr = fresh({ rows = 200, limit = 200 })
 trigger(bufnr, line_of(1))

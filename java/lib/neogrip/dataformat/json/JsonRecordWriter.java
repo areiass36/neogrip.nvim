@@ -6,14 +6,10 @@ import java.util.List;
 import neogrip.dataformat.RecordWriter;
 
 /**
- * One JSON array of objects, keyed by the header's field names, streamed
- * record by record so nothing accumulates and the array can be larger than
- * memory (ADR-0010).
- *
- * {@link JsonWriter} wraps an IOException into an UncheckedIOException,
- * because its own API is a fluent builder with no checked exceptions; this
- * class unwraps it again, so a caller that has to delete a half-written file
- * sees the IOException its signature declared.
+ * One JSON array of objects, streamed record by record so the array can be
+ * larger than memory (ADR-0010); {@link JsonWriter}'s UncheckedIOException is
+ * unwrapped so a caller that has to delete a half-written file sees the
+ * IOException its signature declared.
  */
 public final class JsonRecordWriter implements RecordWriter {
     private final Appendable sink;

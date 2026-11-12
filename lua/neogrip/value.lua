@@ -1,9 +1,5 @@
--- How a value is written out.
---
--- Converting types is the Java side's job now - it has the column type from
--- JDBC, so a decimal arrives as exact text and a binary column as hex. What
--- is left here is turning whatever arrived into the string a cell, a CSV
--- field or the clipboard should hold.
+-- Type conversion is the Java side's job (a decimal arrives as exact text, binary as hex);
+-- this only turns what arrived into the string a cell, a CSV field or the clipboard holds.
 local db = require("neogrip")
 
 local M = {}
@@ -29,8 +25,7 @@ function M.display(value, null_text)
 	return ok and encoded or tostring(value)
 end
 
--- The shapes a type prints in, for M.kind. Matched in order, so uuid is tried
--- before the date patterns and nothing hex-looking is read as a number.
+-- Matched in order, so uuid is tried before the date patterns and nothing hex-looking reads as a number.
 local TEXT_KINDS = {
 	{ "number", "^[-+]?%d+$" },
 	{ "number", "^[-+]?%d*%.%d+$" },
@@ -43,18 +38,11 @@ local TEXT_KINDS = {
 	{ "time", "^%d%d:%d%d:%d%d" },
 }
 
--- Past this a cell is prose, whatever it starts with: a comment field that
--- opens with a date is a comment field, not a timestamp.
+-- Past this a cell is prose: a comment field that opens with a date is not a timestamp.
 local TEXT_LIMIT = 64
 
---- What a cell holds, as a name the grid colours by: "null", "boolean",
---- "number", "date", "timestamp", "time", "uuid", "json" or "text".
----
---- The type has to be read back off the value because that is all the grid
---- gets: the Java side knows the column type from JDBC but sends a row as
---- JSON, where a decimal, a date, a uuid and a name are all strings. Guessing
---- from the text is only ever used to pick a colour -- yanking, exporting and
---- the WHERE clauses built in navigate.lua all read the stored value.
+--- The kind a cell holds, for the grid to colour by; guessed from the text because JSON rows
+--- stringify every type, and only ever used for colour - yank, export and navigate read the stored value.
 function M.kind(value)
 	if value == db.NULL or value == nil or value == vim.NIL then
 		return "null"
@@ -67,8 +55,7 @@ function M.kind(value)
 		return "number"
 	end
 	if lua_type ~= "string" then
-		-- A table: an array or an object the driver sent whole, which display
-		-- encodes back to JSON.
+		-- An array or object the driver sent whole.
 		return "json"
 	end
 	if value:find("^%s*[{%[]") and value:find("[}%]]%s*$") then

@@ -1,14 +1,5 @@
--- Checking a statement against the server without running it.
---
--- JDBC makes this simple in a way the command line clients never were:
--- preparing a statement sends the text to the server, which parses it,
--- resolves the names and describes the result - and executes nothing. No
--- PREPARE inside a rolled-back transaction, no EXPLAIN that has to be kept
--- away from ANALYZE, and no SQL Server special case where SET NOEXEC ON would
--- have run the statement for real.
---
--- PostgreSQL even reports the character position, so the mark lands on the
--- offending name rather than on the line.
+-- Validation prepares the statement: the server parses it and resolves the names but executes
+-- nothing; PostgreSQL even reports the character position.
 local classify = require("neogrip.sql.classify")
 local config = require("neogrip.config")
 local neogrip = require("neogrip")
@@ -22,8 +13,7 @@ local M = {}
 local NAMESPACE = vim.api.nvim_create_namespace("neogrip_diagnostics")
 local pending = {}
 
---- Statements that are not worth sending: a transaction or session command
---- has nothing to validate, and preparing one is not meaningful.
+--- A transaction or session command has nothing to validate.
 --- @return boolean checkable, string|nil reason
 function M.checkable(sql)
 	local kind = classify.kind(sql)
@@ -76,9 +66,8 @@ function M.validate(opts)
 
 	local settings = config.get()
 
-	-- Preparing a statement runs nothing, so checking against production is
-	-- safe. It is still traffic to a production server on every save, so the
-	-- automatic pass skips it; asking explicitly (:NGripValidate) does not.
+	-- Preparing runs nothing, but it is still traffic to a production server on every save,
+	-- so the automatic pass skips production; an explicit :NGripValidate does not.
 	if connection.production and not opts.notify then
 		return
 	end

@@ -12,13 +12,8 @@ import neogrip.gripd.domain.error.RequestRefused;
 import neogrip.jsonrpc.RpcLifecycle;
 
 /**
- * Connection control and metadata, nothing else: this class does not know or
- * care who executes things on the database. It opens the one JDBC connection,
- * answers the facts about it (product, driver, capabilities, readonly, the
- * url and properties a catalog sweep needs to open siblings), tracks when the
- * last request arrived, and closes the connection on shutdown - rollback is
- * the Database's job and runs first, because shutdown hooks fire in reverse
- * registration order.
+ * Connection control and metadata only; rollback on shutdown is the Database's
+ * job and runs first, because shutdown hooks fire in reverse registration order.
  */
 public final class Session implements RpcLifecycle {
     private volatile Connection connection;
@@ -148,7 +143,6 @@ public final class Session implements RpcLifecycle {
             try {
                 open.close();
             } catch (SQLException ignored) {
-                // Shutting down anyway.
             }
         }
     }

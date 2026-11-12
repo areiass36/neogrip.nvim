@@ -1,7 +1,4 @@
--- The handful of glyphs a document draws, and a table a client may read for
--- its own tree or ignore entirely (ADR-0037). Plain Unicode that every
--- monospace font carries - no icon font required - and overridable from
--- setup({ icons = { ... } }).
+-- Plain Unicode glyphs every monospace font carries, overridable from setup({ icons = ... }).
 local config = require("neogrip.config")
 
 local DEFAULTS = {

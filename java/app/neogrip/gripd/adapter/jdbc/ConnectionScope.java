@@ -14,14 +14,9 @@ import neogrip.gripd.domain.Notifications;
 import neogrip.gripd.domain.ReadonlyPolicy;
 
 /**
- * Everything bound to one open connection, built once when it opens.
- *
- * What this replaced was ten volatile fields and a lazy bind() that compared
- * the live connection against the one it had last seen - on every single
- * operation, to answer a question that can only change once, because there is
- * one connection per process (ADR-0003). The scope is built when connect
- * succeeds and handed over whole; before that there is none, and asking for
- * one is what refuses a statement sent before connect.
+ * Everything bound to one open connection, built once when it opens - there
+ * is one connection per process (ADR-0003); before connect there is no scope,
+ * and asking for one is what refuses a statement sent too early.
  */
 public final class ConnectionScope {
     private final ExecutionLane lane;
@@ -49,8 +44,7 @@ public final class ConnectionScope {
         this.details = new Details(connection);
         this.nativeDdl = new NativeDdl(connection, lane.running(), session.url());
         this.counts = new Counts(connection, lane.running(), session.url());
-        // The url and the properties go with it so a catalog sweep can open
-        // connections of its own rather than take this one.
+        // The url and properties let a catalog sweep open connections of its own.
         this.introspect = new Introspect(connection, lane.sweepCancelled(), session.url(), session.properties());
     }
 

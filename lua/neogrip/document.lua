@@ -1,47 +1,24 @@
--- A table or a schema as a document you can :edit.
---
--- The explorer this plugin used to ship named its definition buffer itself
--- and wrote the lines straight into it. The name looked like a URI but was
--- not one: nothing could be pointed at it, so a jump from a table name in a
--- query, or a buffer recovered from a session, had nowhere to land.
---
--- Here the name is the document. db://table/<conn>/<catalog>/<schema>/<table>
--- and db://schema/<conn>/<catalog>/<schema> are read by a BufReadCmd, so
--- :edit of one fills it whoever asked and whenever -- a client's keymap, a
--- go-to-definition, or :bufdo after a restart all end up in the one buffer.
---
--- Every segment is percent-encoded and the shape is fixed, with catalogs and
--- schemas present as empty segments where the engine has none. Joining them
--- with dots the way the old buffer name did was ambiguous the moment a schema
--- or a table had a dot in it, and leaving the empty ones out made the rest
--- impossible to read positionally.
+-- A table or a schema as a document you can :edit: a neogrip:// name is read
+-- by a BufReadCmd, every segment percent-encoded, empty where the engine has no catalog or schema.
 local icons = require("neogrip.icons")
 local schema = require("neogrip.schema")
 
 local M = {}
 
--- rfc2396 rather than vim.uri_encode's default rfc3986, which leaves "/" and
--- ":" alone -- and a schema called "a/b" would then spell a path separator.
+-- Not the default encoding; see doc/internals.md#document-buffers.
 local ENCODING = "rfc2396"
 
--- How many tables a schema listing spells out. A swept warehouse schema holds
--- hundreds, and a pane you scroll for a minute is no more use than a count.
+-- How many tables a schema listing spells out before falling back to a count.
 local LISTED = 40
 
--- Lines the caller already has in hand, waiting for the BufReadCmd that is
--- about to run. A client that already fetched a set's details before opening
--- it would otherwise pay for the same answer twice.
+-- Lines the caller already has in hand, so an answer fetched before opening is
+-- not paid for twice.
 local pending = {}
 
--- Whether the reader is registered. M.setup is what registers it, but nothing
--- can be read before it has run, so M.open makes sure.
+-- M.setup registers the reader; M.open makes sure it has run.
 local reading = false
 
---- Something a document can say in passing, as a SQL comment.
----
---- Flattened, because a driver's message often runs over several lines and a
---- buffer line cannot hold one: unflattened it would raise out of a BufReadCmd
---- instead of being read.
+--- A passing note as a SQL comment, flattened; see doc/internals.md#document-buffers.
 local function comment(text)
 	return "-- " .. (tostring(text):gsub("%s+", " "))
 end
@@ -55,8 +32,7 @@ local function decode(value)
 	return ok and decoded or value
 end
 
---- A caller holding only an id -- a bound buffer, say -- should not have to
---- look the connection up to be able to spell a document's name.
+--- Accept a connection table or just its id.
 local function id_of(connection)
 	if type(connection) == "table" then
 		return connection.id
@@ -83,11 +59,8 @@ function M.schema_uri(connection, catalog, schema_name)
 	)
 end
 
---- What a neogrip:// name means, or nil when it is not one of ours.
----
---- A connection that no longer exists reads as nil rather than raising, so a
---- buffer left over from a session whose connections have been edited since
---- degrades into a note instead of an error on startup.
+--- What a neogrip:// name means, or nil when it is not one of ours; a vanished
+--- connection reads as nil so a stale session buffer degrades into a note.
 --- @return table|nil { kind, connection, catalog, schema, table }
 function M.parse(uri)
 	if type(uri) ~= "string" then
@@ -105,13 +78,10 @@ function M.parse(uri)
 	if not connection then
 		return nil
 	end
-	-- Empty back to nil, because nil is how the rest of the module spells "no
-	-- catalog" and "no schema": sqlite has neither, mysql has no catalog.
+	-- Empty back to nil: nil is how the module spells "no catalog" and "no schema".
 	local catalog, schema_name = decode(segments[2]), decode(segments[3])
 	if catalog == "" then
-		-- A name spelled by something that only knew the connection -- a jump
-		-- from a query buffer, say -- still has to find the sweep, and the
-		-- sweep is keyed by the catalog the connection means.
+		-- The sweep is keyed by the catalog the connection means, so fill it in.
 		catalog = schema.catalog_of(connection)
 	end
 	return {
@@ -123,8 +93,7 @@ function M.parse(uri)
 	}
 end
 
--- What a document draws beside a set of each kind. A client's tree decorates
--- its own nodes (ADR-0037); this is for the lines written here.
+-- What a document draws beside a set of each kind.
 local KIND_ICON = {
 	table = icons.table,
 	temp = icons.table,
@@ -143,8 +112,7 @@ local KIND_LABEL = {
 	foreign = { "foreign table", "foreign tables" },
 }
 
--- Tables first and the derived things after, so the header reads the same way
--- for every engine however the driver happened to order its answer.
+-- Tables first and the derived things after, whatever order the driver answered in.
 local RANK = { table = 1, view = 2, matview = 3, foreign = 4, temp = 5, collection = 6 }
 
 local function label_of(kind, count)
@@ -159,8 +127,7 @@ end
 local function title_of(connection, catalog, schema_name)
 	local where = schema_name
 	if where == nil or where == "" then
-		-- An engine with no schemas: its one database is the thing being
-		-- listed, and for sqlite not even that.
+		-- An engine with no schemas: its one database is the thing being listed.
 		where = catalog
 	end
 	if where == nil or where == "" then
@@ -169,21 +136,14 @@ local function title_of(connection, catalog, schema_name)
 	return schema.quote(connection.driver, where)
 end
 
---- One schema, as a listing of what is in it.
----
---- Comments throughout: this is a 'sql' buffer like every other document here,
---- and a listing is not a statement. Shared with the preview pane, so resting
---- on a schema and opening it cannot describe it two different ways.
----
---- @param tables table[]|nil the schema's tables, in the shape the store keeps
---- them. Read from the swept catalog when not given, which is the synchronous
---- case; the preview hands in the answer of its own warm-up when there is no
---- sweep to read.
+--- One schema, as a listing of comments; shared with the preview pane, so
+--- resting on a schema and opening it describe it the same way.
+--- @param tables table[]|nil the schema's tables in the shape the store keeps;
+--- read from the swept catalog when not given
 --- @return string[]
 function M.schema_lines(connection, catalog, schema_name, tables)
 	connection = connection or {}
-	-- The sweep is keyed by the catalog the connection means, so a caller that
-	-- did not say which reads nothing at all unless it is filled in here.
+	-- The sweep is keyed by the catalog the connection means, so fill it in.
 	catalog = catalog or schema.catalog_of(connection)
 	local known = tables
 	if not known and connection.id then
@@ -229,13 +189,11 @@ function M.schema_lines(connection, catalog, schema_name, tables)
 		end
 		width = math.max(width, #tostring(record.name or ""))
 	end
-	-- Capped, because one pathological name should not push every column count
-	-- off the right of the pane.
+	-- Capped so one pathological name does not push the counts off the pane.
 	width = math.min(width, 48)
 
 	local lines = { comment(("%s: %s"):format(title, table.concat(summary, ", "))), "--" }
-	-- In the order the driver reported them, which JDBC groups by kind and then
-	-- by name: reordering here would stop matching the level below.
+	-- In the driver's reported order: reordering would stop matching the level below.
 	for index, record in ipairs(known) do
 		if index > LISTED then
 			lines[#lines + 1] = "--"
@@ -252,11 +210,8 @@ function M.schema_lines(connection, catalog, schema_name, tables)
 	return lines
 end
 
---- The engine's own DDL for a table, when this driver can produce one.
----
---- Optional in every sense: the driver may have nothing of the kind and the
---- server may refuse, so the callback fires only when there is something to
---- show and nothing ever waits on it.
+--- The engine's own DDL for a table, when this driver can produce one; the
+--- callback fires only when there is something to show.
 --- @param callback fun(ddl: string)
 function M.native_ddl(connection, context, table_name, callback)
 	if type(schema.native_ddl) ~= "function" then
@@ -287,9 +242,7 @@ end
 local function dress(bufnr, parsed)
 	vim.bo[bufnr].buftype = "nofile"
 	vim.bo[bufnr].swapfile = false
-	-- A real 'sql' buffer, so treesitter and the dialect layer in
-	-- db/dialect.lua highlight it the way a query buffer is highlighted -- a
-	-- buffer with no filetype was why the old DDL window came out grey.
+	-- A buffer with no filetype was why the old DDL window came out grey.
 	vim.bo[bufnr].filetype = "sql"
 	vim.bo[bufnr].modified = false
 	vim.bo[bufnr].modifiable = false
@@ -297,20 +250,14 @@ local function dress(bufnr, parsed)
 
 	local connection = parsed and parsed.connection
 	if connection then
-		-- Without the dialect layer this engine's own functions and types are
-		-- highlighted as generic ANSI SQL.
+		-- Without the dialect layer, engine functions highlight as generic ANSI SQL.
 		pcall(require("neogrip.dialect").attach, bufnr, connection.driver)
 		pcall(require("neogrip.resolve").bind, bufnr, connection.id)
 	end
-
-	-- No keymaps here (ADR-0017): leaving the document is :b# or whatever the
-	-- user mapped.
 end
 
---- The definition, as the renderer in neogrip/render.lua writes it.
----
---- Required here rather than at the top of the file: the renderer is optional
---- and this module is not, so naming it late keeps the dependency one-way.
+--- The definition as neogrip/render.lua writes it; required late to keep the
+--- dependency one-way.
 local function definition(parsed, details)
 	local ok, lines =
 		pcall(require("neogrip.render").details, parsed.connection, parsed.schema, parsed.table, details)
@@ -320,11 +267,8 @@ local function definition(parsed, details)
 	return { comment(lines) }
 end
 
---- Fill `bufnr` with the document `uri` names.
----
---- Not necessarily before it returns: a table's definition can be a round trip
---- away and a BufReadCmd has to leave a usable buffer behind synchronously, so
---- a placeholder goes up first and the answer replaces it when it lands.
+--- Fill `bufnr` with the document `uri` names; a BufReadCmd must leave a
+--- usable buffer synchronously, so a placeholder goes up first.
 --- @param on_done fun(lines: string[])|nil fires once, with what was written
 function M.render(uri, bufnr, on_done)
 	local function finish(lines)
@@ -334,8 +278,6 @@ function M.render(uri, bufnr, on_done)
 		end
 	end
 
-	-- Already rendered by whoever is opening this: the answer is in hand, so
-	-- there is nothing to ask and nothing to wait for.
 	local ready = pending[uri]
 	if ready then
 		return finish(ready)
@@ -366,20 +308,19 @@ function M.render(uri, bufnr, on_done)
 		local lines = definition(parsed, details)
 		finish(lines)
 
-		-- The server's own DDL is a second round trip, and the definition reads
-		-- perfectly without it, so it is appended when it lands rather than
-		-- holding the buffer up for it.
+		-- The server's own DDL is a second round trip, appended when it lands
+		-- rather than holding the buffer up for it.
 		M.native_ddl(parsed.connection, parsed, parsed.table, function(ddl)
-			-- A copy, because the details may be the per-question cache's own
-			-- table and this field has no business being written back to it.
+			-- A copy: the details may be the cache's own table, and this field
+			-- must not be written back to it.
 			local whole = vim.tbl_extend("force", {}, details, { native_ddl = ddl })
 			M.fill(bufnr, (definition(parsed, whole)))
 		end)
 	end, parsed.catalog)
 end
 
---- Matched by full name rather than with bufnr(), which takes its argument as
---- a pattern and would happily return a different table's buffer.
+--- Matched by full name: bufnr() takes a pattern and could return a different
+--- table's buffer.
 local function buffer_named(name)
 	for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
 		if vim.api.nvim_buf_get_name(bufnr) == name then
@@ -400,35 +341,24 @@ end
 
 local function switch(uri, existing)
 	if existing and vim.api.nvim_buf_is_loaded(existing) then
-		-- :buffer rather than nvim_win_set_buf, because only the command sets
-		-- the alternate file, and that is what makes <C-^> the way back.
+		-- Only :buffer sets the alternate file, which makes <C-^> the way back.
 		return vim.cmd(("buffer %d"):format(existing))
 	end
 	if not existing then
-		-- The buffer is made here rather than by the :edit, because :edit
-		-- reuses the current buffer when that one is empty and unnamed -- which
-		-- renames whatever you were looking at instead of leaving it behind as
-		-- the alternate file, and the alternate file is the way back.
+		-- Made here because :edit reuses an empty unnamed buffer, renaming what
+		-- you were looking at instead of leaving it as the alternate file.
 		vim.fn.bufadd(uri)
 	end
-	-- File magic off: a percent-encoded name has to reach :edit as it was
-	-- spelled, with % and # left alone rather than expanded into the current
-	-- and alternate file names.
+	-- File magic off, so % and # in a percent-encoded name reach :edit as spelled.
 	return vim.cmd({ cmd = "edit", args = { uri }, magic = { file = false } })
 end
 
---- Open `uri` in the current window.
----
---- In this window and not a split of it: a document is a buffer like any other
---- and replaces what you were looking at, the way :edit would. A window that
---- already shows it is focused instead, so walking back into the same table
---- does not move anything.
+--- Open `uri` in the current window, replacing it the way :edit would; a
+--- window already showing it is focused instead.
 --- @param lines string[]|nil lines the caller has already rendered
 --- @return integer|nil bufnr, integer|nil winid
 function M.open(uri, lines)
-	-- :edit is the only way into a document, so opening one has to know the
-	-- reader is there: db/init.lua registers it at startup, but a caller can
-	-- be loaded and used before that has happened.
+	-- A caller can be loaded and used before db/init.lua registers the reader.
 	if not reading then
 		M.setup()
 	end
@@ -442,8 +372,7 @@ function M.open(uri, lines)
 		pending[uri] = lines
 		local ok = pcall(switch, uri, bufnr)
 		if not ok then
-			-- :edit will not leave a modified buffer behind when 'hidden' is
-			-- off. The document still opens; only the way back is lost.
+			-- :edit can refuse to switch; see doc/internals.md#document-buffers.
 			bufnr = buffer_named(uri)
 			if not bufnr then
 				bufnr = vim.api.nvim_create_buf(true, false)
@@ -466,8 +395,8 @@ function M.open(uri, lines)
 	return bufnr, winid
 end
 
---- The identifier a rendered column entry opens with, in whatever this engine
---- quotes with -- and mongodb quotes with nothing at all.
+--- The identifier a rendered column entry opens with, in this engine's quoting
+--- (mongodb quotes with nothing at all).
 local function leading_identifier(line)
 	local text = vim.trim(line)
 	return text:match('^"(.-)"')
@@ -476,11 +405,8 @@ local function leading_identifier(line)
 		or text:match("^([%w_$]+)")
 end
 
---- The 1-based line a column sits on in a rendered table document, or nil.
----
---- Read back out of the rendered text rather than counted from the details,
---- because the renderer is free to leave a column out or to reorder one, and a
---- jump that lands a line off is worse than one that does not land at all.
+--- The 1-based line a column sits on in a rendered table document, or nil;
+--- read back out of the text because the renderer may omit or reorder a column.
 --- @return integer|nil
 function M.column_line(lines, column_name)
 	local want = tostring(column_name or "")
@@ -489,8 +415,7 @@ function M.column_line(lines, column_name)
 	end
 	for index, line in ipairs(lines or {}) do
 		if line == ");" then
-			-- Past the column list. An index and an inbound reference name
-			-- columns too, and neither is where the column is defined.
+			-- Past the column list: indexes and inbound references name columns too.
 			return nil
 		end
 		if line:sub(1, 4) == "    " and leading_identifier(line) == want then
@@ -508,8 +433,7 @@ function M.setup()
 		pattern = { "neogrip://table/*", "neogrip://schema/*" },
 		callback = function(event)
 			-- Guarded whole: a BufReadCmd that raises leaves behind a buffer
-			-- nothing will ever fill, and the user looking at a traceback
-			-- instead of a table.
+			-- nothing will ever fill.
 			local parsed = M.parse(event.file)
 			pcall(dress, event.buf, parsed)
 			pcall(M.render, event.file, event.buf)

@@ -1,12 +1,6 @@
--- CSV, RFC 4180: used to export a result and to read one back.
---
--- The parser takes bytes, not lines, because a quoted field can contain a
--- newline -- splitting the text on "\n" first would cut rows in half. It can be
--- fed in chunks, which also means it has to survive a chunk boundary landing
--- inside a quoted field, or between the \r and the \n of a line ending.
---
--- It scans with string.find rather than character by character: a per-character
--- loop over a few megabytes takes seconds in Lua.
+-- RFC 4180 CSV, fed in chunks: a quoted field can contain a newline and a chunk boundary can
+-- land inside one. It scans with string.find because a per-character loop over a few megabytes
+-- takes seconds in Lua.
 local db = require("neogrip")
 
 local M = {}

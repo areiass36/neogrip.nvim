@@ -13,11 +13,9 @@ import neogrip.gripd.contract.Contracts;
 /** The small catalog listings: catalogs, schemas, tables, columns. */
 public final class Listings {
     /**
-     * How many names a listing answers at once (ADR-0038).
-     *
-     * A ceiling on what is sent and not on what exists: before paging, a
-     * schema with six hundred tables answered five hundred of them and said
-     * nothing about the rest, which in a tree reads as missing data.
+     * How many names a listing answers at once (ADR-0038) - a ceiling on what
+     * is sent, not on what exists: before paging, a schema with six hundred
+     * tables answered five hundred and said nothing about the rest.
      */
     static final int PAGE = 500;
 
@@ -28,13 +26,8 @@ public final class Listings {
     }
 
     /**
-     * One page of an ordered listing: what sorts after `after`, at most
-     * `limit` of it.
-     *
-     * Keyset rather than offset, and stateless because of it: the client sends
-     * back the last name it received and this resumes with the comparator the
-     * list was ordered by, so nothing is skipped or repeated even if the
-     * catalog changed between two pages.
+     * One page of an ordered listing; keyset rather than offset, so nothing is
+     * skipped or repeated even if the catalog changed between two pages.
      */
     private static <T> Contracts.Rows<T> page(
             List<T> ordered, Function<T, String> name, String after, int limit) {
@@ -78,7 +71,7 @@ public final class Listings {
     public Contracts.Rows<Contracts.Named> schemas(String catalog, String after, int limit)
             throws SQLException {
         // Every name, because the page is cut here: a cap inside the read would
-        // make the last page depend on which names the driver answered first.
+        // make the last page depend on the driver's row order.
         List<String> names = Metadata.schemaNames(connection.getMetaData(), catalog, Integer.MAX_VALUE);
         return page(named(names), Contracts.Named::name, after, limit);
     }
@@ -92,19 +85,8 @@ public final class Listings {
     }
 
     /**
-     * Where this driver wants a database name.
-     *
-     * MySQL and MariaDB report their databases as catalogs: getSchemas answers
-     * nothing at all there, and getTables with the database in the schema
-     * argument silently ignores it. Measured against MySQL 9: asking for schema
-     * "testdb" answered the sys views instead of the two tables in it - fifty
-     * pages of them before the walk gave up - while asking for catalog "testdb"
-     * answered exactly the two. MariaDB's driver accepts either, which is why
-     * the fault is invisible on half the fixtures.
-     *
-     * The editor has one namespace slot per engine and puts the database in it
-     * (schema.catalog_of answers nothing for these drivers), so the swap
-     * belongs here, next to the metadata call it is about.
+     * MySQL and MariaDB report their databases as catalogs; see
+     * doc/internals.md#schema-and-tree.
      */
     private static boolean databaseIsCatalog(DatabaseMetaData meta) throws SQLException {
         String product = meta.getDatabaseProductName();
@@ -138,10 +120,8 @@ public final class Listings {
         }
 
         List<Contracts.TableRow> list = new ArrayList<>();
-        // Asking for a list of types does not work across drivers: DuckDB
-        // answers with "BASE TABLE", others with "TABLE", and a type the driver
-        // does not recognise silently returns nothing. So everything is
-        // requested and the system objects are dropped here.
+        // Asking by type does not work across drivers, so everything is requested and the
+        // system objects are dropped here; see doc/internals.md#schema-and-tree.
         try (ResultSet rows =
                 meta.getTables(
                         Metadata.orNull(inCatalog),
@@ -170,9 +150,8 @@ public final class Listings {
      */
     public Contracts.Rows<?> columns(String catalog, String schema, String table) throws SQLException {
         if (MongoFields.isMongo(connection)) {
-            // The JDBC driver's getColumns needs the Atlas SQL schema, which a
-            // plain mongod does not have; it throws rather than returning
-            // nothing. Sampling documents is what a collection can answer.
+            // getColumns needs the Atlas SQL schema a plain mongod lacks and throws, so
+            // a collection answers by sampling documents instead.
             return MongoFields.sampleFields(connection, table);
         }
 

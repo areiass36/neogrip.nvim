@@ -22,8 +22,7 @@ local targets = {
 	{ driver = "mongodb", schema_name = nil, table_name = "orders", kind = "collection" },
 }
 
--- Only the connections this suite uses: invalidate(nil) would also delete the
--- catalogs the developer has swept, which cost a sweep to get back.
+-- Only this suite's connections: invalidate(nil) would delete the developer's own catalogs.
 for _, connection in pairs(connections) do
 	schema.invalidate(connection)
 end
@@ -34,7 +33,6 @@ for _, target in ipairs(targets) do
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
-		-- Some databases arrive without a fixture of their own.
 		support.ensure_fixture(connection)
 		local databases, databases_err = support.sync(function(done)
 			schema.databases(connection, function(records, err)
@@ -44,8 +42,7 @@ for _, target in ipairs(targets) do
 		if databases_err then
 			support.fail("databases", databases_err)
 		else
-			-- SQLite has no catalog level at all, which is why the tree goes
-			-- straight from the connection to its sets.
+			-- SQLite has no catalog level at all.
 			if target.driver ~= "sqlite" then
 				check("databases are listed", #databases > 0, true)
 			end
@@ -59,12 +56,8 @@ for _, target in ipairs(targets) do
 				:sub(1, 70))
 		end
 
-		-- A view, so the collapse of ADR-0036 is asserted and not assumed: every
-		-- engine reports its own TABLE_TYPE and all of them must arrive as one
-		-- of three kinds. Created here rather than in the container fixtures
-		-- because duckdb and sqlite have no container, and the error is ignored
-		-- because a second run finds it already there - no engine agrees on the
-		-- spelling of "create or replace view".
+		-- A view, so the kind collapse of ADR-0036 is asserted; the error is ignored
+		-- because no engine agrees on the spelling of "create or replace view".
 		if target.driver ~= "mongodb" then
 			support.run(
 				connection,
@@ -74,11 +67,8 @@ for _, target in ipairs(targets) do
 			schema.invalidate(connection)
 		end
 
-		-- The collapse of ADR-0036 is only a decision where an engine has a
-		-- type that is neither plainly a table nor plainly a view, and nothing
-		-- else in this suite produces one: every other fixture is a table, a
-		-- view or a collection, so the "nothing outside the three" check below
-		-- passed without ever being tested. PostgreSQL has both cases.
+		-- Without these the "nothing outside the three" check below passed without
+		-- ever being tested; PostgreSQL has both ambiguous TABLE_TYPEs.
 		if target.driver == "postgres" then
 			support.run(
 				connection,
@@ -122,9 +112,8 @@ for _, target in ipairs(targets) do
 			end
 			check(("%s is listed"):format(target.table_name), found, true)
 
-			-- Ordered by the server (ADR-0036). Not cosmetic: the keyset paging
-			-- of ADR-0038 resumes from the last name received, which is only
-			-- exact while the order is total and the same on every call.
+			-- The keyset paging of ADR-0038 is only exact while the server's order
+			-- is total and stable (ADR-0036).
 			local names, ordered = {}, true
 			for _, record in ipairs(tables) do
 				names[#names + 1] = tostring(record.name)
@@ -135,8 +124,6 @@ for _, target in ipairs(targets) do
 				end
 			end
 			check("the listing comes back ordered by name", ordered, true)
-			-- Nothing outside the three; a matview or a foreign table arriving
-			-- under its own name would show up right here.
 			for kind in pairs(kinds) do
 				check(
 					("%s is one of the three kinds"):format(kind),
@@ -151,9 +138,8 @@ for _, target in ipairs(targets) do
 				done(records, err)
 			end)
 		end)
-		-- MongoDB field sampling is best-effort through the wrapper (ADR-0029):
-		-- after it lists collections, the next sample can come back empty, which
-		-- is the wrapper declining to describe rather than a neogrip failure.
+		-- MongoDB field sampling is best-effort: an empty sample is the wrapper
+		-- declining, not a neogrip failure (ADR-0029).
 		if target.driver == "mongodb" and not columns_err and #columns == 0 then
 			note("mongodb: the wrapper returned no field sample; skipped (ADR-0029)")
 		elseif columns_err then
@@ -209,9 +195,7 @@ else
 		support.run(duck, ("create table if not exists page_%s(id int)"):format(letter), { mode = "exec" })
 	end
 
-	-- Driven through the wire rather than through schema.*: the editor side has
-	-- no paging caller yet (that is the tree), and what is being proved here is
-	-- the contract of ADR-0038.
+	-- Driven through the wire: what is being proved is the contract of ADR-0038.
 	local seen, order, after, pages, cut = {}, {}, nil, 0, nil
 	repeat
 		local params = { schema = "main", limit = 3 }
@@ -264,8 +248,8 @@ do
 	if not support.reachable(mongo) then
 		note("skipped")
 	else
-		-- 120 documents, a field only in the first and another only in the
-		-- last: reading just the head sees one of them (ADR-0038).
+		-- A field only in the first document and another only in the last: reading
+		-- just the head would see one of them (ADR-0038).
 		local fields = support.sync(function(done)
 			schema.columns(mongo, nil, "sampling", function(records, err)
 				done(records, err)
@@ -294,10 +278,8 @@ end
 support.describe("live/schema: approximate row counts")
 do
 	local gripd = require("neogrip.gripd")
-	-- PostgreSQL keeps no estimate until the table has been analysed: reltuples
-	-- is -1 on one autovacuum has not reached yet, which is not an estimate and
-	-- is left out rather than reported as a count. Asking for the analyze is
-	-- what makes this test about the query and not about the clock.
+	-- PostgreSQL's reltuples is -1 until analyzed, so the analyze makes this
+	-- about the query and not the clock.
 	local count_targets = {
 		{ driver = "postgres", schema_name = "public", prepare = "analyze torture" },
 		{ driver = "mysql", schema_name = "testdb" },
@@ -314,10 +296,8 @@ do
 		if not support.reachable(connection) then
 			note(("%s: skipped"):format(target.driver))
 		else
-			-- catalog/counts goes straight to the process, and there is no
-			-- process until something has connected. Every other driver here
-			-- was connected by the block above; Trino appears in this list
-			-- only, so it would be asked before it had a connection at all.
+			-- catalog/counts goes straight to the process, and Trino, in this list
+			-- only, would be asked before it had a connection at all.
 			if not gripd.is_connected(connection.id) then
 				support.run(connection, "select 1", { timeout = 90000 })
 			end
@@ -337,8 +317,7 @@ do
 			check(("%s answers without failing"):format(target.driver), err, nil)
 			if result then
 				if target.empty then
-					-- No cheap estimate there, and nothing counts rows on its
-					-- own behalf (ADR-0038).
+					-- Nothing counts rows on its own behalf (ADR-0038).
 					check(("%s keeps no estimate"):format(target.driver), vim.tbl_count(result.counts), 0)
 				else
 					local estimate = result.counts and result.counts.torture
@@ -359,9 +338,8 @@ if support.reachable(pg) then
 		end)
 	end)
 	local statement = schema.select_statement(pg, "public", "torture", columns)
-	-- The old client had to rewrite the projection as encode(b,'hex') because
-	-- its JSON output destroyed the bytes. JDBC reports the column as binary,
-	-- so the Java side renders it as hex and "select *" is enough.
+	-- The old client had to rewrite the projection as encode(b,'hex'); with JDBC
+	-- "select *" is enough.
 	check("a plain select is generated", statement, 'SELECT * FROM "public"."torture"')
 	local result = support.run(pg, statement .. " ORDER BY id", { limit = 5 })
 	local index
@@ -398,9 +376,8 @@ if support.reachable(pg) then
 			done(records)
 		end)
 	end)
-	-- Not a timing comparison any more: JDBC answers a catalog question in a
-	-- millisecond or two, so "slower than the cache" is not measurable. What
-	-- matters is that the answer is fetched again.
+	-- Not a timing comparison: JDBC answers in a millisecond or two, so "slower
+	-- than the cache" is not measurable.
 	check("and after invalidating it asks the server again", #fresh > 0, true)
 else
 	note("skipped")

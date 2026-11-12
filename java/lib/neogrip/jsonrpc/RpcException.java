@@ -32,12 +32,9 @@ public final class RpcException extends RuntimeException {
 
     /**
      * A refusal the session cannot continue past: the client gets its error
-     * and the server then stops.
-     *
-     * For a request the server answers inline - the handshake - the loop ends
-     * at once. From a request on its own thread the server stops when the read
-     * loop next comes round, because interrupting a blocked read is not
-     * reliable on every platform.
+     * and the server stops - at once for an inline-answered request, otherwise
+     * when the read loop next comes round, because interrupting a blocked read
+     * is not reliable on every platform.
      */
     public static RpcException fatal(int code, String message) {
         return new RpcException(code, message, null, true);

@@ -2,10 +2,9 @@ package neogrip.gripd.adapter.rpc;
 
 /**
  * The error codes this program defines beyond the ones JSON-RPC reserves
- * (doc/protocol.md), mirrored by the Lua side's rpc/protocol.lua.
- *
- * They live here rather than in the RPC library because a library that spelled
- * SQL_ERROR would be a library that knew this program executes SQL.
+ * (doc/protocol.md), mirrored by the Lua side's rpc/protocol.lua; they live
+ * here because a library that spelled SQL_ERROR would know this program
+ * executes SQL.
  */
 public final class ErrorCodes {
     private ErrorCodes() {}

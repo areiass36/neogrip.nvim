@@ -41,14 +41,11 @@ public final class Statements {
         guard.refuseWrites(sql);
         long start = System.currentTimeMillis();
         boolean named = hash != null && !hash.isEmpty();
-        // Only a named result announces itself (ADR-0042): nothing is listening
-        // for a sample or a probe, and no frame could address one.
+        // Only a named result announces itself (ADR-0042): no frame could address an unnamed one.
         Started started = named ? () -> notifications.executing(hash) : () -> {};
         Cursor cursor = Cursor.open(connection, running, sql, limit, timeoutSeconds, named, started);
-        // Registration is tracked rather than inferred from `named`: a hash
-        // that is already live is refused, and detaching it on the way out
-        // would then take somebody else's cursor out of the registry without
-        // closing it - a leak caused by the client bug that was refused.
+        // Registration is tracked rather than inferred from `named`: a live hash is refused, and
+        // detaching on the way out would take somebody else's cursor out of the registry unclosed.
         boolean registered = false;
         boolean keep = false;
         try {
@@ -56,8 +53,7 @@ public final class Statements {
                 return new UpdateResult(cursor.updateCount(), System.currentTimeMillis() - start);
             }
             if (named) {
-                // Registered before the first row is read, so a cancel naming
-                // this hash can reach the statement while it is still running.
+                // Registered before the first row is read, so a cancel can reach the running statement.
                 cursors.keep(hash, cursor);
                 registered = true;
             }
@@ -96,24 +92,17 @@ public final class Statements {
     }
 
     /**
-     * Check a statement without running it.
-     *
-     * Preparing it is enough: the driver sends the text to the server, which
-     * parses it, resolves the names and describes the result. Syntax errors
-     * and unknown columns come back here, and nothing is executed - no
-     * rolled-back transaction, no triggers, none of the games the command line
-     * clients needed.
+     * Check a statement without running it: preparing sends the text to the
+     * server, which parses it and resolves the names, and nothing is executed.
      */
     public void validate(String sql) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             running.set(statement);
-            // Asking for the shape of the result forces the describe on the
-            // drivers that would otherwise prepare lazily.
+            // Asking for the result shape forces the describe on drivers that prepare lazily.
             try {
                 statement.getMetaData();
             } catch (SQLException e) {
-                // Some statements have no result shape (INSERT without
-                // RETURNING); that is not a validation failure.
+                // A statement with no result shape (INSERT without RETURNING) is not a failure.
                 if (!isShapeless(e)) {
                     throw e;
                 }

@@ -1,10 +1,5 @@
--- Checking a statement on the server, and pointing at the right place.
---
--- With JDBC this is one mechanism for every engine: preparing a statement
--- makes the server parse it, resolve the names and describe the result,
--- without running it. The envelopes the old command line clients needed -
--- PREPARE inside a rolled-back transaction, EXPLAIN kept away from ANALYZE,
--- and SQL Server's dangerous SET NOEXEC - are all gone.
+-- Checking a statement on the server and pointing at the right place: preparing
+-- makes the server parse and resolve it without running it.
 local support = require("tests.support")
 local check, note = support.check, support.note
 
@@ -31,7 +26,6 @@ for _, driver in ipairs({ "postgres", "mysql", "mariadb", "mssql", "sqlite", "du
 	if not support.reachable(connection) then
 		note("skipped: nothing listening (tests/containers.sh up)")
 	else
-		-- Some databases arrive without a fixture of their own.
 		support.ensure_fixture(connection)
 		local connections_module = require("neogrip.connections")
 		local saved_get = connections_module.get
@@ -69,7 +63,6 @@ for _, driver in ipairs({ "postgres", "mysql", "mariadb", "mssql", "sqlite", "du
 			check("and the mark covers it", text:sub(item.col + 1, item.end_col), "nosuchcol")
 		end
 
-		-- Nothing ran: the table is untouched and a good statement clears it.
 		vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { ("select id from %s;"):format(table_name) })
 		diagnostics.validate({ bufnr = bufnr })
 		support.wait(function()
@@ -114,14 +107,12 @@ if support.reachable(pg) then
 	vim.api.nvim_set_current_buf(bufnr)
 	require("neogrip.resolve").bind(bufnr, production.id)
 
-	-- The automatic pass (no notify) leaves a production server alone.
 	diagnostics.validate({ bufnr = bufnr })
 	vim.wait(2000, function()
 		return #vim.diagnostic.get(bufnr) > 0
 	end, 50)
 	check("nothing was checked on save", #vim.diagnostic.get(bufnr), 0)
 
-	-- Asking explicitly does check it, and says that it is production.
 	local messages = {}
 	local original = vim.notify
 	vim.notify = function(message)

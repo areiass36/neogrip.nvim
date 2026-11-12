@@ -1,8 +1,5 @@
--- Turning rows into aligned text.
---
--- Widths are measured with strdisplaywidth, never with # or strchars: a CJK
--- character occupies two cells, a combining mark none, and counting bytes would
--- bend every separator out of line.
+-- Turning rows into aligned text. Widths are measured with strdisplaywidth,
+-- never bytes: a CJK character is two cells and a combining mark none.
 local config = require("neogrip.config")
 local value_module = require("neogrip.value")
 
@@ -24,16 +21,13 @@ function M.sanitize(value, null_text)
 	-- Terminal escapes would move the cursor around inside the buffer.
 	text = text:gsub("\27%[[%d;?]*[ -/]*[@-~]", "")
 	text = text:gsub("\r\n", "\n"):gsub("\r", "\n"):gsub("\n", "↵")
-	-- A tab's width depends on where it lands, which would make the measurement
-	-- a lie; a control byte can be a binary value that was never text.
+	-- A tab's width depends on where it lands; a control byte can be binary that was never text.
 	text = text:gsub("\t", " ")
 	text = text:gsub("%z", "·"):gsub("[\1-\8\11\12\14-\31]", "·")
 	return text
 end
 
---- True when a value carries bytes that are not text. Postgres bytea arrives
---- through the JSON driver with its invalid bytes already replaced by U+FFFD,
---- so the original cannot be recovered -- better to say so than to show noise.
+--- True when a value carries bytes that are not text; see doc/internals.md#grid.
 function M.looks_binary(value)
 	if type(value) ~= "string" then
 		return false
@@ -45,9 +39,8 @@ local function display_width(text)
 	return vim.fn.strdisplaywidth(text)
 end
 
---- Longest prefix of `text` that fits in `width` display cells, plus an
---- ellipsis. Binary search over character counts, because a 1 MB JSON value in
---- a cell is not unusual and walking it down one character at a time is slow.
+--- Longest prefix of `text` that fits in `width` display cells, plus an ellipsis.
+--- Binary search, for huge cells; see doc/internals.md#grid.
 function M.truncate(text, width)
 	if display_width(text) <= width then
 		return text
@@ -108,20 +101,10 @@ local function pad(text, width)
 	return text .. string.rep(" ", padding)
 end
 
---- Render the header, the rule and one line per row.
----
---- The byte span of a column is computed per line, not once for the table: a
---- cell holding CJK is the same number of display cells as an ASCII one but a
---- different number of bytes, so a single span would miss by a few bytes on
---- every row that is not pure ASCII.
----
---- `opts.from` renders only the rows from that index on, and leaves the header
---- and the rule alone. Everything comes back keyed by its absolute line, so a
---- caller holding the lines it drew before can splice the answer straight in -
---- which is the whole reason this is worth having: a result read by scrolling
---- re-renders on every batch, and at ten thousand rows that was 425 ms of
---- rendering per batch (measured, eight columns) for two hundred new rows.
----
+--- Render the header, the rule and one line per row. Byte spans are computed
+--- per line: a CJK cell spans different bytes for the same display cells.
+--- `opts.from` renders only the rows from that index on, keyed by absolute
+--- line; see doc/internals.md#grid.
 --- @return string[] lines
 --- @return table spans spans[line][column] = { start_byte, end_byte } 0-based, end exclusive
 --- @return table kinds kinds[line][column] = what the cell holds, for colouring

@@ -9,11 +9,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * MongoDB through JDBC answers with one column holding a document, not with
- * columns. The grid wants columns, so the document's top-level fields are
- * spread out, in order of first appearance, and anything nested is summarised
- * rather than flattened further - a document is not a row and pretending
- * otherwise invents structure that is not there.
+ * Spreads a document result's single column into one column per top-level
+ * field, in order of first appearance, summarising nested values; see
+ * doc/internals.md#jdbc-drivers.
  */
 public final class Documents {
     private final int column;

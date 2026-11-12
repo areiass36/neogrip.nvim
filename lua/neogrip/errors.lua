@@ -1,10 +1,5 @@
--- An error the editor can point at.
---
--- JDBC hands over far more than a command line client did: a SQLState, the
--- vendor's code, and - from PostgreSQL - the exact character position, which
--- the old usql path discarded entirely. So the guesswork that used to live
--- here (hunt for a quoted identifier in the message, search the buffer for it)
--- is now only a fallback for the drivers that report nothing.
+-- An error the editor can point at. Hunting for an identifier in the message is only a
+-- fallback for drivers that report no structured position.
 local dsn = require("neogrip.dsn")
 
 local M = {}
@@ -48,20 +43,15 @@ function M.from_rpc(err, context)
 	local protocol = require("neogrip.rpc.protocol")
 	local data = type(err.data) == "table" and err.data or {}
 	local message = dsn.redact(err.message or "error", context.password)
-	-- Drivers like to append their own position line; the structured field is
-	-- already there, so the text stays short.
+	-- Drivers append their own position line; the structured field already carries it.
 	local first_line = message:match("^[^\n]+") or message
 
 	return {
 		message = vim.trim(first_line),
 		state = data.state ~= "null" and data.state or nil,
 		code = data.vendorCode ~= 0 and data.vendorCode or nil,
-		-- The envelope's own code, kept alongside the driver's because they
-		-- answer different questions and `code` was already the driver's. A
-		-- caller that has to tell a refusal from a failed statement needs this
-		-- one: a continuation whose result is gone answers -32600, and that
-		-- code is what doc/protocol.md pins as the contract - the message is a
-		-- Java string literal with its own opposite three words away.
+		-- The envelope's code, kept apart from the driver's: a continuation whose result is
+		-- gone answers -32600, which doc/protocol.md pins as the contract.
 		rpc_code = err.code,
 		position = data.position,
 		line = data.line,
@@ -77,12 +67,8 @@ function M.from_message(message, context)
 	}
 end
 
---- Where to underline, in buffer coordinates.
----
---- A position from the server is an offset into the statement that was sent,
---- so it is only used when that statement is what the buffer holds; validation
---- sends the text untouched, which is why this works there too.
----
+--- Where to underline, in buffer coordinates; a server position is an offset into the sent
+--- statement, so it only applies while the buffer still holds that statement.
 --- @param error_ neogrip.QueryError
 --- @param statement table { text, start_line, end_line }
 --- @param bufnr integer
@@ -92,8 +78,6 @@ function M.locate(error_, statement, bufnr)
 	local last = (statement.end_line or statement.start_line or 1) - 1
 
 	if error_.position and statement.text then
-		-- Walk the statement's own text to turn an offset into a line and a
-		-- column, then shift by where the statement starts in the buffer.
 		local offset = error_.position
 		local line_index, column = 0, offset
 		for line in (statement.text .. "\n"):gmatch("([^\n]*)\n") do
@@ -106,7 +90,6 @@ function M.locate(error_, statement, bufnr)
 		local target = math.min(first + line_index, last)
 		local text = vim.api.nvim_buf_get_lines(bufnr, target, target + 1, false)[1] or ""
 		local from = math.max(0, math.min(column, #text))
-		-- Underline the whole word the position lands on.
 		local word_end = text:find("[^%w_%.]", from + 1)
 		local to = word_end and (word_end - 1) or #text
 		return target, from, math.max(to, from + 1)

@@ -1,18 +1,12 @@
--- Writing a result out as CSV or JSON.
---
--- The rows the grid has loaded are written from memory - every one of them, as
--- far down as the reader scrolled (ADR-0040). "Everything" re-runs the
--- statement without a LIMIT and streams the client's output straight to a file
--- descriptor, so a result far larger than memory can still be exported.
+-- Writing a result out as CSV or JSON: the loaded rows from memory,
+-- or "everything" re-run without a LIMIT and streamed straight to a file.
 local csv = require("neogrip.codec.csv")
 local neogrip = require("neogrip")
 local value_module = require("neogrip.value")
 
 local M = {}
 
--- Named, because the picker offers them and the handler compares against them:
--- changing one spelling and not the other would send every choice to the
--- everything branch, which re-runs the statement with no limit.
+-- Named once: a spelling drift would send every choice to the no-limit everything branch.
 local CSV_LOADED = "CSV (loaded rows)"
 local JSON_LOADED = "JSON (loaded rows)"
 
@@ -24,8 +18,7 @@ function M.results_dir()
 	return dir
 end
 
---- Column names a SQL identifier can hold: lowercased, non-alphanumerics to
---- underscores, a prefix when it starts with a digit, and deduplicated.
+--- Column names a SQL identifier can hold: lowercased, underscored, prefixed, deduplicated.
 function M.safe_columns(columns)
 	local out, seen = {}, {}
 	for index, column in ipairs(columns) do
@@ -47,9 +40,7 @@ function M.safe_columns(columns)
 	return out
 end
 
---- Every row the grid has loaded, which is as far as the reader scrolled. The
---- name is kept for the callers it already has; "page" has not been a unit here
---- since ADR-0040.
+--- Every row the grid has loaded; "page" in the name has not been a unit since ADR-0040.
 --- @return string path
 function M.page_to_csv(state, path)
 	local columns = M.safe_columns(state.columns)
@@ -57,8 +48,7 @@ function M.page_to_csv(state, path)
 	for _, row in ipairs(state.rows) do
 		lines[#lines + 1] = csv.encode_row(row, { count = #columns, null_marker = NULL_MARKER })
 	end
-	-- A quoted field can contain a newline, so the file is written as one blob
-	-- rather than a list of lines.
+	-- A quoted field can contain a newline, so the file is written as one blob.
 	local text = table.concat(lines, "\n") .. "\n"
 	local fd = assert(vim.uv.fs_open(path, "w", tonumber("600", 8)))
 	vim.uv.fs_write(fd, text)
@@ -91,8 +81,6 @@ function M.pick(bufnr)
 	end
 
 	vim.ui.select(
-		-- The two labels are compared below, so they are written once here and
-		-- matched against these same constants rather than retyped.
 		{ CSV_LOADED, JSON_LOADED, "CSV (everything)" },
 		{ prompt = "Export" },
 		function(choice)
@@ -123,19 +111,15 @@ function M.pick(bufnr)
 	)
 end
 
---- Re-run without a limit, streaming straight to disk.
----
---- The Java side writes the file row by row as the driver hands them over, so
---- a result far larger than memory still exports; nothing is collected here.
+--- Re-run without a limit, streaming straight to disk: the Java side writes the
+--- file row by row, so a result far larger than memory still exports.
 function M.everything(state, path)
 	local runner = require("neogrip.runner")
 	local result = state.result
 	neogrip.notify("exporting the full result...")
 	runner.run({
 		connection = result.connection,
-		-- The statement as it ran, not the one the user typed: a grid that was
-		-- sorted carries its ORDER BY in the wrapper around it, and a file
-		-- exported in another order than the one on screen is a surprise.
+		-- The statement as it ran, not as typed: a sorted grid carries its ORDER BY.
 		sql = result.sql or result.base_sql,
 		mode = "export",
 		limit = 0,
@@ -146,8 +130,7 @@ function M.everything(state, path)
 		if err then
 			return neogrip.notify(("export failed: %s"):format(err.message), vim.log.levels.ERROR)
 		end
-		-- The count comes back from the client, which is the only thing that
-		-- saw the rows: nothing was collected here to count.
+		-- Only the client saw the rows, so the count comes from it.
 		neogrip.notify(
 			("%s rows written to %s"):format(tostring((written or {}).rows_written or "all"), path)
 		)

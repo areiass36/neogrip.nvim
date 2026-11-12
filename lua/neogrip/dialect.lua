@@ -1,23 +1,11 @@
--- Highlighting that follows the chosen database.
---
--- Treesitter's sql parser covers ANSI and Postgres well, and T-SQL not at all:
--- it errors on [bracketed names], TOP, @variables, MERGE, DECLARE and GO. So a
--- SQL Server buffer turns treesitter off and uses the syntax file in
--- syntax/tsql.vim instead, while the other dialects keep treesitter and get an
--- extra layer of their own keywords on top.
---
--- That layer is drawn with extmarks at priority 110: treesitter highlights at
--- 100 (vim.hl.priorities.treesitter), semantic tokens at 125 and diagnostics at
--- 150, so 110 sits above the parser and below both. matchadd would be the other
--- option and is worse: its priority scale is separate and it is per window, so
--- it breaks as soon as the buffer is shown in a split.
+-- Treesitter's sql parser errors on T-SQL, so mssql uses syntax/tsql.vim; the other dialects get
+-- an extmark layer wedged between treesitter's and the LSP's. See doc/internals.md#lsp.
 local M = {}
 
 local NAMESPACE = vim.api.nvim_create_namespace("neogrip_dialect")
 local PRIORITY = 110
 
--- Only what the sql parser does not already know. Function names get
--- @function.builtin, type names @type.builtin, operators @operator.
+-- Only what the sql parser does not already know.
 local DIALECTS = {
 	postgres = {
 		functions = {
@@ -215,13 +203,8 @@ local function spec(driver)
 	return words
 end
 
---- Is this position inside a string or a comment? Highlighting a keyword there
---- would be wrong.
----
---- Treesitter knows the answer, but only once it has parsed the buffer; before
---- that it reports no captures at all and every string would be highlighted. So
---- a small lexer is the fallback, and also the answer for a buffer treesitter
---- is not attached to.
+--- Fallback lexer: before treesitter has parsed it reports no captures at all,
+--- and every string would then be highlighted.
 local function lexical_in_string_or_comment(line, col)
 	local index = 1
 	local quote = nil
@@ -268,12 +251,8 @@ local attached = {}
 local pending = {}
 local tsql = {}
 
---- Hand a buffer to syntax/tsql.vim.
----
---- Scheduled, and repeated on the Syntax event: setting 'syntax' from inside
---- the FileType handler that opened the file does not stick, because the
---- runtime's own syntax autocommand runs afterwards and sets it back to the
---- filetype.
+--- Scheduled and repeated on Syntax: setting 'syntax' inside the FileType handler does not
+--- stick, because the runtime's own syntax autocommand runs afterwards and resets it.
 local function apply_tsql(bufnr)
 	tsql[bufnr] = true
 	vim.schedule(function()
@@ -315,10 +294,8 @@ local function draw(bufnr)
 	end
 end
 
---- Redraw once the buffer stops changing. Marks are set outside the redraw
---- cycle on purpose: deciding whether a word sits inside a string asks
---- treesitter to parse, which is not something to do from a decoration
---- provider.
+--- Marks are set outside the redraw cycle: deciding whether a word sits inside a string asks
+--- treesitter to parse, which must not happen from a decoration provider.
 local function schedule_draw(bufnr)
 	if pending[bufnr] then
 		pending[bufnr]:stop()
@@ -334,8 +311,6 @@ function M.attach(bufnr, driver)
 	vim.b[bufnr].neogrip_dialect = driver
 
 	if driver == "mssql" then
-		-- Treesitter would mark most of a real T-SQL file as an error; the
-		-- syntax file understands it.
 		attached[bufnr] = nil
 		vim.api.nvim_buf_clear_namespace(bufnr, NAMESPACE, 0, -1)
 		apply_tsql(bufnr)
@@ -349,7 +324,6 @@ function M.attach(bufnr, driver)
 	end
 
 	if tsql[bufnr] then
-		-- Hand the buffer back to its filetype and to treesitter.
 		tsql[bufnr] = nil
 		vim.bo[bufnr].syntax = vim.bo[bufnr].filetype
 		pcall(vim.treesitter.start, bufnr)

@@ -5,13 +5,9 @@ import java.sql.Statement;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * The statement currently on the shared connection, so a cancel arriving on
- * another thread can reach it.
- *
- * Statement.cancel is the one JDBC call defined as safe to make from a thread
- * other than the one running the statement, which is the whole reason this
- * exists: a cancel that had to queue behind the statement it should kill would
- * never kill anything.
+ * The statement currently on the shared connection: Statement.cancel is the
+ * one JDBC call defined as safe from another thread, so a cancel arriving on
+ * another thread reaches the statement here instead of queueing behind it.
  */
 public final class Running {
     private final AtomicReference<Statement> current = new AtomicReference<>();

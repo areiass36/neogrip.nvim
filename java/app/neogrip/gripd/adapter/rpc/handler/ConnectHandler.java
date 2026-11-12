@@ -46,9 +46,7 @@ public final class ConnectHandler {
                 }
             }
             case "token" -> {
-                // The property both the SQL Server and the Trino drivers read
-                // a bearer token from; the value came out of kvstore on the
-                // Lua side.
+                // accessToken is the property both the SQL Server and Trino drivers read a bearer token from.
                 if (auth.get("user") instanceof String user) {
                     merged.setProperty("user", user);
                 }

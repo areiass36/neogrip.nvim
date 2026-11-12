@@ -30,10 +30,9 @@ public final class CsvRecordWriter implements RecordWriter {
         line(values);
     }
 
-    /** Nothing to finish: every record already ended with its newline. */
+    /** Nothing to finish: CSV has no closing structure. */
     @Override
     public void close() throws IOException {
-        // Deliberately empty. CSV has no closing structure.
     }
 
     private void line(List<?> cells) throws IOException {

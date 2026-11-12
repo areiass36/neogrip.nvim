@@ -1,6 +1,5 @@
--- Grid actions and the DuckDB requery, end to end with no server: a DuckDB
--- result becomes a grid, the grid becomes CSV, the CSV becomes views, and the
--- views answer SQL - including a standalone CSV from disk (ADR-0021).
+-- Grid actions and the DuckDB requery, end to end with no server: result to grid
+-- to CSV to views that answer SQL.
 local support = require("tests.support")
 local check, note = support.check, support.note
 support.describe("live/requery")
@@ -9,9 +8,8 @@ if not support.has_jdk() then
 	return
 end
 support.seed_secrets()
--- last_row moves the window cursor, which fires the auto-load trigger
--- (ADR-0040), and this suite asserts on #state.rows right after it. Pinned off
--- so the count cannot change between the two reads.
+-- Auto-load pinned off: last_row fires its trigger (ADR-0040) and this suite
+-- asserts on #state.rows right after.
 require("neogrip.config").setup({ auto_load_rows = 0 })
 local duck = support.connections().duckdb
 local connections_module = require("neogrip.connections")
@@ -59,7 +57,6 @@ check("a row yanks as csv", vim.fn.getreg('"'), '1,"a,b",,日本語')
 state.column = 4
 actions.yank_column(result_buf)
 check("a column yanks every value", vim.fn.getreg('"'), "日本語\n中文")
--- A truncated cell must still yank in full.
 local long = string.rep("z", 300)
 state.rows[1][2] = long
 grid.refresh(result_buf)
@@ -153,10 +150,8 @@ local exported = support.sync(function(done)
 end, 90000)
 check("the export reports its row count", exported and exported.rows_written, 2)
 check("and the file is in place", vim.fn.filereadable(full), 1)
--- Gripd's own csv writer, which nothing asserted before: the header
--- check further up is the Lua encoder on a different path, so the quoting
--- rules and the null marker of the streamed export were only ever covered by
--- a row count.
+-- Gripd's own csv writer: the header check further up exercises the Lua encoder
+-- on a different path.
 local full_lines = vim.fn.readfile(full)
 check("with gripd's own header", full_lines[1], "id,s_comma,s_null,cjk")
 check("a comma quoted, a null marked", full_lines[2], '1,"a,b",\\N,日本語')

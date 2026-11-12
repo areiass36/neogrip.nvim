@@ -1,20 +1,5 @@
--- The catalog as a navigable tree of data, for a client that draws its own
--- explorer (ADR-0036, ADR-0037).
---
--- Six levels, a closed set:
---
---   server -> instance -> namespace -> set -> object -> attribute
---   (conn)    (database)  (schema)    (table) (row)     (column)
---
--- Nothing here is formatted for a human: no icons, no padding, no "12
--- columns". A node carries what it is and what is true about it, and the
--- client decides how that looks. `lua/neogrip/icons.lua` is a table a client
--- may read or override; nothing in this module touches it.
---
--- Which levels a connection actually has differs by engine, and that knowledge
--- stays here: `shape()` answers the walk already truncated, with a label per
--- level, so a client recurses through one `children()` call from the
--- connection down to the column without ever naming an engine.
+-- The catalog as a navigable tree of data:
+-- server -> instance -> namespace -> set -> object -> attribute.
 local connections = require("neogrip.connections")
 local gripd = require("neogrip.gripd")
 local runner = require("neogrip.runner")
@@ -26,13 +11,8 @@ local M = {}
 --- The level a node sits at. A closed set: adding one is a contract change.
 M.LEVELS = { "server", "instance", "namespace", "set", "object", "attribute" }
 
---- Does using another instance mean reopening the connection?
----
---- Yes everywhere a connection is bound to one database, which is everywhere
---- but Trino: there one session queries across catalogs, so the choice lands
---- in the name instead (ADR-0039). Nothing in the plugin acts on this - the
---- client draws the explorer (ADR-0037), so this is what tells it to
---- reconnect.
+--- Whether using another instance means reopening the connection: everywhere
+--- but Trino, where one session queries across catalogs (ADR-0039).
 --- @return boolean|nil
 local function reconnects_for(connection)
 	return connection.driver ~= "trino" or nil
@@ -51,17 +31,9 @@ local function labels_for(driver)
 end
 
 --- The walk this connection has, already truncated, and how to label it.
----
---- A file database has no instance to choose and no schema layer; MySQL and
---- MongoDB have databases but no schemas; a connection that names its database
---- starts below that level because there is nothing left to choose. Trino is
---- why `instance` carries the label it does, and why the catalog travels in
---- every ref: asked for all catalogs at once it answers with every catalog's
---- schemas and nothing saying which is which.
----
---- `object` is in the walk but marked `on_demand`: rows are data, they cost a
---- query and are never cached, so `children()` does not reach them unless it is
---- asked to.
+--- The catalog travels in every ref because Trino, asked for all catalogs at
+--- once, answers every catalog's schemas with nothing saying which is which.
+--- `object` is on_demand: rows are data, cost a query and are never cached.
 --- @param connection table
 --- @return table { levels, sweepable, cacheable_until }
 function M.shape(connection)
@@ -78,23 +50,18 @@ function M.shape(connection)
 	end
 
 	if driver == "sqlite" then
-		-- One file and no schemas at all: getSchemas answers nothing there, so
-		-- the sets hang off the connection itself.
+		-- SQLite's sets hang off the connection; see doc/internals.md#schema-and-tree.
 		add("set")
 		add("object", { on_demand = true })
 		add("attribute")
 		return { levels = levels, sweepable = true, cacheable_until = "attribute" }
 	elseif driver == "duckdb" then
-		-- A file too, but it does have schemas - main, information_schema,
-		-- pg_catalog - and the sweep keys its snapshot by them, so a tree that
-		-- skipped the level would ask the server for what it already had. It
-		-- has attached catalogs as well, and they are deliberately not a level:
-		-- the catalog argument is not what filters DuckDB's metadata, which is
-		-- why schema.catalog_of answers nothing for it.
+		-- DuckDB has schemas and the sweep keys its snapshot by them; attached
+		-- catalogs are not a level because the catalog argument does not filter
+		-- its metadata.
 		add("namespace")
 	elseif driver == "mysql" or driver == "mariadb" or driver == "mongodb" then
-		-- A connection that names its database starts below that level:
-		-- there is nothing left to choose.
+		-- A connection that names its database has nothing left to choose.
 		if connection.database == nil or connection.database == "" then
 			add("instance", { reconnects = reconnects_for(connection) })
 		end
@@ -110,11 +77,9 @@ function M.shape(connection)
 
 	return {
 		levels = levels,
-		-- A collection catalog cannot be swept; its fields come from sampling
-		-- one collection at a time (ADR-0029).
+		-- A collection catalog cannot be swept; fields come from sampling (ADR-0029).
 		sweepable = driver ~= "mongodb",
-		-- Everything down to a column can come out of a snapshot. A row never
-		-- can, and never will: it is data.
+		-- A row never comes out of a snapshot: it is data.
 		cacheable_until = "attribute",
 	}
 end
@@ -139,25 +104,16 @@ local function next_level(shape, level, wanted)
 	return nil
 end
 
--- --- ids ---------------------------------------------------------------
-
---- A segment of an id, with the separator and the escape itself escaped.
----
---- Names carry slashes, percent signs, quotes and spaces: a table called `a/b`
---- would otherwise produce an id that reads as two levels, and two different
---- nodes could share one. A client keys its cache, its diff and its extmarks
---- on this, so it has to be exact.
+--- A segment of an id, with the separator and the escape itself escaped: a
+--- table called `a/b` would otherwise produce an id that reads as two levels.
 local function encode(segment)
 	return (tostring(segment):gsub("[%%/]", function(char)
 		return ("%%%02X"):format(char:byte())
 	end))
 end
 
---- The stable id of whatever this ref points at.
----
---- A row's id ends in its position, which is the only identity a row has
---- without a key the client never asked us for - so it is stable for as long
---- as the page is, and no longer.
+--- The stable id of whatever this ref points at; a row's id ends in its
+--- position, stable for as long as the page is and no longer.
 --- @param ref table
 --- @return string
 function M.id(ref)
@@ -173,23 +129,15 @@ function M.id(ref)
 	return table.concat(parts, "/")
 end
 
--- --- refs and the engines' two qualifiers ------------------------------
-
---- The connection a ref names, out of the registry.
----
---- A ref carries an id and not a connection object, because it has to survive
---- being a node id, a client's cache key and a round trip through a config
---- file. A connection the registry has never seen - an ephemeral one a caller
---- built itself - has to be registered before the tree can answer for it.
+--- The connection a ref names; a ref carries an id, not a connection object,
+--- so it survives being a node id, a cache key and a config round trip.
 --- @return table|nil connection
 local function server_of(ref)
 	return ref and ref.server and connections.get(ref.server) or nil
 end
 
---- How this engine wants a ref's two qualifiers passed to `schema.*`.
----
---- MySQL, MariaDB and MongoDB report their databases as catalogs and have no
---- schema layer, so the database goes where every other engine puts its schema.
+--- How this engine passes a ref's two qualifiers to `schema.*`: MySQL, MariaDB
+--- and MongoDB report databases as catalogs and have no schema layer.
 --- @return string|nil catalog, string|nil namespace
 local function qualifiers(connection, ref)
 	local driver = connection.driver
@@ -204,8 +152,6 @@ local function extend(ref, key, value)
 	next_ref[key] = value
 	return next_ref
 end
-
--- --- nodes -------------------------------------------------------------
 
 --- @return table node
 local function node(level, kind, name, ref, extra)
@@ -224,23 +170,17 @@ local function node(level, kind, name, ref, extra)
 	return built
 end
 
---- A handle a client can abandon: a warehouse answers a listing in seconds,
---- and a node collapsed in the meantime must not deliver into a tree that has
---- moved on. For rows the cancel reaches the server, which closes the cursor
---- there - nothing evicts one on the client's behalf any more (ADR-0041), so a
---- client that never closes holds an open statement per expanded node until
---- the idle sweep reaches it.
+--- A handle a client can abandon; for rows the cancel reaches the server,
+--- since nothing evicts a cursor on the client's behalf any more (ADR-0041).
 local function new_handle()
 	local state = { cancelled = false, run = nil }
 	return {
 		cancel = function()
 			state.cancelled = true
 			if state.run then
-				-- cancel declines once the request has answered, and until the
-				-- cap went (ADR-0041) that was harmless because the fifth
-				-- expansion closed this one. Now nothing does, so a listing
-				-- that already arrived has to be handed back by name or it is
-				-- held until the idle sweep an hour later.
+				-- cancel declines once answered; since the cap went (ADR-0041)
+				-- nothing else closes the listing, so it is handed back by name
+				-- or held until the idle sweep an hour later.
 				if not runner.cancel(state.run) and state.run.hash then
 					runner.release(state.run.request.connection, state.run.hash)
 				end
@@ -257,8 +197,6 @@ local function deliver(handle, callback, nodes, err)
 	end
 	callback(nodes, err)
 end
-
--- --- children ----------------------------------------------------------
 
 local function servers(handle, callback)
 	local nodes = {}
@@ -320,17 +258,9 @@ local function namespaces(handle, connection, ref, callback)
 	end)
 end
 
---- One page of a listing, straight from the server (ADR-0038).
----
---- Asked for explicitly, because the cached path is a different question: it
---- asks for a whole schema in one round trip and keeps the answer, which is
---- what a tree wants for the hundreds of sets a person actually browses. A
---- caller that has to be exact on a catalog with thousands of them pages
---- instead, and learns from `done` that there is more - the cheap path cannot
---- say that, because the server caps what it sends and a cap is not a page.
----
---- All three container listings page, because all three can be long: a
---- warehouse has catalogs the way a database has tables.
+--- One page of a listing, straight from the server (ADR-0038): the cached path
+--- caps what it sends without saying so, and a cap is not a page, so an exact
+--- caller pages and learns from `done` that there is more.
 local function paged(handle, connection, ref, level, pattern, opts, callback)
 	local catalog, namespace = qualifiers(connection, ref)
 	local method = ({
@@ -379,10 +309,8 @@ local function paged(handle, connection, ref, level, pattern, opts, callback)
 			nodes[#nodes + 1] = built
 			last = record.name
 		end
-		-- The continuation before the nodes, and in the same shape the rows
-		-- use: every page says `done`, and what is left in it is exactly the
-		-- opts of the next call, so a client continues with one
-		-- `vim.tbl_extend("force", opts, page)` at any level.
+		-- The page is exactly the opts of the next call, so a client continues
+		-- with one `vim.tbl_extend("force", opts, page)` at any level.
 		if not handle._state.cancelled and opts.on_page then
 			opts.on_page({
 				done = not (result and result.truncated == true),
@@ -436,8 +364,7 @@ local function attributes(handle, connection, ref, callback)
 					generated = record.generated,
 					position = record.position,
 					remarks = record.remarks,
-					-- A collection's fields are sampled, not declared
-					-- (ADR-0038): these two are what say so.
+					-- A collection's fields are sampled, not declared (ADR-0038).
 					count = record.count,
 					sample_size = record.sample_size,
 				},
@@ -447,13 +374,9 @@ local function attributes(handle, connection, ref, callback)
 	end, catalog)
 end
 
---- The rows of a set, as nodes, through the named cursor of ADR-0031.
----
---- Never cached and never swept: this is the one level that is data. The page
---- says `done` like every other level's does, and closing a node means calling
---- the handle's cancel so gripd stops holding the cursor. Nothing evicts one
---- for you (ADR-0041): a client that expands tables and never collapses them
---- holds an open statement for each until the idle sweep reaches it.
+--- The rows of a set, as nodes, through the named cursor of ADR-0031; never
+--- cached, and closing a node means calling the handle's cancel so gripd stops
+--- holding the cursor (ADR-0041).
 local function objects(handle, connection, ref, opts, callback)
 	M.statement(ref, "select", function(text, statement_err)
 		if statement_err then
@@ -486,8 +409,8 @@ local function objects(handle, connection, ref, opts, callback)
 						facts = { values = values, columns = columns },
 					})
 			end
-			-- The continuation before the nodes: a client that pages on
-			-- delivery has what it needs to ask for more.
+			-- The continuation goes before the nodes, so a client paging on
+			-- delivery can ask for more.
 			if not handle._state.cancelled and opts.on_page then
 				opts.on_page({
 					hash = result.hash,
@@ -501,18 +424,11 @@ local function objects(handle, connection, ref, opts, callback)
 	end)
 end
 
---- The children of a node, at whatever level comes next for this connection.
----
---- `node` of nil answers the configured connections, so one recursive function
---- walks from there down to a column without knowing that the top level comes
---- from a different place than the rest.
----
---- `limit` or `after` on a container level asks the server for one page by
---- name and reports `{ done, after }` through `on_page`, which is how a client
---- walks a catalog with more sets than the server sends at once. Without
---- either, the answer is the cached whole-schema one: cheaper, kept, and capped
---- by the server without saying so.
----
+--- The children of a node, at whatever level comes next for this connection;
+--- nil answers the configured connections. `limit` or `after` asks the server
+--- for one page and reports `{ done, after }` through `on_page`; without
+--- either, the answer is the cached whole-schema one, capped by the server
+--- without saying so.
 --- @param from table|nil the node to expand, or nil for the servers
 --- @param opts table|nil { objects, limit, after, hash, from, on_page, pattern }
 --- @param callback fun(nodes: table[]|nil, err: table|string|nil)
@@ -569,14 +485,8 @@ function M.children(from, opts, callback)
 	return handle
 end
 
--- --- tools -------------------------------------------------------------
-
---- The name a statement can carry, quoted for this engine.
----
---- The one place a name becomes SQL: a set called `Order` needs its quotes in
---- PostgreSQL, backticks in MySQL and brackets in SQL Server, and a client that
---- concatenated the segments itself would be writing a statement that fails on
---- half the engines.
+--- The name a statement can carry, quoted for this engine: a client that
+--- concatenated the segments itself would fail on half the engines.
 --- @param ref table
 --- @return string|nil
 function M.qualified_name(ref)
@@ -628,11 +538,8 @@ function M.ddl(ref, callback)
 	schema.native_ddl(connection, namespace, ref.set, callback, catalog)
 end
 
---- Approximate row counts for a namespace, by set name (ADR-0038).
----
---- Lazy on purpose: the tree does not wait for it, and where the engine keeps
---- no estimate the answer is simply empty - a client shows no number rather
---- than a wrong one, and nothing counts rows on its behalf.
+--- Approximate row counts for a namespace, by set name (ADR-0038); empty where
+--- the engine keeps no estimate, so a client shows no number rather than a wrong one.
 function M.counts(ref, callback)
 	local connection = server_of(ref)
 	if not connection then
@@ -652,11 +559,8 @@ function M.counts(ref, callback)
 	)
 end
 
---- Sets whose name contains `pattern`, anywhere under this ref.
----
---- A flat answer rather than a walk, because that is what a fuzzy finder
---- wants. With a snapshot it is a scan of what is already here; without one it
---- is a server-side search of the namespace in the ref.
+--- Sets whose name contains `pattern`, as a flat answer: a scan of the
+--- snapshot when there is one, a server-side search otherwise.
 function M.find(ref, pattern, callback)
 	local connection = server_of(ref)
 	if not connection then
@@ -692,12 +596,8 @@ function M.find(ref, pattern, callback)
 	)
 end
 
---- Sweep this ref's catalog, or just one namespace of it (ADR-0038).
----
---- A ref naming a namespace sweeps that namespace and folds the answer into
---- what is already known; anything shallower sweeps the whole instance and
---- replaces it. Mongo cannot be swept at all - `shape().sweepable` says so
---- before the attempt.
+--- Sweep this ref's catalog, or one namespace of it folded into what is known
+--- (ADR-0038); anything shallower replaces the whole instance.
 function M.sweep(ref, opts, callback)
 	local connection = server_of(ref)
 	if not connection then
@@ -721,8 +621,7 @@ function M.swept(ref)
 	return store.stat(connection, catalog)
 end
 
---- Forget what is cached for this ref's connection, so the next question asks
---- the server. The client decides when: nothing here watches the database.
+--- Forget what is cached for this ref's connection; the client decides when.
 function M.forget(ref)
 	local connection = server_of(ref)
 	if not connection then

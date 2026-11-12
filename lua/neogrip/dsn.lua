@@ -1,8 +1,4 @@
--- JDBC connection URLs.
---
--- The password is never part of the URL: it goes to the Java process on the
--- first line of its stdin (lua/db/jvm.lua), so it appears neither in argv nor
--- in anything the driver might echo back in an error.
+-- JDBC connection URLs; a password is never part of one.
 local M = {}
 
 local DEFAULT_PORTS = {
@@ -59,8 +55,7 @@ function M.build(connection)
 	end
 
 	if driver == "postgres" then
-		-- A local server almost never speaks TLS, and without this the driver
-		-- reports the refused handshake as if it were a password problem.
+		-- Local servers default to no TLS; see doc/internals.md#connections-and-dsn.
 		if options.sslmode == nil and (host == "127.0.0.1" or host == "localhost" or host == "::1") then
 			options.sslmode = "disable"
 		end
@@ -73,8 +68,7 @@ function M.build(connection)
 	end
 
 	if driver == "mysql" or driver == "mariadb" then
-		-- Without this the connector negotiates latin1 and every non-ASCII
-		-- value comes back mojibaked.
+		-- UTF-8 must be spelled out; see doc/internals.md#connections-and-dsn.
 		options.characterEncoding = options.characterEncoding or "UTF-8"
 		options.connectionCollation = options.connectionCollation or "utf8mb4_unicode_ci"
 		local scheme = driver == "mariadb" and "mariadb" or "mysql"
@@ -99,10 +93,7 @@ function M.build(connection)
 	end
 
 	if driver == "trino" then
-		-- Trino speaks HTTP, and what follows the host is catalog[/schema],
-		-- not a database. Port 443 is TLS everywhere in practice, and without
-		-- SSL=true the driver reports a TLS server as an unexpected end of
-		-- stream rather than as the wrong scheme.
+		-- The TLS port needs SSL=true spelled out; see doc/internals.md#connections-and-dsn.
 		if options.SSL == nil and port == 443 then
 			options.SSL = "true"
 		end
@@ -110,10 +101,7 @@ function M.build(connection)
 		if path ~= "" and connection.schema then
 			path = path .. "/" .. connection.schema
 		end
-		-- An empty catalog segment is rejected by the driver, so with no
-		-- catalog the path is left off entirely. A query then names the catalog
-		-- itself (catalog.schema.table), which is how Trino SQL is usually
-		-- written anyway; walking into a catalog in a tree fills it in.
+		-- No catalog, no path segment; see doc/internals.md#connections-and-dsn.
 		return ("jdbc:trino://%s:%d%s%s"):format(
 			host,
 			port,
@@ -155,14 +143,7 @@ function M.redact(text, password)
 	return redacted
 end
 
---- The options that have to reach the driver as JDBC properties.
----
---- build() writes them into the url for every driver but the two whose url is
---- a bare file path, and passing them a second time as properties is not
---- harmless: the Trino driver refuses a property it sees in both places
---- ("Connection property SSLVerification is passed both by URL and
---- properties") rather than picking one. So the url owns them wherever it can
---- carry them, and this is what is left over.
+--- Only file-url drivers get options as JDBC properties; see doc/internals.md#connections-and-dsn.
 local FILE_URL_DRIVERS = {
 	sqlite = true,
 	duckdb = true,

@@ -1,11 +1,4 @@
--- Everything a key could do in the grid, as named public functions (ADR-0017):
--- the plugin maps nothing, the README ships a recipe, and each of these works
--- on the current buffer so `vim.keymap.set("n", "y", actions.yank_cell, ...)`
--- is all a mapping needs.
---
--- Every yank and export reads the stored value, never the text on screen: what
--- is on screen may be truncated, and a WHERE clause built from an ellipsis
--- would be wrong.
+-- Every yank and export reads the stored value, never the screen text, which may be truncated.
 local neogrip = require("neogrip")
 local grid = require("neogrip.grid")
 local value_module = require("neogrip.value")
@@ -41,8 +34,6 @@ local function jump(bufnr, field, where)
 	grid.focus_cell(bufnr, 0)
 end
 
--- The movement vocabulary, one name per direction so a mapping needs no
--- arguments.
 function M.next_column(bufnr)
 	M.move(bufnr, 0, 1)
 end
@@ -123,13 +114,8 @@ function M.yank_column(bufnr)
 	copy(table.concat(values, "\n"), ("column %s"):format(state.columns[state.column] or "?"))
 end
 
---- The form a stored value takes in a generated statement.
----
---- A number goes in bare and everything else goes in quoted, which is the form
---- every engine here accepts for the types a key is made of. The quote is
---- doubled the way SQL doubles it, and on MySQL and MariaDB the backslash as
---- well: those read one inside a string literal as an escape unless the server
---- was started with NO_BACKSLASH_ESCAPES.
+--- The form a stored value takes in a generated statement. MySQL and MariaDB
+--- read a backslash inside a string literal as an escape, so it is doubled there too.
 local function literal(driver, value)
 	if type(value) == "number" then
 		return value_module.display(value)
@@ -160,10 +146,8 @@ local function key_of(details, column)
 	return nil
 end
 
---- Every part of the key, paired with the value the row under the cursor holds
---- for it. One equality is enough for the single-column key that nearly every
---- foreign key is; a composite key needs all of its parts, or the statement
---- lands on more rows than the one the cursor is on.
+--- Every part of the key, paired with the value the row under the cursor holds:
+--- a composite key needs all of its parts, or the statement lands on more rows than the cursor's.
 --- @return table[]|nil pairs of { referenced column, stored value }
 --- @return string|nil why there is nothing to select
 local function key_values(state, key, table_name)
@@ -176,8 +160,7 @@ local function key_values(state, key, table_name)
 			if referenced and tostring(column) == tostring(name) and tables[index] == table_name then
 				local value = row[index]
 				if value == nil or value == neogrip.NULL then
-					-- A key with a NULL in it points at nothing, and "= NULL"
-					-- matches nothing either: say which it is.
+					-- "= NULL" matches nothing, so say why instead of selecting.
 					return nil, ("%s is NULL in this row, so it points at nothing"):format(tostring(name))
 				end
 				found[#found + 1] = { referenced, value }
@@ -191,9 +174,7 @@ local function key_values(state, key, table_name)
 	return found, nil
 end
 
---- Follow the foreign key under the cursor: a query buffer selecting the row
---- this cell points at. Needs the swept catalog, so it answers instantly or
---- says why it cannot.
+--- Follow the foreign key under the cursor: a query buffer selecting the row this cell points at.
 function M.follow_fk(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	local state = state_of(bufnr)
@@ -218,9 +199,8 @@ function M.follow_fk(bufnr)
 			vim.log.levels.WARN
 		)
 	end
-	-- Several drivers report the schema as an empty string rather than leaving
-	-- it out, and the catalog keys an engine without schemas on "" as well, so
-	-- the two have to arrive at the store the same way.
+	-- Several drivers report the schema as "" rather than leaving it out, and it
+	-- has to reach the catalog the same way as an absent one.
 	local table_schema = (result.column_schemas or {})[state.column]
 	if table_schema == "" then
 		table_schema = nil
@@ -261,8 +241,7 @@ function M.follow_fk(bufnr)
 		table.concat(predicates, " AND ")
 	)
 
-	-- The same cap a generated SELECT gets: a key usually points at one row,
-	-- but nothing says the other side of it is unique.
+	-- The same cap a generated SELECT gets: nothing says the other side of the key is unique.
 	local limit = connection.limit or require("neogrip.config").get().limit
 	local text
 	if driver == "mssql" then
@@ -273,8 +252,7 @@ function M.follow_fk(bufnr)
 	return require("neogrip.buffer").new_query(connection, text)
 end
 
---- Sort by re-running the statement with an ORDER BY, so the order is the
---- server's and covers every page - not just the rows on screen.
+--- Sort by re-running the statement with an ORDER BY, so the order covers every page.
 local function sort(bufnr, descending)
 	local state = state_of(bufnr)
 	if not state then
@@ -320,12 +298,8 @@ function M.close(bufnr)
 	grid.close(bufnr or vim.api.nvim_get_current_buf())
 end
 
---- Move between result tabs (ADR-0044).
----
---- These take no buffer, unlike everything else here: which tab the window
---- shows is a property of the grid and not of any one buffer. There is no
---- command for them, which is the same answer close has always had - the plugin
---- maps no keys (ADR-0017) and the README's recipe is where keys are named.
+--- Move between result tabs (ADR-0044). These take no buffer: which tab the
+--- window shows is a property of the grid, not of any one buffer.
 function M.next_tab()
 	grid.step_tab(1)
 end

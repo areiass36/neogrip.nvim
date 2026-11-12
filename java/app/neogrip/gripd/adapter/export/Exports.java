@@ -25,9 +25,8 @@ import neogrip.gripd.contract.Contracts.ExportResult;
 import neogrip.gripd.domain.ReadonlyPolicy;
 
 /**
- * Stream a result straight to a file - nothing held in memory - written beside
- * the target and atomically renamed into place, so a crashed export never
- * leaves a half file where the editor reads a finished one (ADR-0010).
+ * Stream a result straight to a file, written beside the target and atomically
+ * renamed into place so a crashed export never leaves a half file (ADR-0010).
  */
 public final class Exports {
     private final Connection connection;
@@ -43,9 +42,7 @@ public final class Exports {
     public ExportResult export(String sql, String path, String format, String nullMarker, int timeoutSeconds)
             throws SQLException, IOException {
         guard.refuseWrites(sql);
-        // The wire names csv or json (doc/protocol.md), and a client that omits
-        // it gets csv - which is what the editor has always sent by default.
-        // A name that is neither is refused rather than written as csv.
+        // The wire names csv or json (doc/protocol.md); absent means csv, any other name is refused.
         DataFormat chosen = format == null || format.isBlank() ? DataFormat.CSV : DataFormat.of(format);
         FormatOptions options = new FormatOptions(nullMarker, ',');
         long start = System.currentTimeMillis();
@@ -79,10 +76,8 @@ public final class Exports {
     }
 
     /**
-     * The column labels, then every row, through whichever format was asked
-     * for. One walk serves them all: before the record writer existed this
-     * loop was written once per format, and the two copies had already drifted
-     * apart in how they turned a value into text.
+     * One walk serves every format: the per-format copies of this loop had
+     * already drifted apart in how they turned a value into text.
      */
     private static long stream(ResultSet rows, RecordWriter out) throws SQLException, IOException {
         try (out) {
@@ -96,10 +91,7 @@ public final class Exports {
 
             long written = 0;
             while (rows.next()) {
-                // A list per row rather than one reused: the writer is free to
-                // keep what it is handed, and a row that outlives its values
-                // is the kind of bug that only shows up in the last format
-                // added.
+                // A list per row rather than one reused: the writer is free to keep what it is handed.
                 List<Object> values = new ArrayList<>(columnCount);
                 for (int i = 1; i <= columnCount; i++) {
                     values.add(Values.read(rows, meta, i));

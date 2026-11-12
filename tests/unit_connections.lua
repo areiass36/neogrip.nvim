@@ -1,6 +1,4 @@
--- The connection files, schema v2: normalization, the kvstore-only secret
--- rule, aliases, and project-over-global precedence. Everything runs against
--- temp directories; no real state directory is touched for the project side.
+-- Connection files against temp directories only; no suite ever writes a real one.
 local support = require("tests.support")
 local check, note = support.check, support.note
 local connections = require("neogrip.connections")
@@ -9,8 +7,8 @@ support.describe("connections: schema v2")
 
 local root = vim.fn.tempname()
 vim.fn.mkdir(root .. "/.nvim", "p")
--- macOS tempdirs live behind a /var -> /private/var symlink; getcwd() resolves
--- it and tempname() does not, so the comparison has to start from the real path.
+-- macOS tempdirs live behind a /var -> /private/var symlink that getcwd() resolves
+-- and tempname() does not.
 root = vim.uv.fs_realpath(root) or root
 local original_cwd = vim.fn.getcwd()
 vim.cmd("cd " .. vim.fn.fnameescape(root))

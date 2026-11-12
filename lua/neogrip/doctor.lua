@@ -1,9 +1,5 @@
--- What :NGripDoctor shows.
---
--- The self test matters more than a version string: it runs "select 1 as a,
--- 2 as b" through the whole path - JDK, driver jar, gripd, connection - and
--- checks the column names, so a broken link shows up on a new machine instead
--- of inside a real query.
+-- The self test runs a query through the whole path (JDK, driver jar, gripd, connection),
+-- so a broken link shows up on a new machine instead of inside a real query.
 local connections = require("neogrip.connections")
 local jdbc = require("neogrip.bootstrap.jdbc")
 local jdk = require("neogrip.bootstrap.jdk")
@@ -62,8 +58,7 @@ function M.report()
 	return lines
 end
 
---- The report plus a live check against every connection. The float has no
---- keymaps (ADR-0017): close it like any window.
+--- The report plus a live check against every connection.
 function M.show()
 	local lines = M.report()
 	table.insert(lines, 1, "neogrip")

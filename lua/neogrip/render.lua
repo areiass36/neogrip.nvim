@@ -1,33 +1,13 @@
--- What a set looks like, as lines of SQL.
---
--- JDBC has no "show me the DDL", but it has every piece one is written from,
--- so the CREATE TABLE here is rendered rather than fetched. That is the honest
--- trade: it is the server's own answer about columns, keys, indexes and
--- comments, spelled in this dialect's quoting, and it is never passed off as
--- the exact text the server would print. Where the server will print its own
--- text cheaply, that is appended underneath, verbatim, so the two can be
--- compared rather than confused.
---
--- The rule the whole file is written to: every line that is not a comment is
--- runnable SQL. So a key the server named is a named CONSTRAINT, an index is a
--- CREATE INDEX, a column remark is a COMMENT ON -- and anything reported
--- without enough detail to spell (a generated column whose expression JDBC
--- does not carry) is said in a comment rather than guessed at.
---
--- Lines, and nothing else: the plugin defines no explorer (ADR-0037), so what
--- was the picker's definition buffer is a renderer a client may call or
--- ignore. `neogrip.document` turns these lines into a buffer and the LSP hover
--- reads them, so this module opens nothing and requires neither.
+-- Render a table's definition from JDBC metadata. The rule the file is written
+-- to: every non-comment line is runnable SQL; what JDBC cannot spell is said in a comment, never guessed.
 local schema = require("neogrip.schema")
 
 local M = {}
 
--- Past this, a foreign key's REFERENCES clause moves onto a line of its own. A
--- definition is read in a window, and a window is not 160 columns wide.
+-- Past this width, a foreign key's REFERENCES clause moves onto its own line.
 local WIDTH = 100
 
--- How this engine spells an auto-numbered column. ANSI identity is the
--- default, because Postgres, Oracle, DB2 and H2 all take it.
+-- ANSI identity is the default; Postgres, Oracle, DB2 and H2 all take it.
 local IDENTITY = {
 	mysql = "AUTO_INCREMENT",
 	mariadb = "AUTO_INCREMENT",
@@ -47,12 +27,9 @@ local function quote_list(driver, names)
 	return table.concat(parts, ", ")
 end
 
---- A reported string, or nil when there is nothing in it.
----
---- Flattened, because a remark or an index filter can run over several lines
---- and a buffer line cannot hold one: unflattened it would raise rather than
---- be read. "nil" is checked for because that is how an absent name reaches
---- Lua from the Java side.
+--- A reported string, or nil when there is nothing in it. Flattened because a
+--- multi-line value in a buffer line would raise; the string "nil" is how an
+--- absent name reaches Lua from the Java side.
 local function named(value)
 	if value == nil then
 		return nil
@@ -64,10 +41,7 @@ local function named(value)
 	return text
 end
 
---- A referential action, when it is one worth writing down.
----
---- "no action" is every engine's default, so spelling it out adds a clause to
---- every foreign key and tells the reader nothing.
+--- A referential action, omitted when it is every engine's default "no action".
 local function action(value)
 	local text = named(value)
 	if not text then
@@ -85,8 +59,8 @@ local function literal(text)
 	return "'" .. (tostring(text):gsub("'", "''")) .. "'"
 end
 
---- An expression in brackets, but only one pair of them: a server reports a
---- generation expression both ways, and two pairs reads as a mistake.
+--- An expression in exactly one pair of brackets: servers report a generation
+--- expression both ways, and two pairs reads as a mistake.
 local function grouped(expression)
 	if expression:sub(1, 1) == "(" then
 		local depth = 0
@@ -97,8 +71,7 @@ local function grouped(expression)
 			elseif char == ")" then
 				depth = depth - 1
 				if depth == 0 then
-					-- The opening bracket closes before the end, so the whole
-					-- of it is not one group: "(a) + (b)" needs its own.
+					-- The group closes before the end, so "(a) + (b)" needs its own pair.
 					return position == #expression and expression or ("(%s)"):format(expression)
 				end
 			end
@@ -107,15 +80,9 @@ local function grouped(expression)
 	return ("(%s)"):format(expression)
 end
 
---- The columns in the order the table declares them.
----
---- JDBC answers in ordinal order already; sorting on the position it reports is
---- what keeps that true when an answer arrives from somewhere else, such as a
---- snapshot merged out of a parallel sweep. Only when every position is a
---- distinct number above zero, because a driver that will not say reports zero
---- for all of them and table.sort is not stable: sorting on that would shuffle
---- a perfectly good order into an arbitrary one. Sorted on a copy, because
---- M.render is pure and the details table belongs to its caller.
+--- The columns in declared order, sorted on a copy and only when every
+--- position is a distinct number above zero: a driver that will not say
+--- reports zero for all, and the unstable sort would shuffle a good order.
 local function ordered(columns)
 	local seen = {}
 	for _, column in ipairs(columns) do
@@ -132,12 +99,8 @@ local function ordered(columns)
 	return copy
 end
 
---- One column of the CREATE TABLE, as { text, note }.
----
---- The note is for what the server reported but did not report enough of to
---- spell: a generated column whose expression JDBC does not carry cannot be
---- written as SQL, and inventing one would break the rule the file is written
---- to.
+--- One column of the CREATE TABLE, as { text, note }; the note carries what
+--- the server reported too little of to spell as SQL.
 local function column_entry(driver, column, widths)
 	local parts = {
 		("%-" .. widths.name .. "s %-" .. widths.type .. "s"):format(
@@ -153,8 +116,8 @@ local function column_entry(driver, column, widths)
 
 	local default = named(column.default_expr)
 	if column.auto_increment == true or column.auto_increment == 1 then
-		-- The sequence behind a serial column is the default, and the identity
-		-- clause is the same statement said portably, so only one goes in.
+		-- A serial column's default and the identity clause say the same thing,
+		-- so only one goes in.
 		parts[#parts + 1] = IDENTITY[driver] or "GENERATED BY DEFAULT AS IDENTITY"
 	elseif column.generated == true or column.generated == 1 then
 		if default then
@@ -170,10 +133,6 @@ local function column_entry(driver, column, widths)
 end
 
 --- The declared keys, as named constraints where a name was reported.
----
---- Unnamed where it was not, which is what this file emitted before names were
---- available at all: a bare PRIMARY KEY (...) is still correct, it just cannot
---- be dropped by name.
 local function constraints(connection, namespace, details)
 	local driver = connection.driver
 	local primary = details.primary_key or {}
@@ -182,14 +141,11 @@ local function constraints(connection, namespace, details)
 
 	local primary_name = named(details.primary_key_name)
 	if primary_name == "PRIMARY" and (driver == "mysql" or driver == "mariadb") then
-		-- Not a name the user gave it and not one MySQL will accept back: every
-		-- primary key there is reported as PRIMARY, which is the engine saying
-		-- the key has no name of its own.
+		-- MySQL's key name is unusable; see doc/internals.md#document-buffers.
 		primary_name = nil
 	end
 
-	-- The constraint names line up with each other rather than with the columns
-	-- above: they are a block of their own and are read down it.
+	-- The constraint names align as a block of their own, read down it.
 	local width = 1
 	local names = {}
 	if #primary > 0 then
@@ -232,8 +188,7 @@ local function constraints(connection, namespace, details)
 			head(named(key.name), "FOREIGN KEY"),
 			quote_list(driver, key.columns)
 		)
-		-- The comma is allowed for, so whether a key wraps does not depend on
-		-- it happening to be the last entry.
+		-- The comma is allowed for, so wrapping does not depend on being the last entry.
 		if #declaration + #target + 6 <= WIDTH then
 			entries[#entries + 1] = { text = ("%s %s"):format(declaration, target) }
 		else
@@ -250,8 +205,7 @@ local function create_table(connection, namespace, table_name, details)
 	local columns = ordered(details.rows or {})
 	local lines = { ("CREATE TABLE %s ("):format(schema.qualify(connection, namespace, table_name)) }
 
-	-- Line the names and the types up, so a wide table can be read down the
-	-- column rather than across every row of it.
+	-- Names and types line up so a wide table reads down the column.
 	local widths = { name = 1, type = 1 }
 	for _, column in ipairs(columns) do
 		widths.name = math.max(widths.name, #quote(driver, column.name))
@@ -278,10 +232,6 @@ local function create_table(connection, namespace, table_name, details)
 end
 
 --- The indexes, as the statements that would create them.
----
---- Statements rather than the comments this used to write: an index is part of
---- how a table is defined, and the one worth copying into a migration is the
---- one the server already has.
 local function indexes(connection, namespace, table_name, details)
 	local driver = connection.driver
 	local qualified = schema.qualify(connection, namespace, table_name)
@@ -296,15 +246,13 @@ local function indexes(connection, namespace, table_name, details)
 		end
 		local spelled = table.concat(columns, ", ")
 
-		-- An index that implements the primary key is already stated by the
-		-- constraint above, and written twice it reads as two different things.
+		-- An index implementing the primary key is already stated by the constraint.
 		local implements_key = primary ~= "" and table.concat(index.columns or {}, "\1") == primary
 		local name = named(index.name)
 
 		local worth_writing = not implements_key and #columns > 0
 		if worth_writing and not name then
-			-- With no name there is no statement to write, so what is known
-			-- goes down as a note instead.
+			-- With no name there is no statement to write.
 			lines[#lines + 1] = ("--   an unnamed %sindex on (%s)"):format(
 				index.unique and "unique " or "",
 				spelled
@@ -321,9 +269,7 @@ local function indexes(connection, namespace, table_name, details)
 				statement = ("%s WHERE %s"):format(statement, filter)
 			end
 			statement = statement .. ";"
-			-- The kind is not syntax any two engines share -- USING btree is
-			-- Postgres, CLUSTERED is T-SQL and goes in a different place -- so
-			-- it is said rather than spelled.
+			-- The kind is not shared syntax; see doc/internals.md#document-buffers.
 			local kind = named(index.kind)
 			if kind and kind ~= "other" then
 				statement = ("%s  -- %s"):format(statement, kind)
@@ -335,12 +281,7 @@ local function indexes(connection, namespace, table_name, details)
 	return lines
 end
 
---- The remarks, as COMMENT ON.
----
---- Standard SQL, which Postgres, Oracle and DB2 all take. MySQL and SQLite
---- spell a comment inside the column definition instead; rather than guess at
---- which of those this driver is, the portable form is written and the reader
---- can see what the server said.
+--- The remarks, as standard COMMENT ON; see doc/internals.md#document-buffers.
 local function comments(connection, namespace, table_name, details)
 	local driver = connection.driver
 	local qualified = schema.qualify(connection, namespace, table_name)
@@ -364,9 +305,8 @@ local function comments(connection, namespace, table_name, details)
 	return lines
 end
 
---- What points at this table, as comments: it describes the table rather than
---- recreating it, and a buffer you might yank out of should not hand you
---- statements that belong to someone else's table.
+--- What points at this table, as comments: a buffer you might yank out of
+--- should not hand you statements that belong to another table.
 local function annotations(connection, namespace, details)
 	local driver = connection.driver
 	local lines = {}
@@ -375,9 +315,8 @@ local function annotations(connection, namespace, details)
 	if #inbound > 0 then
 		lines[#lines + 1] = ("-- Referenced by (%d)"):format(#inbound)
 		for _, key in ipairs(inbound) do
-			-- Read as: that table's column points at this table's column. The
-			-- trailing space goes when there is no name to put after it, so an
-			-- unnamed key does not leave whitespace at the end of the line.
+			-- That table's column points at this table's column; an unnamed key
+			-- must not leave trailing whitespace.
 			lines[#lines + 1] = (
 				("--   %s (%s) -> (%s)   %s")
 					:format(
@@ -392,9 +331,8 @@ local function annotations(connection, namespace, details)
 	end
 
 	if #(details.indexes or {}) == 0 and #inbound == 0 and #(details.foreign_keys or {}) == 0 then
-		-- No blank line of its own: this branch is only reached when the block
-		-- above wrote nothing, so one here would double the gap M.render
-		-- already puts between sections.
+		-- Only reached when the block above wrote nothing, so no blank line of
+		-- its own: one here would double the gap between sections.
 		lines[#lines + 1] = "-- No indexes, foreign keys or inbound references reported."
 		lines[#lines + 1] = "-- A query engine such as Trino has none to report."
 	end
@@ -402,11 +340,8 @@ local function annotations(connection, namespace, details)
 	return lines
 end
 
---- The server's own DDL, where it gave one.
----
---- Verbatim, because the whole point of it is that it is the server's answer
---- and not this file's rendering of one: the two disagreeing is the thing worth
---- seeing, and a check constraint is only ever in this half.
+--- The server's own DDL, verbatim, where it gave one: the two halves
+--- disagreeing is the thing worth seeing, and a check constraint is only here.
 local function native(details)
 	local text = details.native_ddl
 	if type(text) ~= "string" or vim.trim(text) == "" then
@@ -428,11 +363,8 @@ function M.details(connection, namespace, table_name, details)
 	if #columns == 0 then
 		return { ("-- %s: no columns reported"):format(tostring(table_name)) }
 	end
-	-- One blank line between sections, decided here and nowhere else: this is a
-	-- buffer somebody reads, four kinds of statement run together are hard to
-	-- take in, and a section that spaced itself as well would double the gap.
-	-- Trailing blanks are trimmed off each section for the same reason, so the
-	-- document never ends in whitespace either.
+	-- One blank line between sections, decided here and nowhere else; trailing
+	-- blanks are trimmed so the document never ends in whitespace.
 	local lines = {}
 	for _, section in ipairs({
 		create_table(connection, namespace, table_name, details),

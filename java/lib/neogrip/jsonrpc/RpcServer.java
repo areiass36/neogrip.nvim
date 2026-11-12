@@ -19,20 +19,11 @@ import neogrip.jsonrpc.transport.Transport;
 
 /**
  * A JSON-RPC 2.0 server: frames in from a {@link Transport}, dispatched to
- * annotated methods, answers back out the same way.
- *
- * The server owns framing, dispatch, the envelope of every result and error,
- * the bounded drain on EOF, and notifications. It owns no contract of its own:
- * the version, the handshake, the error codes beyond the ones JSON-RPC
- * reserves, and the decision to exit all belong to the program configured into
- * it. That is what keeps this a library, and the program one that any JSON-RPC
- * client can talk to.
- *
- * Every request runs on its own virtual thread (ADR-0028), so the read loop
- * never blocks and a cancel is always answerable while a query runs. Whatever
- * must be serialized - the shared session connection - is a lock where its
- * owner lives, not a thread model here: handlers declare nothing about
- * threading.
+ * annotated methods, answers back out the same way. It owns no contract of
+ * its own - the version, the handshake, the extra error codes and the
+ * decision to exit belong to the program configured into it - and every
+ * request runs on its own virtual thread (ADR-0028), so the read loop never
+ * blocks and a cancel is always answerable while a query runs.
  */
 public final class RpcServer {
     private final Transport transport;
@@ -90,8 +81,7 @@ public final class RpcServer {
                 continue;
             }
             if (!(message instanceof Map<?, ?> frame) || !(frame.get("method") instanceof String method)) {
-                // A response to a server-initiated request would land here too;
-                // none exist yet, so anything without a method is invalid.
+                // No server-initiated requests exist yet, so anything without a method is invalid.
                 send(Envelope.error(null, JsonRpc.INVALID_REQUEST, "expected a request object", null));
                 continue;
             }
@@ -102,9 +92,7 @@ public final class RpcServer {
                 break;
             }
 
-            // A component may refuse a request before it is dispatched - a
-            // handshake gate is what needs this - and the refusal is answered
-            // like any other error.
+            // A component may refuse a request before dispatch - the handshake gate needs this.
             RpcException refusal = refuse(method);
             if (refusal != null) {
                 send(Envelope.error(id, refusal.code(), refusal.getMessage(), refusal.data()));
@@ -122,9 +110,8 @@ public final class RpcServer {
             }
 
             if (inline.contains(method)) {
-                // Answered before the next line is read, because what this
-                // method puts in effect has to hold for the frame that follows
-                // it, and a client is free to pipe both in at once.
+                // Answered before the next line is read: its effect has to hold for the frame
+                // that follows, and a client is free to pipe both in at once.
                 if (handle(target, id, params)) {
                     reason = ExitReason.REFUSED;
                     break;
@@ -135,8 +122,7 @@ public final class RpcServer {
             requests.submit(() -> handle(target, id, params));
         }
 
-        // Work already submitted still finishes: a shutdown arriving while a
-        // query is in flight should still return that query's answer.
+        // Work already submitted still finishes: a query in flight at shutdown still answers.
         drain(requests);
         for (int i = lifecycle.size() - 1; i >= 0; i--) {
             lifecycle.get(i).onShutdown();
@@ -177,11 +163,9 @@ public final class RpcServer {
             fatal = cause instanceof RpcException rpc && rpc.fatal();
             response = errorLine(id, cause);
         } catch (Throwable e) {
-            // Throwable, not Exception: an Error leaves this thread without a
-            // response, and a client with no timeout then waits forever. That
-            // is not hypothetical - a class cache compiled by a newer JDK than
-            // the one running made every statement hang on a LinkageError
-            // instead of saying so. A request always gets an answer.
+            // Throwable, not Exception: an Error leaving this thread without a response makes
+            // the client wait forever (see doc/internals.md#gripd-process). A request always
+            // gets an answer.
             response = errorLine(id, e);
         }
         send(response);
@@ -223,12 +207,10 @@ public final class RpcServer {
     }
 
     /**
-     * Configuration and assembly. Classes in, singletons out: every component
-     * and handler class is instantiated here, each constructor parameter
-     * resolved by type from the other components and the library's own
-     * injectables (Notifier, Worker). Everything that can be wrong -
-     * unresolvable dependency, duplicate wire name, unsupported signature,
-     * a build without -parameters - fails here, naming the offender.
+     * Configuration and assembly: every component and handler class is
+     * instantiated here, constructor parameters resolved by type, and
+     * everything that can be wrong - a build without -parameters included -
+     * fails here, naming the offender.
      */
     public static final class Builder {
         private Transport transport;
@@ -259,11 +241,9 @@ public final class RpcServer {
         }
 
         /**
-         * Methods answered on the read thread, before the next frame is read.
-         *
-         * For a handshake, and for little else: everything inline is a request
-         * that cannot be answered while another is in flight, which is the
-         * opposite of what this server is for.
+         * Methods answered on the read thread, before the next frame is read -
+         * for a handshake and little else, since anything inline cannot be
+         * answered while another request is in flight.
          */
         public Builder inline(String... methods) {
             this.inline = Set.of(methods);

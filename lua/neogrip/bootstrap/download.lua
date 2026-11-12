@@ -1,7 +1,6 @@
--- Download a pinned artifact with curl, verify its SHA-256, then install it.
--- Nothing from a downloaded file is extracted or executed before its checksum
--- passes (ADR-0005, ADR-0006). curl and tar ship with macOS, Linux and
--- Windows 10+; the macOS and Windows tar also open .zip files.
+-- Download a pinned artifact with curl: nothing is extracted or executed before its SHA-256
+-- passes. curl and tar ship with all three platforms; the macOS and Windows tar also open
+-- .zip files.
 local platform = require("neogrip.bootstrap.platform")
 local neogrip = require("neogrip")
 
@@ -10,8 +9,7 @@ local M = {}
 local in_flight = {}
 local gnu_tar = nil
 
---- GNU tar needs --wildcards before a pattern; bsdtar (macOS, Windows) matches
---- patterns on its own and does not know the flag.
+--- GNU tar needs --wildcards before a pattern; bsdtar (macOS, Windows) does not know the flag.
 local function wildcards_flag()
 	if gnu_tar == nil then
 		local version = vim.system({ "tar", "--version" }, { text = true }):wait()
@@ -20,8 +18,7 @@ local function wildcards_flag()
 	return gnu_tar and { "--wildcards" } or {}
 end
 
---- Hash a file with the hashing tool the OS ships, because reading a 190 MB
---- archive into a Lua string just to hash it would double its cost in memory.
+--- Hash with the OS tool, never in Lua; see doc/internals.md#bootstrap.
 --- @param path string
 --- @param callback fun(digest: string|nil, err: string|nil)
 function M.sha256_of(path, callback)
@@ -42,9 +39,8 @@ function M.sha256_of(path, callback)
 			if result.code ~= 0 then
 				return callback(nil, "hashing failed: " .. (result.stderr or ""))
 			end
-			-- certutil prints a header line, the digest, and a footer; the
-			-- unix tools print "<digest>  <path>". The digest is the first
-			-- run of exactly 64 hex characters either way.
+			-- certutil and the unix tools format differently; the digest is the first run of
+			-- exactly 64 hex characters either way.
 			local digest = nil
 			for candidate in (result.stdout or ""):lower():gmatch("%x+") do
 				if #candidate == 64 then
@@ -68,8 +64,7 @@ local function verify(name, path, sha256, on_done)
 			return on_done(false)
 		end
 		if digest ~= sha256:lower() then
-			-- A wrong checksum is a wrong artifact; keeping it would invite a
-			-- retry to "fix" it by running it anyway.
+			-- Keeping a wrong artifact would invite a retry to "fix" it by running it anyway.
 			pcall(vim.fn.delete, path)
 			neogrip.notify(
 				("checksum mismatch for %s: expected %s, got %s"):format(name, sha256, digest),
@@ -82,12 +77,10 @@ local function verify(name, path, sha256, on_done)
 end
 
 local function fetch(name, url, destination, on_done)
-	-- Downloaded next to the target and moved or extracted from there, so an
-	-- interrupted download never leaves something that looks installed.
+	-- Downloaded next to the target and moved from there, so an interrupted download never looks installed.
 	local curl = { "curl", "-fsSL", "-o", destination, url }
 	if platform.is_windows then
-		-- Corporate TLS inspection (e.g. Cloudflare WARP) serves certificates
-		-- without revocation info, which Windows curl (schannel) rejects.
+		-- Corporate TLS inspection trips schannel; see doc/internals.md#bootstrap.
 		table.insert(curl, 2, "--ssl-revoke-best-effort")
 	end
 	vim.system(

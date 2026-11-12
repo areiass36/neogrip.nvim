@@ -20,8 +20,7 @@ function M.set(key, value)
 	return true
 end
 
--- Test-only helper: suites seed and wipe the store through these rather than
--- reaching into module internals.
+-- Test-only helper, absent from the real kvstore surface.
 function M.reset(values)
 	store = values or {}
 end
