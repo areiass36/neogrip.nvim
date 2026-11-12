@@ -76,6 +76,12 @@ vim.keymap.set("n", "<leader>qq", "<cmd>NGripRun<cr>", { desc = "Run the stateme
 vim.keymap.set("n", "<leader>qx", "<cmd>NGripCancel<cr>", { desc = "Cancel the running query" })
 vim.keymap.set("n", "<leader>qc", "<cmd>NGripUse<cr>", { desc = "Pick a connection" })
 vim.keymap.set("n", "<leader>qr", "<cmd>NGripResults<cr>", { desc = "Query the result with SQL" })
+vim.keymap.set("n", "<leader>dx", function()
+	require("neogrip.catalog.export").script(
+		{ server = "replica", namespace = "public" }, -- or any tree node id
+		{ path = vim.fn.getcwd() .. "/schema.sql" }
+	)
+end, { desc = "Export the schema as runnable DDL" })
 
 -- Buffer-local, inside the result grid.
 vim.api.nvim_create_autocmd("FileType", {

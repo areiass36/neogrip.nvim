@@ -130,6 +130,14 @@ suites assert what the status line says, never that it moved (ADR-0045).
    notice is honest (an execution really is running), but on a slow statement it reads as the clock
    restarting for no reason. Measured: 3999 rows came out of one execution with `maxRows` set to 1001.
 
+## DDL export
+
+The suites assert the script's content headlessly; what is manual is the session around it.
+
+1. From a real session, map and press the README's export key against a schema with a few tables.
+2. Open the produced file. Confirm the dialect layer highlights it as SQL.
+3. Confirm the notification names the counts ("exported N tables, M views to ...").
+
 ## Results
 
 | Date | Check | OS | Result |

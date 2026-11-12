@@ -312,6 +312,22 @@ The rest are tools, not UI. None of them opens a buffer:
   sweep(ref, opts, cb)           sweep the instance, or one namespace of it
   swept(ref)                     when it was swept and what it holds, or nil
   forget(ref)                    drop what is cached; the client decides when
+  ref_of(id)                     a node id back into its ref, or nil and why
+
+                                                *neogrip.catalog.export*
+`require("neogrip.catalog.export").script(target, opts, callback)` writes the
+DDL of everything under `target` - a tree node id or a ref naming a set, a
+namespace, an instance or a whole file database - to `opts.path`, as one
+script that runs top to bottom against an empty schema (ADR-0047). Every
+non-comment line is runnable SQL: tables come out dependencies-first, the
+engine's own text is used where one statement produces it, and what cannot be
+spelled is a comment, never a guess. Every answer comes from the server at
+the moment of the export; the catalog caches are neither read nor written. A
+row or a column is refused - neither has a definition - and so is a server
+whose instances would need reopening the connection. The callback receives
+`({ path, tables, views, collections, skipped }, err)` exactly once, a
+`cancel()` on the returned handle included; with no callback, the notifier
+reports the counts.
 
 `require("neogrip.catalog.ddl").details(connection, namespace, set, details)` turns
 a details record into lines of SQL, if you want the definition the plugin used
