@@ -31,6 +31,13 @@ jobs:
       - run: luarocks install luacheck 1.2.0
       - run: luacheck lua tests
 
+  boundaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the dependency directions
+        run: tests/boundaries.sh
+
   java:
     runs-on: ubuntu-latest
     steps:
