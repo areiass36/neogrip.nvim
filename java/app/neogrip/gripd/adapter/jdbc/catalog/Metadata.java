@@ -229,6 +229,10 @@ public final class Metadata {
     /** varchar(50) and numeric(10,2) read better than varchar and numeric. */
     static String describeType(ResultSet rows) throws SQLException {
         String type = String.valueOf(optionalString(rows, "TYPE_NAME")).toLowerCase();
+        if (type.indexOf('(') >= 0) {
+            // The driver already spelled the precision; see doc/internals.md#schema-and-tree.
+            return type;
+        }
         int size = optionalInt(rows, "COLUMN_SIZE", 0);
         int digits = optionalInt(rows, "DECIMAL_DIGITS", -1);
         boolean hasDigits = digits >= 0;

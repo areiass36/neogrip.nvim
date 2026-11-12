@@ -147,6 +147,14 @@ and the code lean on. Each fact lives here exactly once, and the code points at 
 - Trino reports Integer.MAX_VALUE as the column size of every plain varchar, which printed as
   varchar(2147483647); a size is shown only when it is positive and below that bound.
   `java/app/neogrip/gripd/adapter/jdbc/catalog/Metadata.java`, `describeType`.
+- DuckDB's TYPE_NAME already carries the precision - `DECIMAL(10,2)`, where every other driver says
+  `decimal` - so a type that already holds a parenthesis is passed through, or the composed string
+  read decimal(10,2)(10,2). `java/app/neogrip/gripd/adapter/jdbc/catalog/Metadata.java`,
+  `describeType`.
+- DuckDB's JDBC driver (1.3.1.0) answers `getImportedKeys` with zero rows and no error, even for a
+  table declared with a foreign key, so no DuckDB definition ever carries one and the DDL export
+  says so in its header instead of ordering by a graph it cannot see.
+  `lua/neogrip/catalog/export.lua`.
 
 ## document-buffers
 
