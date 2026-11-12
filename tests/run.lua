@@ -23,6 +23,7 @@ local UNIT = {
 	"unit_completion",
 	"unit_lsp",
 	"unit_tree",
+	"unit_export",
 }
 
 local LIVE = {
@@ -36,6 +37,7 @@ local LIVE = {
 	"live_safety",
 	"live_schema",
 	"live_tree",
+	"live_ddl",
 	"live_introspect",
 	"live_diagnostics",
 }
