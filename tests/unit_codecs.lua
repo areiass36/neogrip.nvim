@@ -2,7 +2,7 @@
 local support = require("tests.support")
 local check = support.check
 local csv = require("neogrip.codec.csv")
-local neogrip = require("neogrip")
+local value_module = require("neogrip.codec.value")
 local json = require("neogrip.codec.json")
 
 support.describe("codec/json: column order")
@@ -31,7 +31,7 @@ support.describe("codec/json: NULL is not the empty string")
 local sets = json.result_sets('[{"a":1,"b":null,"c":""}]')
 check("one result set", #sets, 1)
 check("columns", sets[1].columns, { "a", "b", "c" })
-check("null becomes the sentinel", sets[1].rows[1][2] == neogrip.NULL, true)
+check("null becomes the sentinel", sets[1].rows[1][2] == value_module.NULL, true)
 check("the empty string stays a string", sets[1].rows[1][3], "")
 
 support.describe("codec/json: output shapes")
@@ -62,7 +62,7 @@ check("crlf", csv.decode("a,b\r\n1,2\r\n"), { { "a", "b" }, { "1", "2" } })
 check("empty fields", csv.decode("a,,b\n"), { { "a", "", "b" } })
 check("quoted empty field", csv.decode('a,"",b\n'), { { "a", "", "b" } })
 check("trailing empty field", csv.decode("a,b,\n"), { { "a", "b", "" } })
-check("null marker", csv.decode("a,\\N,\n", { null_marker = "\\N" })[1][2] == neogrip.NULL, true)
+check("null marker", csv.decode("a,\\N,\n", { null_marker = "\\N" })[1][2] == value_module.NULL, true)
 check("a quoted marker is a string", csv.decode('a,"\\N",\n', { null_marker = "\\N" })[1][2], "\\N")
 
 support.describe("codec/csv: fed in chunks")
@@ -89,15 +89,15 @@ check("plain", csv.encode_row({ "a", "b" }), "a,b")
 check("comma quoted", csv.encode_row({ "a,b" }), '"a,b"')
 check("quote doubled", csv.encode_row({ 'he "x"' }), '"he ""x"""')
 check("newline quoted", csv.encode_row({ "a\nb" }), '"a\nb"')
-check("null as the marker", csv.encode_row({ neogrip.NULL }, { null_marker = "\\N" }), "\\N")
+check("null as the marker", csv.encode_row({ value_module.NULL }, { null_marker = "\\N" }), "\\N")
 check("leading space quoted", csv.encode_row({ " a" }), '" a"')
 check(
 	"round trip",
 	csv.decode(
-		csv.encode_row({ "a,b", 'q"q', "li\nnha", neogrip.NULL }, { null_marker = "\\N" }) .. "\n",
+		csv.encode_row({ "a,b", 'q"q', "li\nnha", value_module.NULL }, { null_marker = "\\N" }) .. "\n",
 		{ null_marker = "\\N" }
 	)[1],
-	{ "a,b", 'q"q', "li\nnha", neogrip.NULL }
+	{ "a,b", 'q"q', "li\nnha", value_module.NULL }
 )
 
 support.describe("codec/json: false is a value, not a missing field")
@@ -106,7 +106,7 @@ check("columns", falsey.columns, { "a", "b", "c", "d" })
 check("false stays false", falsey.rows[1][1], false)
 check("zero stays zero", falsey.rows[1][2], 0)
 check("the empty string stays", falsey.rows[1][3], "")
-check("and only null is NULL", falsey.rows[1][4] == neogrip.NULL, true)
+check("and only null is NULL", falsey.rows[1][4] == value_module.NULL, true)
 
 local falsey_set = json.result_sets('[{"flag":false}]')
 check("the same in a result set", falsey_set[1].rows[1][1], false)

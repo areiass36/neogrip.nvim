@@ -1,7 +1,7 @@
 -- The path a command takes: statement under the cursor, grid, paging, server-side sorting.
 local support = require("tests.support")
 local check, note = support.check, support.note
-local neogrip = require("neogrip")
+local value_module = require("neogrip.codec.value")
 
 support.describe("live/flow")
 if not support.has_jdk() then
@@ -46,7 +46,7 @@ check("a grid was opened", result_buf ~= nil, true)
 local state = grid.state(result_buf)
 check("columns", state.columns, { "id", "s_comma", "s_null", "cjk" })
 check("rows", #state.rows, 2)
-check("NULL is kept as NULL in the state", state.rows[1][3] == neogrip.NULL, true)
+check("NULL is kept as NULL in the state", state.rows[1][3] == value_module.NULL, true)
 
 local lines = vim.api.nvim_buf_get_lines(result_buf, 0, -1, false)
 check("the header names a column", lines[1]:find("s_comma") ~= nil, true)

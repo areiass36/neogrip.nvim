@@ -2,7 +2,8 @@
 -- passes. curl and tar ship with all three platforms; the macOS and Windows tar also open
 -- .zip files.
 local platform = require("neogrip.gripd.bootstrap.platform")
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
+local paths = require("neogrip.paths")
 
 local M = {}
 
@@ -60,13 +61,13 @@ local function verify(name, path, sha256, on_done)
 	M.sha256_of(path, function(digest, err)
 		if not digest then
 			pcall(vim.fn.delete, path)
-			neogrip.notify(("could not verify %s: %s"):format(name, err), vim.log.levels.ERROR)
+			notify.send(("could not verify %s: %s"):format(name, err), vim.log.levels.ERROR)
 			return on_done(false)
 		end
 		if digest ~= sha256:lower() then
 			-- Keeping a wrong artifact would invite a retry to "fix" it by running it anyway.
 			pcall(vim.fn.delete, path)
-			neogrip.notify(
+			notify.send(
 				("checksum mismatch for %s: expected %s, got %s"):format(name, sha256, digest),
 				vim.log.levels.ERROR
 			)
@@ -89,7 +90,7 @@ local function fetch(name, url, destination, on_done)
 		vim.schedule_wrap(function(result)
 			if result.code ~= 0 then
 				pcall(vim.fn.delete, destination)
-				neogrip.notify(
+				notify.send(
 					("failed to download %s: %s"):format(name, result.stderr or ""),
 					vim.log.levels.ERROR
 				)
@@ -132,7 +133,7 @@ function M.file(name, url, sha256, destination, on_done)
 			end
 			local renamed = vim.uv.fs_rename(partial, destination) ~= nil
 			if renamed then
-				neogrip.notify(name .. " ready")
+				notify.send(name .. " ready")
 			else
 				pcall(vim.fn.delete, partial)
 			end
@@ -163,12 +164,12 @@ function M.archive(name, url, sha256, destination, strip_components, on_done, me
 		end
 	end
 
-	local temp_dir = neogrip.data_dir .. "/.download-" .. name:gsub("[^%w._-]", "_")
+	local temp_dir = paths.data_dir .. "/.download-" .. name:gsub("[^%w._-]", "_")
 	vim.fn.delete(temp_dir, "rf")
 	vim.fn.mkdir(temp_dir, "p")
 	local archive = temp_dir .. "/" .. url:match("[^/]+$")
 
-	neogrip.notify("downloading " .. name .. "...")
+	notify.send("downloading " .. name .. "...")
 	fetch(name, url, archive, function(fetched)
 		if not fetched then
 			vim.fn.delete(temp_dir, "rf")
@@ -197,13 +198,13 @@ function M.archive(name, url, sha256, destination, strip_components, on_done, me
 					vim.fn.delete(temp_dir, "rf")
 					vim.fn.delete(destination .. "/__MACOSX", "rf")
 					if extract.code ~= 0 then
-						neogrip.notify(
+						notify.send(
 							"failed to extract " .. name .. ": " .. (extract.stderr or ""),
 							vim.log.levels.ERROR
 						)
 						return finish(false)
 					end
-					neogrip.notify(name .. " ready")
+					notify.send(name .. " ready")
 					finish(true)
 				end)
 			)

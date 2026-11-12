@@ -1,6 +1,7 @@
 -- Resolves which connection a buffer runs against, most specific rule first;
 -- an explicit choice is saved per file, so it survives a restart.
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
+local paths = require("neogrip.paths")
 local connections = require("neogrip.connections")
 
 local M = {}
@@ -10,7 +11,7 @@ local last_used = nil
 local loaded_root = nil
 
 local function store_path()
-	local dir = neogrip.state_dir .. "/bindings"
+	local dir = paths.state_dir .. "/bindings"
 	vim.fn.mkdir(dir, "p")
 	return ("%s/%s.json"):format(dir, vim.fn.sha256(connections.project_root()))
 end
@@ -170,7 +171,7 @@ function M.pick(bufnr, on_done)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	local list = connections.all()
 	if #list == 0 then
-		neogrip.notify("no connections configured; run :NGripInit", vim.log.levels.WARN)
+		notify.send("no connections configured; run :NGripInit", vim.log.levels.WARN)
 		return
 	end
 	vim.ui.select(list, {
@@ -183,7 +184,7 @@ function M.pick(bufnr, on_done)
 			return
 		end
 		M.bind(bufnr, choice.id)
-		neogrip.notify(("%s selected for this buffer"):format(choice.name))
+		notify.send(("%s selected for this buffer"):format(choice.name))
 		if on_done then
 			on_done(choice)
 		end

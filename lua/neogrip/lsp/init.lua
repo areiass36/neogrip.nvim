@@ -1,6 +1,6 @@
 -- An in-process SQL language server, one client per connection, answering from
 -- the catalog :NGripIntrospect wrote to disk.
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
 local identifier = require("neogrip.lsp.identifier")
 local schema = require("neogrip.catalog")
 local split = require("neogrip.sql.split")
@@ -492,7 +492,7 @@ local function in_process(connection_id)
 					local ok, err = pcall(dispatch, connection_id, method, params, answer)
 					if not ok then
 						-- An unanswered request is a client that waits forever.
-						neogrip.notify(("%s failed: %s"):format(method, err), vim.log.levels.DEBUG)
+						notify.send(("%s failed: %s"):format(method, err), vim.log.levels.DEBUG)
 						answer(nil)
 					end
 				end)
@@ -590,7 +590,7 @@ end
 local function on_list(list)
 	local items = list.items or {}
 	if #items == 0 then
-		return neogrip.notify("nothing to go to")
+		return notify.send("nothing to go to")
 	end
 	if #items == 1 then
 		return open(items[1])

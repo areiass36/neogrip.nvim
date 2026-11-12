@@ -1,6 +1,6 @@
 -- The result window. The rendered text is only a picture of the result:
 -- yanking and exporting read the untruncated value out of state.rows.
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
 local highlight = require("neogrip.grid.highlight")
 local layout = require("neogrip.grid.layout")
 local value_module = require("neogrip.codec.value")
@@ -1034,7 +1034,7 @@ end
 function M.show_document(bufnr)
 	local state = states[bufnr]
 	if not state or not state.documents then
-		neogrip.notify("no document behind this row", vim.log.levels.WARN)
+		notify.send("no document behind this row", vim.log.levels.WARN)
 		return
 	end
 	local document = state.documents[state.row]

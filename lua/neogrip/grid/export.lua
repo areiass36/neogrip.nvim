@@ -1,7 +1,8 @@
 -- Writing a result out as CSV or JSON: the loaded rows from memory,
 -- or "everything" re-run without a LIMIT and streamed straight to a file.
 local csv = require("neogrip.codec.csv")
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
+local paths = require("neogrip.paths")
 local value_module = require("neogrip.codec.value")
 
 local M = {}
@@ -13,7 +14,7 @@ local JSON_LOADED = "JSON (loaded rows)"
 local NULL_MARKER = "\\N"
 
 function M.results_dir()
-	local dir = ("%s/results/%d"):format(neogrip.state_dir, vim.uv.os_getpid())
+	local dir = ("%s/results/%d"):format(paths.state_dir, vim.uv.os_getpid())
 	vim.fn.mkdir(dir, "p")
 	return dir
 end
@@ -62,7 +63,7 @@ function M.page_to_json(state, path)
 		local object = {}
 		for index, column in ipairs(state.columns) do
 			local value = row[index]
-			object[column] = value == neogrip.NULL and vim.NIL or value
+			object[column] = value == value_module.NULL and vim.NIL or value
 		end
 		documents[#documents + 1] = object
 	end
@@ -80,35 +81,31 @@ function M.pick(bufnr)
 		return
 	end
 
-	vim.ui.select(
-		{ CSV_LOADED, JSON_LOADED, "CSV (everything)" },
-		{ prompt = "Export" },
-		function(choice)
-			if not choice then
-				return
-			end
-			local default = ("%s/export-%s"):format(vim.fn.getcwd(), os.date("%Y%m%d-%H%M%S"))
-			local extension = choice:match("^JSON") and ".json" or ".csv"
-			vim.ui.input(
-				{ prompt = "Write to: ", default = default .. extension, completion = "file" },
-				function(path)
-					if not path or path == "" then
-						return
-					end
-					path = vim.fn.expand(path)
-					if choice == CSV_LOADED then
-						M.page_to_csv(state, path)
-						neogrip.notify(("%d rows written to %s"):format(#state.rows, path))
-					elseif choice == JSON_LOADED then
-						M.page_to_json(state, path)
-						neogrip.notify(("%d rows written to %s"):format(#state.rows, path))
-					else
-						M.everything(state, path)
-					end
-				end
-			)
+	vim.ui.select({ CSV_LOADED, JSON_LOADED, "CSV (everything)" }, { prompt = "Export" }, function(choice)
+		if not choice then
+			return
 		end
-	)
+		local default = ("%s/export-%s"):format(vim.fn.getcwd(), os.date("%Y%m%d-%H%M%S"))
+		local extension = choice:match("^JSON") and ".json" or ".csv"
+		vim.ui.input(
+			{ prompt = "Write to: ", default = default .. extension, completion = "file" },
+			function(path)
+				if not path or path == "" then
+					return
+				end
+				path = vim.fn.expand(path)
+				if choice == CSV_LOADED then
+					M.page_to_csv(state, path)
+					notify.send(("%d rows written to %s"):format(#state.rows, path))
+				elseif choice == JSON_LOADED then
+					M.page_to_json(state, path)
+					notify.send(("%d rows written to %s"):format(#state.rows, path))
+				else
+					M.everything(state, path)
+				end
+			end
+		)
+	end)
 end
 
 --- Re-run without a limit, streaming straight to disk: the Java side writes the
@@ -116,7 +113,7 @@ end
 function M.everything(state, path)
 	local runner = require("neogrip.gripd.runner")
 	local result = state.result
-	neogrip.notify("exporting the full result...")
+	notify.send("exporting the full result...")
 	runner.run({
 		connection = result.connection,
 		-- The statement as it ran, not as typed: a sorted grid carries its ORDER BY.
@@ -128,12 +125,10 @@ function M.everything(state, path)
 		timeout_ms = 10 * 60 * 1000,
 	}, function(written, err)
 		if err then
-			return neogrip.notify(("export failed: %s"):format(err.message), vim.log.levels.ERROR)
+			return notify.send(("export failed: %s"):format(err.message), vim.log.levels.ERROR)
 		end
 		-- Only the client saw the rows, so the count comes from it.
-		neogrip.notify(
-			("%s rows written to %s"):format(tostring((written or {}).rows_written or "all"), path)
-		)
+		notify.send(("%s rows written to %s"):format(tostring((written or {}).rows_written or "all"), path))
 	end)
 end
 

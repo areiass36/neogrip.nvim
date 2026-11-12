@@ -2,7 +2,7 @@
 -- nothing; PostgreSQL even reports the character position.
 local classify = require("neogrip.sql.classify")
 local config = require("neogrip.config")
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
 local errors = require("neogrip.gripd.errors")
 local resolve = require("neogrip.connections.resolve")
 local runner = require("neogrip.gripd.runner")
@@ -59,7 +59,7 @@ function M.validate(opts)
 	local connection = resolve.for_buf(bufnr)
 	if not connection then
 		if opts.notify then
-			neogrip.notify("no connection for this buffer", vim.log.levels.WARN)
+			notify.send("no connection for this buffer", vim.log.levels.WARN)
 		end
 		return
 	end
@@ -72,7 +72,7 @@ function M.validate(opts)
 		return
 	end
 	if connection.production and opts.notify then
-		neogrip.notify(
+		notify.send(
 			("%s is marked production; checking it anyway, nothing is executed"):format(connection.name)
 		)
 	end
@@ -80,7 +80,7 @@ function M.validate(opts)
 	local checkable, reason = M.checkable(statement.text)
 	if not checkable then
 		if opts.notify then
-			neogrip.notify(reason, vim.log.levels.WARN)
+			notify.send(reason, vim.log.levels.WARN)
 		end
 		return
 	end
@@ -96,12 +96,12 @@ function M.validate(opts)
 		if err and not err.cancelled then
 			M.from_error(bufnr, statement, err)
 			if opts.notify then
-				neogrip.notify(err.message, vim.log.levels.ERROR)
+				notify.send(err.message, vim.log.levels.ERROR)
 			end
 		else
 			M.clear(bufnr)
 			if opts.notify then
-				neogrip.notify("the server accepts this statement")
+				notify.send("the server accepts this statement")
 			end
 		end
 	end)

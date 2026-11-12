@@ -1,12 +1,12 @@
 -- Cleaning up after sessions that are gone.
 local support = require("tests.support")
 local check = support.check
-local neogrip = require("neogrip")
+local paths = require("neogrip.paths")
 local requery = require("neogrip.grid.requery")
 
 support.describe("scratch: a dead session's files are collected")
-local scratch_dir = neogrip.state_dir .. "/scratch"
-local results_dir = neogrip.state_dir .. "/results"
+local scratch_dir = paths.state_dir .. "/scratch"
+local results_dir = paths.state_dir .. "/results"
 vim.fn.mkdir(scratch_dir, "p")
 vim.fn.mkdir(results_dir, "p")
 

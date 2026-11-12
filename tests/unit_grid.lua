@@ -1,15 +1,15 @@
 -- Measuring and drawing cells.
 local support = require("tests.support")
 local check = support.check
-local neogrip = require("neogrip")
 local layout = require("neogrip.grid.layout")
+local value_module = require("neogrip.codec.value")
 
 support.describe("grid/layout: making a value printable")
 check("newline", layout.sanitize("li\nnha"), "li↵nha")
 check("terminal escapes removed", layout.sanitize("\27[31mred\27[0m"), "red")
 check("control bytes", layout.sanitize("a\1b"), "a·b")
 check("tab", layout.sanitize("a\tb"), "a b")
-check("null", layout.sanitize(neogrip.NULL, "NULL"), "NULL")
+check("null", layout.sanitize(value_module.NULL, "NULL"), "NULL")
 check("number", layout.sanitize(42), "42")
 check("boolean", layout.sanitize(true), "true")
 check("a big integer is not rendered in exponent form", layout.sanitize(1234567890123), "1234567890123")
@@ -37,7 +37,7 @@ check("without walking the whole string", elapsed < 2000, true)
 
 support.describe("grid/layout: widths and rendering")
 local columns = { "id", "cjk", "txt" }
-local rows = { { 1, "日本語", "a" }, { 2, "ab", neogrip.NULL } }
+local rows = { { 1, "日本語", "a" }, { 2, "ab", value_module.NULL } }
 local computed = layout.compute(columns, rows, {})
 check("a cjk column counts double", computed.widths[2], 6)
 local lines, spans = layout.render(computed, columns, rows, {})
@@ -59,8 +59,7 @@ check("plain text is not binary", layout.looks_binary("日本語"), false)
 check("a number is not binary", layout.looks_binary(42), false)
 
 support.describe("value: what a cell holds")
-local value_module = require("neogrip.codec.value")
-check("null", value_module.kind(neogrip.NULL), "null")
+check("null", value_module.kind(value_module.NULL), "null")
 check("a boolean", value_module.kind(true), "boolean")
 check("a boolean the driver sent as text", value_module.kind("false"), "boolean")
 check("an integer", value_module.kind(42), "number")
@@ -86,7 +85,7 @@ check(
 support.describe("grid/layout: a cell's kind comes back with the lines")
 local kind_columns = { "n", "flag", "when", "who", "nothing" }
 local kind_rows = {
-	{ 1, true, "2026-10-06", "MOTOR", neogrip.NULL },
+	{ 1, true, "2026-10-06", "MOTOR", value_module.NULL },
 	{ 2, false, "2026-10-07", "JOÃO FELIPE PEREIRA DE ARAUJO", "ok" },
 }
 local kind_layout = layout.compute(kind_columns, kind_rows, {})

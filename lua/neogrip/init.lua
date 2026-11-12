@@ -1,24 +1,6 @@
+local paths = require("neogrip.paths")
+
 local M = {}
-
-M.state_dir = vim.fn.stdpath("state") .. "/neogrip"
-
--- Artifacts and compiled classes live apart from state, so wiping one never costs the other.
-M.data_dir = vim.fn.stdpath("data") .. "/neogrip"
-
--- SQL NULL as a unique table: nil would leave a hole in a row array and "" is a different value.
-M.NULL = setmetatable({}, {
-	__tostring = function()
-		return "NULL"
-	end,
-})
-
---- Notify the user; scheduled because most callers are vim.system callbacks, where vim.notify
---- cannot run directly.
-function M.notify(message, level)
-	vim.schedule(function()
-		vim.notify("[neogrip] " .. message, level or vim.log.levels.INFO)
-	end)
-end
 
 --- The single entry point; nothing is registered before it runs and downloads stay lazy (ADR-0018).
 function M.setup(opts)
@@ -30,7 +12,7 @@ function M.setup(opts)
 	end
 
 	require("neogrip.config").setup(opts)
-	vim.fn.mkdir(M.state_dir, "p")
+	vim.fn.mkdir(paths.state_dir, "p")
 	require("neogrip.connections").setup()
 	require("neogrip.connections.resolve").setup()
 	require("neogrip.gripd.runner").setup()

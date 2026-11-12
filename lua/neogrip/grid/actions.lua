@@ -1,5 +1,5 @@
 -- Every yank and export reads the stored value, never the screen text, which may be truncated.
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
 local grid = require("neogrip.grid")
 local value_module = require("neogrip.codec.value")
 
@@ -77,7 +77,7 @@ end
 local function copy(text, what)
 	vim.fn.setreg('"', text)
 	vim.fn.setreg("+", text)
-	neogrip.notify(("%s copied (%d chars)"):format(what, #text))
+	notify.send(("%s copied (%d chars)"):format(what, #text))
 end
 
 function M.yank_cell(bufnr)
@@ -159,7 +159,7 @@ local function key_values(state, key, table_name)
 		for index, column in ipairs(state.columns) do
 			if referenced and tostring(column) == tostring(name) and tables[index] == table_name then
 				local value = row[index]
-				if value == nil or value == neogrip.NULL then
+				if value == nil or value == value_module.NULL then
 					-- "= NULL" matches nothing, so say why instead of selecting.
 					return nil, ("%s is NULL in this row, so it points at nothing"):format(tostring(name))
 				end
@@ -183,7 +183,7 @@ function M.follow_fk(bufnr)
 	end
 	local schema_ok, schema = pcall(require, "neogrip.catalog")
 	if not schema_ok then
-		return neogrip.notify("the catalog layer has not landed yet", vim.log.levels.WARN)
+		return notify.send("the catalog layer has not landed yet", vim.log.levels.WARN)
 	end
 	local result = state.result
 	local connection = result.connection
@@ -194,7 +194,7 @@ function M.follow_fk(bufnr)
 
 	local table_name = (result.column_tables or {})[state.column]
 	if table_name == nil or table_name == "" then
-		return neogrip.notify(
+		return notify.send(
 			("the driver did not say which table %s came from"):format(tostring(column)),
 			vim.log.levels.WARN
 		)
@@ -209,7 +209,7 @@ function M.follow_fk(bufnr)
 	local catalog = schema.catalog_of(connection)
 	local details = schema.details_ready(connection, catalog, table_schema, table_name)
 	if not details then
-		return neogrip.notify(
+		return notify.send(
 			("%s has not been swept, so its keys are not known; :NGripIntrospect would make this work"):format(
 				schema.qualify(connection, table_schema, table_name)
 			),
@@ -219,12 +219,12 @@ function M.follow_fk(bufnr)
 
 	local key = key_of(details, column)
 	if not key then
-		return neogrip.notify(("%s is not part of a foreign key"):format(tostring(column)))
+		return notify.send(("%s is not part of a foreign key"):format(tostring(column)))
 	end
 
 	local found, why = key_values(state, key, table_name)
 	if not found then
-		return neogrip.notify(why, vim.log.levels.WARN)
+		return notify.send(why, vim.log.levels.WARN)
 	end
 
 	local driver = connection.driver

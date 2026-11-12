@@ -1,6 +1,6 @@
 local classify = require("neogrip.sql.classify")
 local config = require("neogrip.config")
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
 local diagnostics = require("neogrip.diagnostics")
 local protocol = require("neogrip.gripd.protocol")
 local grid = require("neogrip.grid")
@@ -35,7 +35,7 @@ local function refused(connection, sql)
 	local kind = classify.kind(sql)
 	local writes = kind == "dml" or kind == "ddl" or kind == "call"
 	if writes and connection.readonly then
-		neogrip.notify(
+		notify.send(
 			("%s is read-only; this %s was not run"):format(connection.name, kind),
 			vim.log.levels.ERROR
 		)
@@ -106,9 +106,9 @@ local function execute_statement(p)
 				grid.fail(tab, err)
 			end
 			if err.cancelled then
-				return neogrip.notify("cancelled")
+				return notify.send("cancelled")
 			end
-			neogrip.notify((p.label and p.label .. ": " or "") .. err.message, vim.log.levels.ERROR)
+			notify.send((p.label and p.label .. ": " or "") .. err.message, vim.log.levels.ERROR)
 			diagnostics.from_error(bufnr, p.statement, err)
 			return
 		end
@@ -182,7 +182,7 @@ function M.run(opts)
 	-- Comment-only text would make the server answer with its own "no
 	-- statements" error, which reads as a failure.
 	if not statement or classify.strip_leading_comments(statement.text) == "" then
-		neogrip.notify("no statement under the cursor", vim.log.levels.WARN)
+		notify.send("no statement under the cursor", vim.log.levels.WARN)
 		return
 	end
 
@@ -236,7 +236,7 @@ function M.cancel(bufnr)
 	end
 	local active = runner.active()
 	if #active == 0 then
-		neogrip.notify("nothing is running")
+		notify.send("nothing is running")
 		return
 	end
 	for _, running in ipairs(active) do
@@ -288,7 +288,7 @@ function M.load_more(state, opts)
 
 	local function refuse(message, level)
 		if not opts.quiet then
-			neogrip.notify(message, level)
+			notify.send(message, level)
 		end
 		return false
 	end
@@ -336,7 +336,7 @@ function M.load_more(state, opts)
 				grid.refresh(bufnr)
 				-- Said even when quiet: nothing is re-run (ADR-0040), so the
 				-- reader must be told why the rows stopped.
-				neogrip.notify(
+				notify.send(
 					"the result expired; the rows loaded are still here - "
 						.. "run the statement again for more",
 					vim.log.levels.ERROR
@@ -379,13 +379,13 @@ function M.page(state, delta)
 
 	local target = current_batch(state) + delta
 	if target < 1 then
-		return neogrip.notify("already on the first page")
+		return notify.send("already on the first page")
 	end
 	if (state.batches or {})[target] then
 		return grid.goto_page(bufnr, target)
 	end
 	if delta < 0 then
-		return neogrip.notify("already on the first page")
+		return notify.send("already on the first page")
 	end
 
 	M.load_more(state, {

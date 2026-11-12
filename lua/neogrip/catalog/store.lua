@@ -1,7 +1,7 @@
 -- A whole swept catalog on disk, replaced only by :NGripIntrospect and never expiring on its
 -- own, so walking the tree costs nothing across restarts. The Java side writes the file;
 -- nothing the size of a catalog crosses the request protocol.
-local neogrip = require("neogrip")
+local paths = require("neogrip.paths")
 
 local M = {}
 
@@ -22,7 +22,7 @@ local function key_of(connection, catalog)
 end
 
 local function dir()
-	local path = neogrip.state_dir .. "/catalog"
+	local path = paths.state_dir .. "/catalog"
 	vim.fn.mkdir(path, "p")
 	return path
 end
@@ -154,7 +154,7 @@ end
 function M.clear(connection)
 	if not connection then
 		loaded = {}
-		pcall(vim.fn.delete, neogrip.state_dir .. "/catalog", "rf")
+		pcall(vim.fn.delete, paths.state_dir .. "/catalog", "rf")
 		return
 	end
 	local prefix = connection.id .. "|"

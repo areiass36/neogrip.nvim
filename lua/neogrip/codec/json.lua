@@ -1,11 +1,9 @@
 -- JSON is the transport because CSV cannot tell NULL from an empty string. Column order is read
 -- from the text (vim.json.decode loses it), and long integer literals are quoted before decoding;
 -- see doc/internals.md#protocol.
-local db = require("neogrip")
+local value_module = require("neogrip.codec.value")
 
 local M = {}
-
-M.NULL = db.NULL
 
 --- Hand every stretch outside a string literal to `transform`; string contents pass untouched.
 local function outside_strings(text, transform)
@@ -121,7 +119,7 @@ local function row_of(object, columns, seen)
 	for index, column in ipairs(columns) do
 		local value = object[column]
 		if value == nil or value == vim.NIL then
-			row[index] = db.NULL
+			row[index] = value_module.NULL
 		else
 			row[index] = value
 		end
@@ -196,7 +194,7 @@ function M.result_sets(text)
 			else
 				-- A bare scalar array: one nameless column.
 				columns[1] = columns[1] or "value"
-				rows[#rows + 1] = { object == vim.NIL and db.NULL or object }
+				rows[#rows + 1] = { object == vim.NIL and value_module.NULL or object }
 			end
 		end
 		sets[#sets + 1] = { columns = columns, rows = rows }
@@ -209,11 +207,11 @@ end
 function M.flatten_ejson(value)
 	if type(value) ~= "table" then
 		if value == vim.NIL then
-			return db.NULL
+			return value_module.NULL
 		end
 		return value
 	end
-	if value == db.NULL then
+	if value == value_module.NULL then
 		return value
 	end
 
@@ -292,7 +290,7 @@ function M.documents(text)
 				value = document[column]
 			end
 			if value == nil or value == vim.NIL then
-				row[index] = db.NULL
+				row[index] = value_module.NULL
 			else
 				row[index] = M.flatten_ejson(value)
 			end

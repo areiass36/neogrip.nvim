@@ -1,11 +1,16 @@
 -- Type conversion is the Java side's job (a decimal arrives as exact text, binary as hex);
 -- this only turns what arrived into the string a cell, a CSV field or the clipboard holds.
-local db = require("neogrip")
-
 local M = {}
 
+-- SQL NULL as a unique table: nil would leave a hole in a row array and "" is a different value.
+M.NULL = setmetatable({}, {
+	__tostring = function()
+		return "NULL"
+	end,
+})
+
 function M.display(value, null_text)
-	if value == db.NULL or value == nil or value == vim.NIL then
+	if value == M.NULL or value == nil or value == vim.NIL then
 		return null_text or "NULL"
 	end
 	if type(value) == "boolean" then
@@ -44,7 +49,7 @@ local TEXT_LIMIT = 64
 --- The kind a cell holds, for the grid to colour by; guessed from the text because JSON rows
 --- stringify every type, and only ever used for colour - yank, export and navigate read the stored value.
 function M.kind(value)
-	if value == db.NULL or value == nil or value == vim.NIL then
+	if value == M.NULL or value == nil or value == vim.NIL then
 		return "null"
 	end
 	local lua_type = type(value)

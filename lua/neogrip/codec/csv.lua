@@ -1,7 +1,7 @@
 -- RFC 4180 CSV, fed in chunks: a quoted field can contain a newline and a chunk boundary can
 -- land inside one. It scans with string.find because a per-character loop over a few megabytes
 -- takes seconds in Lua.
-local db = require("neogrip")
+local value_module = require("neogrip.codec.value")
 
 local M = {}
 
@@ -28,7 +28,7 @@ end
 
 function Parser:_push_field(value, quoted)
 	if not quoted and self.null_marker and value == self.null_marker then
-		value = db.NULL
+		value = value_module.NULL
 	end
 	self.row[#self.row + 1] = value
 	self.started = true
@@ -174,7 +174,7 @@ end
 function M.encode_value(value, opts)
 	opts = opts or {}
 	local delimiter = opts.delimiter or ","
-	if value == db.NULL or value == nil then
+	if value == value_module.NULL or value == nil then
 		return opts.null_marker or ""
 	end
 	if type(value) == "boolean" then

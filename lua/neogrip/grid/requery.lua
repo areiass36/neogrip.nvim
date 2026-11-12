@@ -1,6 +1,7 @@
 -- Querying a result with SQL: the rows become a CSV view in a scratch DuckDB file,
 -- per-PID because the file takes one writer and its format is tied to the driver version.
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
+local paths = require("neogrip.paths")
 local config = require("neogrip.config")
 local export = require("neogrip.grid.export")
 
@@ -9,7 +10,7 @@ local M = {}
 local counter = 0
 
 local function scratch_dir()
-	local dir = neogrip.state_dir .. "/scratch"
+	local dir = paths.state_dir .. "/scratch"
 	vim.fn.mkdir(dir, "p")
 	return dir
 end
@@ -63,14 +64,16 @@ end
 function M.query_csv(csv_path, callback)
 	M.register(csv_path, {}, function(view, err)
 		if not view then
-			neogrip.notify(("could not open the csv: %s"):format(err), vim.log.levels.ERROR)
+			notify.send(("could not open the csv: %s"):format(err), vim.log.levels.ERROR)
 			if callback then
 				callback(nil, err)
 			end
 			return
 		end
-		local bufnr =
-			require("neogrip.ui.buffer").new_query(M.connection(), ("SELECT * FROM %s LIMIT 100;"):format(view))
+		local bufnr = require("neogrip.ui.buffer").new_query(
+			M.connection(),
+			("SELECT * FROM %s LIMIT 100;"):format(view)
+		)
 		if callback then
 			callback(bufnr, nil)
 		end
@@ -82,7 +85,7 @@ function M.materialise(bufnr)
 	local grid = require("neogrip.grid")
 	local state = grid.state(bufnr)
 	if not state or #state.rows == 0 then
-		return neogrip.notify("no rows to materialise", vim.log.levels.WARN)
+		return notify.send("no rows to materialise", vim.log.levels.WARN)
 	end
 
 	counter = counter + 1
@@ -92,9 +95,9 @@ function M.materialise(bufnr)
 
 	M.register(path, { name = name }, function(view, err)
 		if not view then
-			return neogrip.notify(("could not register the result: %s"):format(err), vim.log.levels.ERROR)
+			return notify.send(("could not register the result: %s"):format(err), vim.log.levels.ERROR)
 		end
-		neogrip.notify(("%d rows available as %s (and as 'last')"):format(#state.rows, view))
+		notify.send(("%d rows available as %s (and as 'last')"):format(#state.rows, view))
 		require("neogrip.ui.buffer").new_query(M.connection(), ("SELECT * FROM %s LIMIT 100;"):format(view))
 	end)
 end
@@ -126,7 +129,7 @@ local function collect_garbage()
 	end
 
 	sweep(scratch_dir(), "*.duckdb")
-	sweep(neogrip.state_dir .. "/results", "*")
+	sweep(paths.state_dir .. "/results", "*")
 end
 
 function M.setup()

@@ -2,7 +2,7 @@
 -- holds a whole swept catalog and is asked first; what is left here is the per-question cache
 -- that fills in as you walk.
 local config = require("neogrip.config")
-local neogrip = require("neogrip")
+local paths = require("neogrip.paths")
 local gripd = require("neogrip.gripd")
 local runner = require("neogrip.gripd.runner")
 local store = require("neogrip.catalog.store")
@@ -87,7 +87,7 @@ function M.catalog_of(connection)
 end
 
 local function cache_path(connection)
-	local dir = neogrip.state_dir .. "/cache"
+	local dir = paths.state_dir .. "/cache"
 	vim.fn.mkdir(dir, "p")
 	return ("%s/%s.json"):format(dir, vim.fn.sha256(connection.id))
 end
@@ -129,7 +129,7 @@ function M.invalidate(connection)
 		pcall(vim.fn.delete, cache_path(connection))
 	else
 		memory = {}
-		pcall(vim.fn.delete, neogrip.state_dir .. "/cache", "rf")
+		pcall(vim.fn.delete, paths.state_dir .. "/cache", "rf")
 	end
 	store.clear(connection)
 end

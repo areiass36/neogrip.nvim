@@ -4,7 +4,8 @@ local jdk = require("neogrip.gripd.bootstrap.jdk")
 local platform = require("neogrip.gripd.bootstrap.platform")
 local client = require("neogrip.gripd.client")
 local protocol = require("neogrip.gripd.protocol")
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
+local paths = require("neogrip.paths")
 
 local M = {}
 
@@ -12,7 +13,7 @@ local M = {}
 -- where a manager cloned it.
 local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h")
 M.sources_dir = plugin_root .. "/java"
-M.classes_dir = neogrip.data_dir .. "/classes"
+M.classes_dir = paths.data_dir .. "/classes"
 
 -- The classes are stamped with the protocol version, so a contract bump
 -- recompiles instead of mismatching at runtime.
@@ -249,7 +250,7 @@ end
 --- a suite can deliver one without a live process (ADR-0023).
 function M.notification(connection, method, params)
 	if method == "status" and params and params.message then
-		return neogrip.notify(("%s: %s"):format(connection.name, params.message))
+		return notify.send(("%s: %s"):format(connection.name, params.message))
 	end
 	if method == "progress" and params and params.hash then
 		-- Required here rather than at the top: the runner requires this module.

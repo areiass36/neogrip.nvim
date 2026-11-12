@@ -1,5 +1,6 @@
 -- Queue requests per connection, apply timeouts, translate gripd's answers.
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
+local value_module = require("neogrip.codec.value")
 local errors = require("neogrip.gripd.errors")
 local gripd = require("neogrip.gripd")
 local config = require("neogrip.config")
@@ -89,7 +90,7 @@ local function translate(handle, response)
 		for index = 1, (columns and #columns or #source) do
 			local value = source[index]
 			-- The grid wants the NULL sentinel, distinct from the empty string.
-			row[index] = (value == nil or value == vim.NIL) and neogrip.NULL or value
+			row[index] = (value == nil or value == vim.NIL) and value_module.NULL or value
 		end
 		rows[#rows + 1] = row
 	end
@@ -169,7 +170,7 @@ local function dispatch(handle)
 	if timeout_ms > 0 then
 		handle.timer = vim.defer_fn(function()
 			if not handle.done then
-				neogrip.notify("gripd stopped answering; restarting it", vim.log.levels.WARN)
+				notify.send("gripd stopped answering; restarting it", vim.log.levels.WARN)
 				gripd.disconnect(connection.id)
 				finish(handle, nil, { message = "timed out waiting for gripd" })
 			end

@@ -2,7 +2,8 @@
 -- GraalVM engine slows every other connection's queries. Digests computed from the official
 -- artifacts on 2026-10-29; bump jar, url and sha256 together.
 local download = require("neogrip.gripd.bootstrap.download")
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
+local paths = require("neogrip.paths")
 
 local MAVEN = "https://repo1.maven.org/maven2"
 
@@ -58,7 +59,7 @@ local DRIVERS = {
 
 local M = {}
 
-M.dir = neogrip.data_dir .. "/jdbc"
+M.dir = paths.data_dir .. "/jdbc"
 
 --- @return string|nil path to the jar for this driver, when already installed
 function M.jar(driver)
@@ -87,7 +88,7 @@ function M.ensure(driver, on_done)
 	end
 
 	local path = ("%s/%s"):format(M.dir, spec.jar)
-	neogrip.notify(("downloading the %s JDBC driver..."):format(driver))
+	notify.send(("downloading the %s JDBC driver..."):format(driver))
 	download.file(spec.jar, spec.url, spec.sha256, path, function(ok)
 		if not ok then
 			return on_done(nil, ("could not download the %s driver"):format(driver))

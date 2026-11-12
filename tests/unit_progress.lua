@@ -4,7 +4,7 @@ local support = require("tests.support")
 local check = support.check
 local runner = require("neogrip.gripd.runner")
 local gripd = require("neogrip.gripd")
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
 
 local one = { id = "__progress_one__", name = "one", driver = "postgres" }
 local two = { id = "__progress_two__", name = "two", driver = "duckdb" }
@@ -13,11 +13,11 @@ local saved = {
 	request = gripd.request,
 	is_connected = gripd.is_connected,
 	is_connected_to = gripd.is_connected_to,
-	notify = neogrip.notify,
+	notify = notify.send,
 }
 
 local notices = {}
-neogrip.notify = function(message)
+notify.send = function(message)
 	notices[#notices + 1] = message
 end
 gripd.is_connected = function()
@@ -50,11 +50,7 @@ end
 support.describe("progress: a status frame still reaches the editor")
 
 gripd.notification(one, "status", { phase = "transaction", message = "idle transaction rolled back" })
-check(
-	"the notice names the connection that said it",
-	notices[#notices],
-	"one: idle transaction rolled back"
-)
+check("the notice names the connection that said it", notices[#notices], "one: idle transaction rolled back")
 
 local before = #notices
 gripd.notification(one, "status", { phase = "transaction" })
@@ -129,4 +125,4 @@ runner.cancel(third)
 gripd.request = saved.request
 gripd.is_connected = saved.is_connected
 gripd.is_connected_to = saved.is_connected_to
-neogrip.notify = saved.notify
+notify.send = saved.notify

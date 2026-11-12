@@ -3,7 +3,8 @@
 -- cannot be checksummed; bump url and sha256 together.
 local platform = require("neogrip.gripd.bootstrap.platform")
 local download = require("neogrip.gripd.bootstrap.download")
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
+local paths = require("neogrip.paths")
 
 local GITHUB = "https://github.com/adoptium/temurin21-binaries/releases/download"
 local RELEASES = {
@@ -42,7 +43,7 @@ local M = {}
 -- cannot read (ADR-0005); virtual threads put the floor at 21 (ADR-0028).
 M.LANGUAGE_LEVEL = 21
 
-M.dir = neogrip.data_dir .. "/jdk"
+M.dir = paths.data_dir .. "/jdk"
 
 --- The layout differs: macOS nests the runtime under Contents/Home. CI and
 --- tests can point NEOGRIP_TEST_JDK at an existing JDK to skip the download.
@@ -96,15 +97,15 @@ function M.ensure(on_done)
 	local os_name, arch = platform.detect()
 	local release = RELEASES[os_name] and RELEASES[os_name][arch]
 	if not release then
-		neogrip.notify(("no pinned Temurin JDK for %s/%s"):format(os_name, arch), vim.log.levels.WARN)
+		notify.send(("no pinned Temurin JDK for %s/%s"):format(os_name, arch), vim.log.levels.WARN)
 		return on_done(false)
 	end
 
-	neogrip.notify("downloading a JDK for gripd (about 190 MB, once)")
+	notify.send("downloading a JDK for gripd (about 190 MB, once)")
 	-- The archive has a single jdk-<version> directory at its root.
 	download.archive("temurin jdk", release.url, release.sha256, M.dir, 1, function(ok)
 		if ok and not M.installed() then
-			neogrip.notify("the JDK archive extracted but no java was found in it", vim.log.levels.ERROR)
+			notify.send("the JDK archive extracted but no java was found in it", vim.log.levels.ERROR)
 			return on_done(false)
 		end
 		on_done(ok)

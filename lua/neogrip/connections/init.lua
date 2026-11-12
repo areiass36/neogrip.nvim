@@ -1,4 +1,5 @@
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
+local paths = require("neogrip.paths")
 
 local M = {}
 
@@ -50,7 +51,7 @@ local ephemeral = {}
 local function warn_once(key, message)
 	if not warned[key] then
 		warned[key] = true
-		neogrip.notify(message, vim.log.levels.WARN)
+		notify.send(message, vim.log.levels.WARN)
 	end
 end
 
@@ -89,7 +90,7 @@ function M.project_root()
 end
 
 function M.global_file()
-	return neogrip.state_dir .. "/connections.json"
+	return paths.state_dir .. "/connections.json"
 end
 
 function M.project_file()
@@ -350,7 +351,7 @@ function M.save_global(connection)
 	if not replaced then
 		table.insert(data.connections, connection)
 	end
-	vim.fn.mkdir(neogrip.state_dir, "p")
+	vim.fn.mkdir(paths.state_dir, "p")
 	local ok = pcall(vim.fn.writefile, vim.split(vim.json.encode(data), "\n"), M.global_file())
 	if ok then
 		M.reload()

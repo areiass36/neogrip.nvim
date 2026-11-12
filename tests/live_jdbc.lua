@@ -2,7 +2,7 @@
 -- process that stays alive between queries.
 local support = require("tests.support")
 local check, note = support.check, support.note
-local neogrip = require("neogrip")
+local value_module = require("neogrip.codec.value")
 local gripd = require("neogrip.gripd")
 
 if not support.has_jdk() then
@@ -53,7 +53,7 @@ for _, driver in ipairs(order) do
 				check("a decimal keeps its digits", by_name.total, 10.5)
 				check("false is false, not NULL", result.rows[2][6], false)
 			else
-				check("NULL is not the empty string", by_name.s_null == neogrip.NULL, true)
+				check("NULL is not the empty string", by_name.s_null == value_module.NULL, true)
 				check("and the empty string is a string", by_name.s_empty, "")
 				check("a comma inside a value", by_name.s_comma, "a,b")
 				check("cjk", by_name.cjk, driver == "postgres" and "日本語テキスト" or "日本語")
@@ -69,7 +69,7 @@ for _, driver in ipairs(order) do
 				check("emoji", by_name.emoji, "🚀🔥")
 				-- The old client mangled bytea into replacement characters.
 				check("bytea is readable hex", by_name.b, "01020aff")
-				check("and a NULL bytea is still NULL", result.rows[2][9] == neogrip.NULL, true)
+				check("and a NULL bytea is still NULL", result.rows[2][9] == value_module.NULL, true)
 			end
 
 			if driver == "mysql" or driver == "mariadb" or driver == "mssql" then

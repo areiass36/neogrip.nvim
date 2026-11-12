@@ -1,5 +1,5 @@
 local connections = require("neogrip.connections")
-local neogrip = require("neogrip")
+local notify = require("neogrip.notify")
 local resolve = require("neogrip.connections.resolve")
 
 local M = {}
@@ -17,7 +17,7 @@ end
 local function current_connection()
 	local connection = resolve.for_buf(0)
 	if not connection then
-		neogrip.notify("no connection for this buffer", vim.log.levels.WARN)
+		notify.send("no connection for this buffer", vim.log.levels.WARN)
 	end
 	return connection
 end
@@ -43,24 +43,24 @@ function M.setup()
 		if #lines == 0 then
 			lines = { "no connections; :NGripInit writes a project file" }
 		end
-		neogrip.notify(table.concat(lines, "\n"))
+		notify.send(table.concat(lines, "\n"))
 	end, { desc = "List the configured database connections" })
 
 	command("NGripWhich", function()
 		local connection, reason = resolve.for_buf(0)
 		if not connection then
-			return neogrip.notify("no connection resolves for this buffer", vim.log.levels.WARN)
+			return notify.send("no connection resolves for this buffer", vim.log.levels.WARN)
 		end
-		neogrip.notify(("%s [%s] — %s"):format(connection.name, connection.driver, reason))
+		notify.send(("%s [%s] — %s"):format(connection.name, connection.driver, reason))
 	end, { desc = "Show which connection this buffer runs against, and why" })
 
 	command("NGripUse", function(args)
 		local connection = connections.get(args.args)
 		if not connection then
-			return neogrip.notify(("no connection %q"):format(args.args), vim.log.levels.ERROR)
+			return notify.send(("no connection %q"):format(args.args), vim.log.levels.ERROR)
 		end
 		resolve.bind(0, connection.id)
-		neogrip.notify(("%s selected for this buffer"):format(connection.name))
+		notify.send(("%s selected for this buffer"):format(connection.name))
 	end, {
 		nargs = 1,
 		complete = connection_names,
@@ -69,7 +69,7 @@ function M.setup()
 
 	command("NGripReload", function()
 		connections.reload()
-		neogrip.notify("connections reloaded")
+		notify.send("connections reloaded")
 	end, { desc = "Re-read the connection files" })
 
 	command("NGripRun", function(args)
@@ -91,7 +91,7 @@ function M.setup()
 		local gripd = require("neogrip.gripd")
 		if args.bang then
 			gripd.disconnect_all()
-			return neogrip.notify("disconnected from every database")
+			return notify.send("disconnected from every database")
 		end
 		local id = args.args
 		if id == "" then
@@ -102,10 +102,10 @@ function M.setup()
 			id = connection.id
 		end
 		if not gripd.is_connected(id) then
-			return neogrip.notify(("%s is not connected"):format(id))
+			return notify.send(("%s is not connected"):format(id))
 		end
 		gripd.disconnect(id)
-		neogrip.notify(("disconnected from %s"):format(id))
+		notify.send(("disconnected from %s"):format(id))
 	end, {
 		nargs = "?",
 		bang = true,
@@ -127,7 +127,7 @@ function M.setup()
 			return
 		end
 		require("neogrip.catalog").invalidate(connection)
-		neogrip.notify(("%s: cached catalog cleared"):format(connection.name))
+		notify.send(("%s: cached catalog cleared"):format(connection.name))
 	end, { desc = "Clear the cached catalog for this buffer's connection" })
 
 	command("NGripIntrospect", function(args)
@@ -144,19 +144,19 @@ function M.setup()
 
 		if args.bang then
 			if not schema.introspecting(connection, catalog) then
-				return neogrip.notify("nothing is being introspected")
+				return notify.send("nothing is being introspected")
 			end
 			-- The same cancel the runner uses; it reaches the sweep's own threads too.
 			require("neogrip.gripd").request(connection, "cancel", {}, function() end)
-			return neogrip.notify("cancelling the introspect")
+			return notify.send("cancelling the introspect")
 		end
 
-		neogrip.notify(("introspecting %s%s..."):format(connection.name, catalog and ("/" .. catalog) or ""))
+		notify.send(("introspecting %s%s..."):format(connection.name, catalog and ("/" .. catalog) or ""))
 		schema.introspect(connection, catalog, {}, function(summary, err)
 			if err then
-				return neogrip.notify(("introspect failed: %s"):format(err), vim.log.levels.ERROR)
+				return notify.send(("introspect failed: %s"):format(err), vim.log.levels.ERROR)
 			end
-			neogrip.notify(
+			notify.send(
 				("%s: %d schemas, %d tables, %d columns in %d ms%s%s"):format(
 					connection.name,
 					summary.schemas,
@@ -178,11 +178,11 @@ function M.setup()
 		local grid = require("neogrip.grid")
 		local bufnr = grid.current_buf()
 		if not bufnr then
-			return neogrip.notify("no result yet")
+			return notify.send("no result yet")
 		end
 		-- Said here: requery would answer "no rows to materialise", which misleads.
 		if grid.is_pending(bufnr) then
-			return neogrip.notify("this tab is still running")
+			return notify.send("this tab is still running")
 		end
 		require("neogrip.grid.requery").materialise(bufnr)
 	end, { desc = "Query the current result with SQL (DuckDB)" })
@@ -190,7 +190,7 @@ function M.setup()
 	command("NGripCsv", function(args)
 		local path = vim.fn.expand(args.args)
 		if vim.fn.filereadable(path) == 0 then
-			return neogrip.notify(("no such file: %s"):format(path), vim.log.levels.ERROR)
+			return notify.send(("no such file: %s"):format(path), vim.log.levels.ERROR)
 		end
 		require("neogrip.grid.requery").query_csv(vim.fs.normalize(vim.fn.fnamemodify(path, ":p")))
 	end, { nargs = 1, complete = "file", desc = "Query a CSV file with SQL (DuckDB)" })
@@ -199,10 +199,10 @@ function M.setup()
 		local grid = require("neogrip.grid")
 		local bufnr = grid.current_buf()
 		if not bufnr then
-			return neogrip.notify("no result to export", vim.log.levels.WARN)
+			return notify.send("no result to export", vim.log.levels.WARN)
 		end
 		if grid.is_pending(bufnr) then
-			return neogrip.notify("this tab is still running", vim.log.levels.WARN)
+			return notify.send("this tab is still running", vim.log.levels.WARN)
 		end
 		require("neogrip.grid.export").pick(bufnr)
 	end, { desc = "Export the current result as CSV or JSON" })
@@ -214,13 +214,13 @@ function M.setup()
 			local bufnr = grid.current_buf()
 			local state = bufnr and grid.state(bufnr)
 			if not state then
-				return neogrip.notify("no result to keep", vim.log.levels.WARN)
+				return notify.send("no result to keep", vim.log.levels.WARN)
 			end
 			local export = require("neogrip.grid.export")
 			local path = args.args ~= "" and vim.fn.expand(args.args)
 				or (vim.fn.getcwd() .. "/result-" .. os.date("%Y%m%d-%H%M%S") .. ".csv")
 			export.page_to_csv(state, path)
-			neogrip.notify(("kept as %s"):format(path))
+			notify.send(("kept as %s"):format(path))
 		end,
 		{ nargs = "?", complete = "file", desc = "Write the current result where it will not be cleaned up" }
 	)
@@ -240,7 +240,7 @@ function M.init_project()
 	local root = connections.project_root()
 	local path = connections.project_file()
 	if vim.fn.filereadable(path) == 1 then
-		return neogrip.notify((".nvim/database.json already exists at %s"):format(root))
+		return notify.send((".nvim/database.json already exists at %s"):format(root))
 	end
 
 	vim.system(
@@ -255,7 +255,7 @@ function M.init_project()
 					1
 				)
 				if answer ~= 1 then
-					return neogrip.notify("not creating the file: it would be committed", vim.log.levels.WARN)
+					return notify.send("not creating the file: it would be committed", vim.log.levels.WARN)
 				end
 				local gitignore = root .. "/.gitignore"
 				local lines = vim.fn.filereadable(gitignore) == 1 and vim.fn.readfile(gitignore) or {}
@@ -290,7 +290,7 @@ function M.init_project()
 			}
 			vim.fn.writefile(template, root .. "/" .. ".nvim/database.json")
 			connections.reload()
-			neogrip.notify(("wrote %s — :KVStore local-postgres stores the password"):format(path))
+			notify.send(("wrote %s — :KVStore local-postgres stores the password"):format(path))
 			vim.cmd(("edit %s"):format(vim.fn.fnameescape(root .. "/.nvim/database.json")))
 		end)
 	)
