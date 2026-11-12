@@ -51,5 +51,6 @@ in the author's Neovim configuration; where the two disagreed, the record states
 | 0040 | [The grid accumulates rows and loads the next batch as the cursor nears the end](0040-the-grid-accumulates-rows.md) | Accepted |
 | 0041 | [An open result lives an hour, and there is no cap on how many](0041-an-open-result-lives-an-hour.md) | Accepted |
 | 0042 | [Protocol 5: gripd says when an execution begins](0042-protocol-5-execution-progress.md) | Accepted |
-| 0043 | [Transient result-window chrome lives in the winbar](0043-the-elapsed-time-is-in-the-winbar.md) | Accepted |
+| 0043 | [Transient result-window chrome lives in the winbar](0043-the-elapsed-time-is-in-the-winbar.md) | Superseded by 0045 |
 | 0044 | [The result window holds one tab per query](0044-one-tab-per-query.md) | Accepted |
+| 0045 | [The tab strip is the result window's winbar, and carries only the strip](0045-the-tab-strip-is-the-winbar.md) | Accepted |

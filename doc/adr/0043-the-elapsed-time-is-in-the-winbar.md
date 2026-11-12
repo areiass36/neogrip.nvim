@@ -1,7 +1,7 @@
 # 0043. Transient result-window chrome lives in the winbar
 
 - Date: 2026-11-09T14:47:10Z
-- Status: Accepted
+- Status: Superseded by 0045
 
 ## Context
 
