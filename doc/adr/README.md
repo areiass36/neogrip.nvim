@@ -54,3 +54,4 @@ in the author's Neovim configuration; where the two disagreed, the record states
 | 0043 | [Transient result-window chrome lives in the winbar](0043-the-elapsed-time-is-in-the-winbar.md) | Superseded by 0045 |
 | 0044 | [The result window holds one tab per query](0044-one-tab-per-query.md) | Accepted |
 | 0045 | [The tab strip is the result window's winbar, and carries only the strip](0045-the-tab-strip-is-the-winbar.md) | Accepted |
+| 0046 | [The Lua tree is grouped by subsystem, with one dependency direction](0046-lua-modules-by-subsystem.md) | Accepted |
