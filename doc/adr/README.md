@@ -55,3 +55,4 @@ in the author's Neovim configuration; where the two disagreed, the record states
 | 0044 | [The result window holds one tab per query](0044-one-tab-per-query.md) | Accepted |
 | 0045 | [The tab strip is the result window's winbar, and carries only the strip](0045-the-tab-strip-is-the-winbar.md) | Accepted |
 | 0046 | [The Lua tree is grouped by subsystem, with one dependency direction](0046-lua-modules-by-subsystem.md) | Accepted |
+| 0047 | [The catalog exports a runnable DDL script](0047-the-catalog-exports-a-runnable-ddl-script.md) | Accepted |
