@@ -199,8 +199,10 @@ local function constraints(connection, namespace, details)
 	return entries
 end
 
---- The CREATE TABLE, from the columns and the keys they declare.
-local function create_table(connection, namespace, table_name, details)
+--- The CREATE TABLE, from the columns and, unless told otherwise, the keys
+--- they declare: an engine whose native text re-adds every constraint gets
+--- the columns alone, or the replayed script would declare each key twice.
+local function create_table(connection, namespace, table_name, details, keys)
 	local driver = connection.driver
 	local columns = ordered(details.rows or {})
 	local lines = { ("CREATE TABLE %s ("):format(schema.qualify(connection, namespace, table_name)) }
@@ -216,7 +218,9 @@ local function create_table(connection, namespace, table_name, details)
 	for _, column in ipairs(columns) do
 		entries[#entries + 1] = column_entry(driver, column, widths)
 	end
-	vim.list_extend(entries, constraints(connection, namespace, details))
+	if keys ~= false then
+		vim.list_extend(entries, constraints(connection, namespace, details))
+	end
 
 	for index, entry in ipairs(entries) do
 		local tail = (index < #entries and "," or "") .. (entry.note and ("  -- " .. entry.note) or "")
@@ -352,6 +356,23 @@ local function native(details)
 		lines[#lines + 1] = (line:gsub("\r$", ""))
 	end
 	return lines
+end
+
+--- The CREATE TABLE alone, for a composition that brings its own constraints
+--- and indexes (ADR-0047); `opts.keys = false` leaves the declared keys out.
+--- @param opts table|nil { keys }
+--- @return string[] lines
+function M.create_table(connection, namespace, table_name, details, opts)
+	if #(details.rows or {}) == 0 then
+		return { ("-- %s: no columns reported"):format(tostring(table_name)) }
+	end
+	return create_table(connection, namespace, table_name, details, (opts or {}).keys)
+end
+
+--- The index statements alone, for the same composition.
+--- @return string[] lines
+function M.index_statements(connection, namespace, table_name, details)
+	return indexes(connection, namespace, table_name, details)
 end
 
 --- The definition of one set, as lines of runnable SQL.

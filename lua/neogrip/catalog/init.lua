@@ -155,6 +155,9 @@ local function connected(connection, callback)
 	end)
 end
 
+--- The same guarantee for a caller that asks gripd directly, outside this cache (ADR-0047).
+M.ensure_connected = connected
+
 --- Ask gripd a catalog question; `whole` keeps the entire answer, because details do not fit the rows shape.
 local function ask(connection, method, params, key, callback, whole)
 	if key then
