@@ -7,6 +7,7 @@ local grid = require("neogrip.grid")
 local resolve = require("neogrip.connections.resolve")
 local runner = require("neogrip.gripd.runner")
 local split = require("neogrip.sql.split")
+local statement_module = require("neogrip.ui.statement")
 
 local M = {}
 
@@ -184,7 +185,9 @@ end
 function M.run(opts)
 	opts = opts or {}
 	local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
-	local statement = opts.statement or (opts.visual and split.selection(bufnr)) or split.at_cursor(bufnr)
+	local statement = opts.statement
+		or (opts.visual and statement_module.selection(bufnr))
+		or statement_module.at_cursor(bufnr)
 
 	-- Comment-only text would make the server answer with its own "no
 	-- statements" error, which reads as a failure.

@@ -6,7 +6,7 @@ local notify = require("neogrip.notify")
 local errors = require("neogrip.gripd.errors")
 local resolve = require("neogrip.connections.resolve")
 local runner = require("neogrip.gripd.runner")
-local split = require("neogrip.sql.split")
+local statement_module = require("neogrip.ui.statement")
 
 local M = {}
 
@@ -51,7 +51,7 @@ end
 function M.validate(opts)
 	opts = opts or {}
 	local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
-	local statement = opts.statement or split.at_cursor(bufnr)
+	local statement = opts.statement or statement_module.at_cursor(bufnr)
 	if not statement then
 		return
 	end
