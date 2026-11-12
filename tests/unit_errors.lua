@@ -51,8 +51,13 @@ vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
 })
 local statement = { text = "select id, nosuchcol\n  from torture", start_line = 2, end_line = 3 }
 
+--- The reader locate() takes, so the geometry is checked without naming the editor here either.
+local function line_at(lnum)
+	return vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or ""
+end
+
 -- A server position is an offset into the statement, not into the buffer.
-local line, from, to = errors.locate({ position = 11 }, statement, bufnr)
+local line, from, to = errors.locate({ position = 11 }, statement, line_at)
 check("the position becomes a buffer line", line, 1)
 check(
 	"and lands on the name",
@@ -60,17 +65,17 @@ check(
 	"nosuchcol"
 )
 
-line = errors.locate({ position = 23 }, statement, bufnr)
+line = errors.locate({ position = 23 }, statement, line_at)
 check("an offset on the second line", line, 2)
 
-line, from, to = errors.locate({ token = "nosuchcol" }, statement, bufnr)
+line, from, to = errors.locate({ token = "nosuchcol" }, statement, line_at)
 check("without a position, the token is searched for", line, 1)
 check("and found", vim.api.nvim_buf_get_lines(bufnr, line, line + 1, false)[1]:sub(from + 1, to), "nosuchcol")
 
-line = errors.locate({ line = 2 }, statement, bufnr)
+line = errors.locate({ line = 2 }, statement, line_at)
 check("a reported line is relative to the statement", line, 2)
 
-line = errors.locate({}, statement, bufnr)
+line = errors.locate({}, statement, line_at)
 check("with nothing to go on, the statement's first line", line, 1)
 
 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
@@ -80,6 +85,6 @@ vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
 line = errors.locate(
 	{ token = "nosuchcol" },
 	{ text = "select nosuchcol from t", start_line = 2, end_line = 2 },
-	bufnr
+	line_at
 )
 check("the search stays inside the statement", line, 1)

@@ -71,9 +71,9 @@ end
 --- statement, so it only applies while the buffer still holds that statement.
 --- @param error_ neogrip.QueryError
 --- @param statement table { text, start_line, end_line }
---- @param bufnr integer
+--- @param line_at fun(lnum: integer): string the buffer line at a 0-based number
 --- @return integer line, integer col_start, integer col_end all 0-based
-function M.locate(error_, statement, bufnr)
+function M.locate(error_, statement, line_at)
 	local first = (statement.start_line or 1) - 1
 	local last = (statement.end_line or statement.start_line or 1) - 1
 
@@ -88,7 +88,7 @@ function M.locate(error_, statement, bufnr)
 			line_index = line_index + 1
 		end
 		local target = math.min(first + line_index, last)
-		local text = vim.api.nvim_buf_get_lines(bufnr, target, target + 1, false)[1] or ""
+		local text = line_at(target)
 		local from = math.max(0, math.min(column, #text))
 		local word_end = text:find("[^%w_%.]", from + 1)
 		local to = word_end and (word_end - 1) or #text
@@ -96,22 +96,21 @@ function M.locate(error_, statement, bufnr)
 	end
 
 	if error_.token then
-		local lines = vim.api.nvim_buf_get_lines(bufnr, first, last + 1, false)
-		for offset, text in ipairs(lines) do
-			local from = text:find(error_.token, 1, true)
+		for lnum = first, last do
+			local from = line_at(lnum):find(error_.token, 1, true)
 			if from then
-				return first + offset - 1, from - 1, from - 1 + #error_.token
+				return lnum, from - 1, from - 1 + #error_.token
 			end
 		end
 	end
 
 	if error_.line then
 		local target = math.min(first + error_.line - 1, last)
-		local text = vim.api.nvim_buf_get_lines(bufnr, target, target + 1, false)[1] or ""
+		local text = line_at(target)
 		return target, 0, math.max(#text, 1)
 	end
 
-	local text = vim.api.nvim_buf_get_lines(bufnr, first, first + 1, false)[1] or ""
+	local text = line_at(first)
 	return first, 0, math.max(#text, 1)
 end
 

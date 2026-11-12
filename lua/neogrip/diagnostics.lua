@@ -29,7 +29,9 @@ end
 
 --- Put a client error on the map.
 function M.from_error(bufnr, statement, err)
-	local line, from, to = errors.locate(err, statement, bufnr)
+	local line, from, to = errors.locate(err, statement, function(lnum)
+		return vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or ""
+	end)
 	local message = err.message or "error"
 	if err.state or err.code then
 		message = ("%s [%s]"):format(message, err.state or tostring(err.code))
