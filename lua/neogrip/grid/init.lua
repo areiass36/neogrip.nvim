@@ -478,8 +478,10 @@ local function schedule_load(bufnr)
 		if current.result.hash ~= hash then
 			return
 		end
-		-- Required late to avoid a require cycle with execute.
-		require("neogrip.execute").load_more(current, { quiet = true })
+		local source = current.source
+		if source and source.load_more then
+			source.load_more(current, { quiet = true })
+		end
 	end, DEBOUNCE_MS)
 end
 
@@ -700,10 +702,15 @@ local function activate(bufnr)
 	paint_strip()
 end
 
+---  neogrip.grid.Source what a tab asks for rows it does not hold yet
+---  load_more fun(state: table, opts: table|nil): boolean
+---  page fun(state: table, delta: integer)
+---  sort fun(state: table, column: string, descending: boolean)
+
 --- Open a tab for a query that has not answered yet (ADR-0044); the tab must
 --- exist before the request leaves because the runner can answer synchronously.
 --- `into` reuses a tab instead of opening one, which is what a sort does.
---- @param opts table { into, hash, connection, origin_buf, statement, label, focus }
+--- @param opts table { into, hash, connection, origin_buf, statement, label, focus, source }
 --- @return integer bufnr
 function M.open_pending(opts)
 	local bufnr = opts.into
@@ -712,6 +719,7 @@ function M.open_pending(opts)
 	end
 	waiting[bufnr] = {
 		hash = opts.hash,
+		source = opts.source,
 		connection = opts.connection,
 		origin_buf = opts.origin_buf,
 		statement = opts.statement,
@@ -818,6 +826,7 @@ function M.show(result, context)
 		origin_buf = context.origin_buf or (pending_entry and pending_entry.origin_buf),
 		statement = context.statement or (pending_entry and pending_entry.statement),
 		label = pending_entry and pending_entry.label,
+		source = context.source or (pending_entry and pending_entry.source),
 	}
 	render(bufnr)
 	attach_cursor_sync(bufnr)

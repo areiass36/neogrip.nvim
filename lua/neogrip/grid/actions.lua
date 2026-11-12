@@ -262,7 +262,10 @@ local function sort(bufnr, descending)
 	if not column then
 		return
 	end
-	require("neogrip.execute").sort(state, column, descending)
+	local source = state.source
+	if source and source.sort then
+		source.sort(state, column, descending)
+	end
 end
 
 function M.sort_asc(bufnr)
@@ -278,7 +281,10 @@ local function page(bufnr, delta)
 	if not state then
 		return
 	end
-	require("neogrip.execute").page(state, delta)
+	local source = state.source
+	if source and source.page then
+		source.page(state, delta)
+	end
 end
 
 function M.page_next(bufnr)

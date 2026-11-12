@@ -5,6 +5,10 @@ local check, note = support.check, support.note
 local config = require("neogrip.config")
 local grid = require("neogrip.grid")
 local runner = require("neogrip.gripd.runner")
+local execute = require("neogrip.execute")
+
+-- The window asks its source for rows it does not hold; execute is that source in the plugin.
+local source = { load_more = execute.load_more, page = execute.page, sort = execute.sort }
 
 local connection = { id = "auto", name = "auto", driver = "duckdb" }
 
@@ -52,7 +56,7 @@ local function fresh(opts)
 		hash = hash,
 		limit = opts.limit or 200,
 		connection = connection,
-	}, { focus = false })
+	}, { focus = false, source = source })
 	requests, notices = {}, {}
 	return grid.current_buf()
 end
@@ -184,7 +188,6 @@ settle()
 check("a later motion does not ask again", #requests, 1)
 check("nor repeat itself", #notices, 1)
 
-local execute = require("neogrip.execute")
 notices = {}
 execute.page(grid.state(bufnr), 1)
 support.wait(function()

@@ -10,6 +10,11 @@ local split = require("neogrip.sql.split")
 
 local M = {}
 
+--- What the result window asks when it needs more rows than it holds; installed on the
+--- tab so the window never names this module.
+---  neogrip.grid.Source
+local source
+
 local in_flight = {}
 
 --- Flash the range about to run, so a splitter mistake is visible before it executes.
@@ -76,6 +81,7 @@ local function execute_statement(p)
 	local tab = nil
 	if p.show then
 		tab = grid.open_pending({
+			source = source,
 			-- A sort reuses the tab it re-orders, keeping the rows on screen meanwhile.
 			into = p.into,
 			hash = hash,
@@ -118,6 +124,7 @@ local function execute_statement(p)
 			result.order_by = p.order_by
 			result.descending = p.descending
 			grid.show(result, {
+				source = source,
 				into = tab,
 				origin_buf = bufnr,
 				statement = p.statement,
@@ -401,5 +408,7 @@ end
 function M.sort(state, column, descending)
 	rerun(state, { order_by = column, descending = descending })
 end
+
+source = { load_more = M.load_more, page = M.page, sort = M.sort }
 
 return M

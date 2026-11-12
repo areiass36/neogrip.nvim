@@ -265,6 +265,19 @@ close_all()
 check("no tabs left", #grid.tabs(), 0)
 check("and no clock", grid._ticking(), false)
 
+support.describe("tabs: a tab carries the source that fills it")
+
+close_all()
+run_query("select 1")
+local sourced = grid.current_buf()
+answer(1, { columns = { "n" }, rows = { { 1 } }, done = true })
+local source = grid.state(sourced).source
+check("the result knows where more rows come from", type(source), "table")
+check("it can ask for the next batch", type(source.load_more), "function")
+check("for another page", type(source.page), "function")
+check("and for another order", type(source.sort), "function")
+close_all()
+
 resolve.for_buf = saved.for_buf
 runner.run = saved.run
 runner.release = saved.release
