@@ -104,11 +104,19 @@ local function next_level(shape, level, wanted)
 	return nil
 end
 
---- A segment of an id, with the separator and the escape itself escaped: a
---- table called `a/b` would otherwise produce an id that reads as two levels.
+--- A segment of an id, with the separator, the escape itself and the row
+--- marker escaped: a table called `a/b` would otherwise produce an id that
+--- reads as two levels, and one called `#3` an id that reads as a row.
 local function encode(segment)
-	return (tostring(segment):gsub("[%%/]", function(char)
+	return (tostring(segment):gsub("[%%/#]", function(char)
 		return ("%%%02X"):format(char:byte())
+	end))
+end
+
+--- A segment back to the name it encodes.
+local function decode(segment)
+	return (segment:gsub("%%(%x%x)", function(hex)
+		return string.char(tonumber(hex, 16))
 	end))
 end
 
@@ -136,6 +144,57 @@ local function server_of(ref)
 	return ref and ref.server and connections.get(ref.server) or nil
 end
 
+--- The ref a node id names, resolved against the connection's shape: the id
+--- alone does not say which level a segment fills, the walk this connection
+--- has does.
+--- @param id string
+--- @return table|nil ref, string|nil reason
+function M.ref_of(id)
+	local segments = vim.split(tostring(id or ""), "/", { plain = true })
+	local server = decode(segments[1] or "")
+	local connection = connections.get(server)
+	if not connection then
+		return nil, ("no connection named %s"):format(server)
+	end
+
+	local ref = { server = connection.id }
+	local levels = {}
+	for _, entry in ipairs(M.shape(connection).levels) do
+		if entry.level ~= "server" and entry.level ~= "object" then
+			levels[#levels + 1] = entry.level
+		end
+	end
+
+	local names = {}
+	for index = 2, #segments do
+		local segment = segments[index]
+		if segment:sub(1, 1) == "#" then
+			if index ~= #segments then
+				return nil, "a row's position ends its id"
+			end
+			local position = decode(segment:sub(2))
+			ref.object = tonumber(position) or position
+		else
+			names[#names + 1] = decode(segment)
+		end
+	end
+
+	-- A ref built from a search result carries the connection's own catalog in
+	-- its instance slot even where the shape has no instance level; the walk
+	-- never writes that segment, so a first name spelling that catalog is read
+	-- as the instance, not as the level the walk would fill.
+	if levels[1] ~= "instance" and #names > 0 and names[1] == schema.catalog_of(connection) then
+		ref.instance = table.remove(names, 1)
+	end
+	if #names > #levels then
+		return nil, ("%s has no level for %q"):format(connection.id, tostring(names[#levels + 1]))
+	end
+	for index, name in ipairs(names) do
+		ref[levels[index]] = name
+	end
+	return ref, nil
+end
+
 --- How this engine passes a ref's two qualifiers to `schema.*`: MySQL, MariaDB
 --- and MongoDB report databases as catalogs and have no schema layer.
 --- @return string|nil catalog, string|nil namespace
@@ -146,6 +205,9 @@ local function qualifiers(connection, ref)
 	end
 	return ref.instance or schema.catalog_of(connection), ref.namespace
 end
+
+--- The same mapping for a caller composing catalog requests of its own (ADR-0047).
+M.qualifiers = qualifiers
 
 local function extend(ref, key, value)
 	local next_ref = vim.deepcopy(ref or {})
