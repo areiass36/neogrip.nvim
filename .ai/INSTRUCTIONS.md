@@ -7,7 +7,7 @@ secret hygiene and portability rules are strict.
 ## Boundaries
 
 **Always**
-- Run the formatter and the linter before committing.
+- Run the formatter, the linter and `tests/boundaries.sh` before committing.
 - Add or update tests for every behavior change.
 - Record every architecture decision as an ADR before implementing it.
 - Read `doc/adr/` before proposing a change that touches architecture.
@@ -45,7 +45,27 @@ stylua .
 stylua --check .
 luacheck lua tests
 javac --release 21 -parameters -Xlint:all -Werror -d build/classes $(find java -name '*.java')
+tests/boundaries.sh
 ```
+
+## Module Layout
+
+Both trees are grouped by subsystem, with one direction of dependency. The Java side is `java/lib` and
+`java/app`, laid out in [java/README.md](../java/README.md) (ADR-0032, ADR-0035); the Lua side follows
+ADR-0046:
+
+- `lua/neogrip/` holds only what is plugin-wide or public: the entry point, the commands, the options,
+  the two use cases (`execute`, `diagnostics`), the self test, `health.lua`, the notifier and the two
+  paths. Nothing that belongs to a subsystem sits there.
+- A subsystem directory is named for what it is, never for a ring: `sql` (the lexer and the statement
+  classification), `codec` (CSV, JSON and the value model), `gripd` (the daemon, the wire and
+  `bootstrap/`), `connections` (the file, the resolution, the secrets), `catalog` (the swept catalog,
+  its store, the tree, the rendered definition), `lsp`, `grid` (the result window) and `ui` (every
+  editor surface that is not the result window).
+- Nothing requires `neogrip`. `sql/` and `codec/` require nothing outside themselves. `sql/`, `codec/`,
+  `gripd/`, `connections/` and `catalog/` never require `grid/`, `ui/`, `lsp/` or a use case.
+
+`tests/boundaries.sh` checks every one of those, in CI and before a commit.
 
 ## Comments
 
