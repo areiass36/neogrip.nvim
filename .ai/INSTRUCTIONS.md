@@ -49,9 +49,16 @@ javac --release 21 -parameters -Xlint:all -Werror -d build/classes $(find java -
 
 ## Comments
 
-- Comment the reason behind a decision, not what the code already says.
-- When a decision came from a measurement or a failed alternative, record the number or the failure in the
-  comment. A future reader cannot re-run the conversation that produced it.
+- A comment states a constraint the code cannot show, in one sentence. Never what the code already says.
+- Rationale, measurements and failed alternatives live in documentation, not in the code: a decision in
+  its ADR, a measured fact or a driver/platform quirk in `doc/internals.md`. The code carries a one-line
+  pointer (`ADR-0040`, `See doc/internals.md#grid`), and each fact is stated in exactly one place.
+- A premise that holds for the whole project - a rule in this file, or the decision an ADR records - is
+  never restated in code, in a file header or in a configuration file. An ADR id appears in code only
+  where the adjacent construct would look wrong without it.
+- Two exceptions stay inline in full: secret-hygiene invariants at their exact point of use - the
+  function that could violate them, never a file banner - and LuaLS annotations (`@param`, `@return`,
+  `@class`, `@field`).
 - Write comments as prose in full sentences.
 
 ## Tests
